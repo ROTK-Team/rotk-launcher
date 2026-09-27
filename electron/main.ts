@@ -58,6 +58,7 @@ import {
   type AttestationOutcome,
 } from "./services/game-launcher.js";
 import { HWID_CORE_SLOTS, collectHwid } from "./services/machine-identity.js";
+import { HwidVerificationError } from "./services/hwid-evidence.js";
 import { collectTpmProof } from "./services/tpm-identity.js";
 import { collectTpmAnchor, enrolTpmAnchor } from "./services/tpm-anchor.js";
 import { tpmBindingMessage } from "../shared/attestation.js";
@@ -366,13 +367,12 @@ async function runAssetSync(mode: "sync" | "verify", soft: boolean): Promise<Ope
 
 /**
  * Runs one integrity attestation pass and returns the block the launch ticket
- * request carries. Returns null only when attestation genuinely cannot run
- * (no policy published, manifest unreachable and never cached) — it is the
- * backend, not the launcher, that decides whether a null is acceptable.
+ * request carries. An unavailable or unconfigured service returns a distinct
+ * outcome, which the launch gate refuses before requesting a ticket.
  *
- * A tampered installation still attests: the deviations are reported and the
- * evidence will not match, so the rejection is logged for the admin studio
- * instead of being silently hidden by the client.
+ * An installation with deviations still reports its measurements. The backend
+ * decides whether those measurements are acceptable; completion of an attempt
+ * is not a local assertion that all files or hardware values are trusted.
  */
 async function attestInstallation(
   playerKey: string,
@@ -381,10 +381,9 @@ async function attestInstallation(
   const root = await installationRoot();
   const userDataDirectory = app.getPath("userData");
   const launcherVersion = app.getVersion();
-  // A server that does not run attestation (no policy yet, development
-  // backend) gets the last mode this player was told to use; a fresh machine
-  // starts on the shipped default. Production always uses the signed
-  // challenge directive below.
+  // Keep the cached patch mode for installation reconciliation after a failed
+  // or unavailable attempt. This is not an authorization fallback: the game
+  // launch gate still refuses to request a ticket without attestation.
   const fallbackMode: GameplayPatchMode =
     await readCachedGameplayPatchMode(userDataDirectory) ?? "patched";
   if (!root) return { status: "not-applicable", clientPatchMode: fallbackMode };
@@ -458,7 +457,7 @@ async function attestInstallation(
     // The fingerprint this launch was asked for (#320 §B): the slots the signed
     // challenge names, or the core five for a server that names none. Read
     // after the challenge, so the answer is to this launch's question.
-    const hwid = await collectHwid(challenge.hwidSlots ?? HWID_CORE_SLOTS).catch(() => ({}));
+    const hwid = await collectHwid(challenge.hwidSlots ?? HWID_CORE_SLOTS);
     // Sign with the TPM-backed key when the machine has one; null when it does
     // not, and the launch proceeds without it. The message binds the
     // (single-use) challengeId to the fingerprint exactly as the ticket will
@@ -491,13 +490,15 @@ async function attestInstallation(
     };
   } catch (error) {
     attestationProgress = null;
+    // Do not downgrade a failed collector to an unavailable attestation or fallback vector.
+    if (error instanceof HwidVerificationError) throw error;
     // A minimum-version rejection is authoritative and must reach the Play
     // handler so it can lock the button and surface the mandatory updater UI.
     if ((error as { code?: string })?.code === "launcher_update_required") {
       throw error;
     }
-    // No policy published / attestation unconfigured: it does not apply, and
-    // the launch proceeds silently exactly as before enforcement existed.
+    // Preserve the service outcome for the launch gate, which refuses to
+    // request a ticket without completed verification.
     if (error instanceof AttestationUnavailableError && error.notApplicable) {
       await applyGameplayPatchMode(
         root,
@@ -507,8 +508,8 @@ async function attestInstallation(
       return { status: "not-applicable", clientPatchMode: fallbackMode };
     }
     // A challenge or manifest we could not obtain, or files we could not read:
-    // attestation should have run and did not. Carry the reason so a launch the
-    // backend then blocks can say why, instead of blaming the launcher version.
+    // attestation should have run and did not. The launch gate blocks ticket
+    // issuance locally; the backend must also reject absent attestation.
     const reason = error instanceof Error && error.message
       ? error.message.replace(/[.]?\s*$/, ".")
       : "the integrity service could not be reached.";
@@ -1042,14 +1043,9 @@ function registerIpc(): void {
           bundledVivoxRuntimePath: resolveBundledVivoxRuntimePath(),
           bundledGameplayPatchPath: resolveBundledGameplayPatchPath(),
           bundledDeathcommPath: resolveBundledDeathcommPath(),
-          clientPatchModeFallback:
-            await readCachedGameplayPatchMode(join(app.getPath("userData"))) ?? "patched",
           attest: () => attestInstallation(launchCredential.playerKey, launchRuntime),
           launcherVersion: app.getVersion(),
           diagnostics: diagnosticLaunch?.hooks,
-          // Best-effort hardware fingerprint; the server hashes it. A failure
-          // must never block a launch, so it degrades to no HWID signal.
-          hwid: await collectHwid().catch(() => ({})),
           onExit: () => {
             gamePid = null;
             phase = "ready";

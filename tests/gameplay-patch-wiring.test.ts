@@ -16,7 +16,6 @@ describe("shotgun sprint patch wiring", () => {
     expect(launcher).not.toContain("removeRetiredGameplayPatch");
     expect(main).not.toContain("removeRetiredGameplayPatch");
     expect(launcher).toContain("bundledGameplayPatchPath: string;");
-    expect(launcher).toContain("clientPatchModeFallback: GameplayPatchMode;");
     expect(launcher).toContain("await assertGameplayPatchState(root, clientPatchMode);");
     expect(count(launcher, "await prepareClient(")).toBe(2);
 
@@ -25,7 +24,6 @@ describe("shotgun sprint patch wiring", () => {
     expect(main).toContain("await recordGameplayPatchState(");
     expect(main).toContain("resolveBundledGameplayPatchPath()");
     expect(main).toContain("bundledGameplayPatchPath: resolveBundledGameplayPatchPath()");
-    expect(main).toContain("clientPatchModeFallback:");
   });
 
   it("attests dinput8.dll only when the server directs the patched mode", async () => {

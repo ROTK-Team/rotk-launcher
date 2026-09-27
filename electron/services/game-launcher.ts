@@ -22,20 +22,12 @@ import {
 import { deployVivoxCompatibility } from "./vivox-client.js";
 import { prepareInterfaceInputProfile } from "./interface-input-profile.js";
 import { prepareWeaponStanceProfile, WEAPON_STANCE_ENABLED } from "./weapon-stance-profile.js";
+import { assertHwidEvidence } from "./hwid-evidence.js";
 import { startDeathcommClient } from "./deathcomm-client.js";
 
 const GAME_STARTUP_STABILITY_MS = 3_000;
 
-/**
- * What one attestation attempt produced.
- * - `attested`: a block to carry with the ticket request.
- * - `not-applicable`: the server has no attestation to run (no policy yet, or
- *   unconfigured). Launch as usual — the ticket route stays the authority.
- * - `unavailable`: attestation should have run but could not (service
- *   unreachable, files unreadable, malformed response). No block is sent, and
- *   if enforcement then blocks the launch, the reason explains why instead of
- *   the ticket route's opaque "update the launcher".
- */
+/** A failed or absent attestation cannot obtain a ticket through this launcher. */
 export type AttestationOutcome =
   | {
       readonly status: "attested";
@@ -46,7 +38,7 @@ export type AttestationOutcome =
        * request must carry exactly this object and not a fingerprint read at
        * another time.
        */
-      readonly hwid?: Record<string, string>;
+      readonly hwid: Record<string, string>;
       /** Server-directed shotgun sprint client-patch mode for this launch. */
       readonly clientPatchMode: GameplayPatchMode;
     }
@@ -67,22 +59,10 @@ export interface LaunchRequest {
   bundledVivoxRuntimePath: string;
   bundledGameplayPatchPath: string;
   bundledDeathcommPath?: string;
-  /**
-   * Mode reapplied when the server does not run attestation (development or
-   * unconfigured backend). The production path always uses the signed
-   * challenge directive instead.
-   */
-  clientPatchModeFallback: GameplayPatchMode;
-  /**
-   * Integrity attestation hook. The launcher never self-exempts: it reports
-   * what it observed and lets the backend decide what an absent attestation
-   * means.
-   */
-  attest?: () => Promise<AttestationOutcome>;
+  /** Required for every launch and ticket refresh. No unverified fallback. */
+  attest: () => Promise<AttestationOutcome>;
   /** This launcher's version, sent so the server's update gate can act. */
   launcherVersion?: string;
-  /** Raw hardware fingerprint; the server hashes it (see machine-identity.ts). */
-  hwid?: Record<string, string>;
   /** Best-effort telemetry only. Diagnostic failures never control the game lifecycle. */
   diagnostics?: GameLaunchDiagnostics;
   onExit(exitCode: number | null): void;
@@ -100,29 +80,20 @@ function diagnosticCallback(callback: (() => void) | undefined): void {
   try { callback?.(); } catch { /* Diagnostic collection must remain fail-open. */ }
 }
 
-/**
- * Turn an attestation outcome plus the launcher's version and fingerprint into
- * the ticket request options. A clean measurement carries its block; a
- * not-applicable one carries nothing; an unavailable one records why so an
- * enforced refusal can name the real cause. The version and HWID ride along
- * regardless, so the update gate and HWID capture work even with no attestation.
- */
+/** Local gate only: the backend must make the same decision independently. */
 function ticketRequestOptions(
   request: LaunchRequest,
   outcome: AttestationOutcome,
-): { attestation?: unknown; attestationUnavailableReason?: string; launcherVersion?: string; hwid?: Record<string, string> } {
-  const base: { launcherVersion?: string; hwid?: Record<string, string> } = {};
-  if (request.launcherVersion) base.launcherVersion = request.launcherVersion;
-  // An attested launch answers the slots its challenge named, and its TPM proof
-  // is bound to that exact vector; the fingerprint read before the launch is
-  // the fallback for a launch that could not attest.
-  const hwid = outcome.status === "attested" && outcome.hwid !== undefined ? outcome.hwid : request.hwid;
-  if (hwid && Object.keys(hwid).length > 0) base.hwid = hwid;
-  if (outcome.status === "attested") return { ...base, attestation: outcome.block };
-  if (outcome.status === "unavailable") {
-    return { ...base, attestationUnavailableReason: outcome.reason };
+): { attestation: unknown; launcherVersion?: string; hwid: Record<string, string> } {
+  if (outcome.status !== "attested" || !outcome.block || typeof outcome.block !== "object" || Array.isArray(outcome.block)) {
+    throw new Error("ROTK could not complete integrity verification. Try again; if the problem persists, contact ROTK support.");
   }
-  return base;
+  assertHwidEvidence(outcome.hwid);
+  return {
+    ...(request.launcherVersion ? { launcherVersion: request.launcherVersion } : {}),
+    hwid: outcome.hwid,
+    attestation: outcome.block,
+  };
 }
 
 async function validateMarker(installation: InstalledClientConfig): Promise<void> {
@@ -313,13 +284,23 @@ function waitForStableStartup(
 
 export class GameLauncher {
   private child: ChildProcess | null = null;
+  private launching = false;
 
   isRunning(): boolean {
     return this.child !== null && this.child.exitCode === null && !this.child.killed;
   }
 
   async launch(request: LaunchRequest): Promise<number> {
-    if (this.isRunning()) throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+    if (this.launching || this.isRunning()) throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+    this.launching = true;
+    try {
+      return await this.launchVerified(request);
+    } finally {
+      this.launching = false;
+    }
+  }
+
+  private async launchVerified(request: LaunchRequest): Promise<number> {
     const installation = request.config.installation;
     if (!installation) throw new Error("Installe d’abord le client ROTK.");
     const installationRoot = await validateInstalledClient(installation);
@@ -338,11 +319,9 @@ export class GameLauncher {
       request.bundledVivoxRuntimePath,
     );
 
-    // Integrity attestation runs before the ticket exists: the whole point is
-    // that a tampered installation never obtains one.
-    const outcome = request.attest
-      ? await request.attest()
-      : { status: "not-applicable", clientPatchMode: request.clientPatchModeFallback } as const;
+    // Complete attestation before requesting a ticket. The server must reject
+    // unacceptable measurements; a completed attempt can report deviations.
+    const outcome = await request.attest();
 
     // The durable website key reaches only the HTTPS account service. H1Z1
     // receives a short ticket and the Steam identity authenticated by it.
@@ -375,9 +354,7 @@ export class GameLauncher {
         await sessionGateway.close().catch(() => undefined);
         // A fresh ticket needs a fresh attestation: the first challenge was
         // consumed by the request above and is not replayable.
-        const refreshed = request.attest
-          ? await request.attest()
-          : { status: "not-applicable", clientPatchMode: request.clientPatchModeFallback } as const;
+        const refreshed = await request.attest();
         launchIdentity = await createLaunchTicket(
           request.identity.playerKey,
           request.runtime.launchTicketUrl,

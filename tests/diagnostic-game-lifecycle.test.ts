@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GameLauncher, type GameLaunchDiagnostics, type LaunchRequest } from '../electron/services/game-launcher.js';
 import { RUNTIME_CONFIGS } from '../electron/services/runtime-config.js';
 
-const mocks = vi.hoisted(() => ({ spawn: vi.fn(), gatewayClose: vi.fn(async () => undefined) }));
+const mocks = vi.hoisted(() => ({ spawn: vi.fn(), gatewayClose: vi.fn(async () => undefined), ticket: vi.fn(), fresh: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
 vi.mock('../electron/services/path-policy.js', () => ({ validateInstallDestination: async (root: string) => root }));
 vi.mock('../electron/services/installer.js', () => ({ readInstallationMarker: async () => ({ schemaVersion: 1, installId: 'fixture' }) }));
@@ -18,8 +18,8 @@ vi.mock('../electron/services/gameplay-patch.js', () => ({
 }));
 vi.mock('../electron/services/client-config.js', () => ({ synchronizeClientConfig: (current: string) => current,
   validateLocalCreateSessionUrl: (url: string) => url }));
-vi.mock('../electron/services/launch-ticket.js', () => ({ assertLaunchTicketFresh: () => undefined,
-  createLaunchTicket: async () => ({ ticket: 'test-only-ticket', displayName: 'FixturePlayer', steamId: '76561190000000000' }) }));
+vi.mock('../electron/services/launch-ticket.js', () => ({ assertLaunchTicketFresh: mocks.fresh,
+  createLaunchTicket: mocks.ticket }));
 vi.mock('../electron/services/session-gateway.js', () => ({
   startLocalSessionGateway: async () => ({ createSessionUrl: 'http://127.0.0.1:45678/createsession', close: mocks.gatewayClose }),
 }));
@@ -38,6 +38,8 @@ const roots: string[] = [];
 const children: GameChild[] = [];
 beforeEach(() => {
   mocks.gatewayClose.mockClear();
+  mocks.fresh.mockReset();
+  mocks.ticket.mockReset().mockResolvedValue({ ticket: 'test-only-ticket', displayName: 'FixturePlayer', steamId: '76561190000000000' });
   mocks.spawn.mockReset().mockImplementation(() => { const child = new GameChild(); children.push(child); return child; });
 });
 afterEach(async () => {
@@ -60,7 +62,9 @@ async function fixture() {
     identity: { playerKey: 'test-only-player-key' } as LaunchRequest['identity'],
     runtime: RUNTIME_CONFIGS.test, logsRoot: join(root, 'logs'), bundledShimPath: join(root, 'bundled-shim.dll'),
     bundledVivoxProxyPath: join(root, 'unused-proxy.dll'), bundledVivoxRuntimePath: join(root, 'unused-runtime.dll'),
-    bundledGameplayPatchPath: join(root, 'unused-dinput8.dll'), clientPatchModeFallback: 'clean',
+    bundledGameplayPatchPath: join(root, 'unused-dinput8.dll'),
+    attest: vi.fn(async () => ({ status: 'attested', block: { challengeId: 'fixture' },
+      hwid: { machine_guid: 'fixture-machine' }, clientPatchMode: 'clean' } as const)),
     diagnostics, onExit: vi.fn(),
   };
   return { launcher: new GameLauncher(), request, diagnostics, child: () => children.at(-1)! };
@@ -144,5 +148,83 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(() => f.child().emit('error', new Error('ENOENT'))).not.toThrow();
     expect(f.child().kill).not.toHaveBeenCalled();
     expect(mocks.gatewayClose).toHaveBeenCalled();
+  });
+});
+
+
+describe('launch verification gate', () => {
+  it.each(['unavailable', 'not-applicable'] as const)('refuses %s attestation before requesting a ticket', async status => {
+    const f = await fixture();
+    f.request.attest = async () => ({ status, reason: 'verification service unavailable', clientPatchMode: 'clean' });
+    await expect(f.launcher.launch(f.request)).rejects.toThrow('could not complete integrity verification');
+    expect(mocks.ticket).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, [], '', 'invalid'])('refuses malformed attestation blocks (case %#)', async block => {
+    const f = await fixture();
+    f.request.attest = async () => ({ status: 'attested', block, hwid: { machine_guid: 'fixture' }, clientPatchMode: 'clean' });
+    await expect(f.launcher.launch(f.request)).rejects.toThrow('could not complete integrity verification');
+    expect(mocks.ticket).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('does not turn a collector failure into a ticket request', async () => {
+    const f = await fixture();
+    f.request.attest = async () => { throw new Error('Hardware verification timed out'); };
+    await expect(f.launcher.launch(f.request)).rejects.toThrow('Hardware verification timed out');
+    expect(mocks.ticket).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty attested evidence without consulting a fallback', async () => {
+    const f = await fixture();
+    f.request.attest = async () => ({ status: 'attested', block: {}, hwid: {}, clientPatchMode: 'clean' });
+    await expect(f.launcher.launch(f.request)).rejects.toMatchObject({ code: 'hwid_verification_failed' });
+    expect(mocks.ticket).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('rechecks evidence on ticket refresh and closes the previous gateway on failure', async () => {
+    const f = await fixture();
+    const first = await f.request.attest();
+    f.request.attest = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce({
+      status: 'attested', block: { challengeId: 'second' }, hwid: {}, clientPatchMode: 'clean',
+    });
+    mocks.fresh.mockImplementationOnce(() => { throw new Error('expired'); });
+    await expect(f.launcher.launch(f.request)).rejects.toMatchObject({ code: 'hwid_verification_failed' });
+    expect(f.request.attest).toHaveBeenCalledTimes(2);
+    expect(mocks.ticket).toHaveBeenCalledTimes(1);
+    expect(mocks.gatewayClose).toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('uses the new signed vector when refreshing, never the first vector', async () => {
+    const f = await fixture();
+    const first = await f.request.attest();
+    f.request.attest = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce({
+      status: 'attested', block: { challengeId: 'second' }, hwid: { machine_guid: 'second' }, clientPatchMode: 'clean',
+    });
+    mocks.fresh.mockImplementationOnce(() => { throw new Error('expired'); });
+    const launched = f.launcher.launch(f.request).catch(error => error);
+    await vi.waitFor(() => expect(mocks.spawn).toHaveBeenCalledOnce());
+    expect(mocks.ticket).toHaveBeenNthCalledWith(2, f.request.identity.playerKey, f.request.runtime.launchTicketUrl, {
+      attestation: { challengeId: 'second' }, hwid: { machine_guid: 'second' },
+    });
+    f.child().exit(0);
+    await launched;
+  });
+
+  it('rejects concurrent launches and releases the lock after a verification failure', async () => {
+    const f = await fixture(), gate = deferred();
+    f.request.attest = vi.fn(async () => { await gate.promise; throw new Error('verification failed'); });
+    const first = f.launcher.launch(f.request).catch(error => error);
+    await vi.waitFor(() => expect(f.request.attest).toHaveBeenCalledOnce());
+    await expect(f.launcher.launch(f.request)).rejects.toThrow('déjà lancé');
+    gate.resolve();
+    expect((await first).message).toBe('verification failed');
+    await expect(f.launcher.launch(f.request)).rejects.toThrow('verification failed');
+    expect(f.request.attest).toHaveBeenCalledTimes(2);
+    expect(mocks.ticket).not.toHaveBeenCalled();
   });
 });

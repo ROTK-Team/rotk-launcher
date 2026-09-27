@@ -1,3 +1,4 @@
+import { assertHwidEvidence } from "./hwid-evidence.js";
 import { isValidLaunchTicket } from "../../shared/launch-ticket.js";
 import { isValidPlayerKey, normalizePlayerKey } from "../../shared/player-key.js";
 
@@ -27,16 +28,14 @@ interface TicketRequestOptions {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   /**
-   * Integrity attestation block (see integrity-attestation.ts). Optional while
-   * the backend runs in observation mode; required once enforcement is on.
+   * Integrity attestation block (see integrity-attestation.ts). The game launch
+   * gate requires a completed attempt before calling this transport helper.
+   * The backend must independently enforce its evidence requirements.
    */
   attestation?: unknown;
   /**
-   * Set when attestation should have run but could not (service unreachable,
-   * files unreadable). No block is sent; if enforcement then refuses the
-   * launch, this reason is surfaced instead of the misleading "update the
-   * launcher" — the launch failed because the files could not be verified, not
-   * because the launcher is old.
+   * Legacy transport error context. The current game launch gate blocks an
+   * unavailable attestation locally and never uses this fallback route.
    */
   attestationUnavailableReason?: string;
   /**
@@ -46,10 +45,9 @@ interface TicketRequestOptions {
    */
   launcherVersion?: string;
   /**
-   * The raw hardware fingerprint (see machine-identity.ts). The server
-   * keyed-hashes each component and stores only digests; the launcher holds no
-   * hashing key and sends the raw values, exactly like the address it never
-   * sees hashed.
+   * Raw hardware evidence, required at runtime before any HTTP request.
+   * Values must remain byte-identical to the vector covered by the proof.
+   * Server-side storage and admission policy are outside this module.
    */
   hwid?: Record<string, string>;
 }
@@ -232,6 +230,7 @@ export async function createLaunchTicket(
 ): Promise<LaunchTicketIdentity> {
   if (!isValidPlayerKey(playerKey)) throw new Error("Invalid ROTK player key");
   const endpoint = validateEndpoint(endpointValue);
+  assertHwidEvidence(options.hwid);
   const fetchImpl = options.fetchImpl ?? fetch;
   const requestStartedAtMonotonicMs = performance.now();
   const controller = new AbortController();
@@ -249,7 +248,7 @@ export async function createLaunchTicket(
         body: JSON.stringify({
           launcherKey: normalizePlayerKey(playerKey),
           ...(options.launcherVersion ? { launcherVersion: options.launcherVersion } : {}),
-          ...(options.hwid && Object.keys(options.hwid).length > 0 ? { hwid: options.hwid } : {}),
+          hwid: options.hwid,
           ...(options.attestation ? { attestation: options.attestation } : {}),
         }),
         cache: "no-store",
