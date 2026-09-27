@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   assertLaunchTicketFresh,
-  createLaunchTicket,
+  createLaunchTicket as requestLaunchTicket,
   launchTicketInternals,
 } from "../electron/services/launch-ticket.js";
+
+const validHwid = { machine_guid: "fixture-machine" };
+const createLaunchTicket: typeof requestLaunchTicket = (key, url, options = {}) =>
+  requestLaunchTicket(key, url, { hwid: validHwid, ...options });
 
 const launcherKey = "0123456789abcdef0123456789abcdef";
 const endpoint = "https://accounts.rotk.app/createLaunchTicket";
@@ -38,7 +42,7 @@ describe("ROTK launch ticket client", () => {
       expect(input.toString()).not.toContain(launcherKey);
       expect(init?.method).toBe("POST");
       expect(init?.headers).toEqual({ Accept: "application/json", "Content-Type": "application/json" });
-      expect(init?.body).toBe(JSON.stringify({ launcherKey }));
+      expect(init?.body).toBe(JSON.stringify({ launcherKey, hwid: validHwid }));
       return jsonResponse(validResponse);
     }) as typeof fetch;
 
@@ -68,13 +72,30 @@ describe("ROTK launch ticket client", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it("omits an empty HWID vector rather than sending an empty object", async () => {
+  it.each([undefined, null, {}, [], { machine_guid: "" }, { machine_guid: "none" },
+    { machine_guid: 123 }, { machine_guid: "serial\0other=value" },
+    { machine_guid: "x".repeat(1025) }, { "invalid=slot": "value" },
+  ])("refuses missing or malformed HWID before sending credentials: %j", async (hwid) => {
+    const fetchImpl = vi.fn();
+    await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl, hwid: hwid as Record<string, string> }))
+      .rejects.toMatchObject({ code: "hwid_verification_failed" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("also refuses omitted HWID at the raw ticket API boundary", async () => {
+    const fetchImpl = vi.fn();
+    await expect(requestLaunchTicket(launcherKey, endpoint, { fetchImpl }))
+      .rejects.toMatchObject({ code: "hwid_verification_failed" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("preserves the exact bytes covered by an existing proof", async () => {
+    const hwid = { machine_guid: " Mixed Case Value " };
     const fetchImpl = vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
-      expect(JSON.parse(String(init?.body))).toEqual({ launcherKey, launcherVersion: "1.4.0" });
+      expect(JSON.parse(String(init?.body)).hwid).toEqual(hwid);
       return jsonResponse(validResponse);
     }) as typeof fetch;
-    await createLaunchTicket(launcherKey, endpoint, { fetchImpl, launcherVersion: "1.4.0", hwid: {} });
-    expect(fetchImpl).toHaveBeenCalledOnce();
+    await createLaunchTicket(launcherKey, endpoint, { fetchImpl, hwid });
   });
 
   it("tags the update-required refusal so the launch flow can make it mandatory", async () => {

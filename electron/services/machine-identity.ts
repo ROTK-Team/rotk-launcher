@@ -1,33 +1,23 @@
 /**
  * Composite hardware fingerprint (Windows).
  *
- * The launcher reads the machine identifiers a launch is asked for and sends
- * the RAW values with the ticket request; the server keyed-hashes each and
- * stores only the digests (never the raw value, never on the launcher side
- * either). No single component is trusted — the server matches a HWID ban
- * fuzzily over identity slots, so changing one serial does not evade it.
- *
- * Which slots: the five CORE slots every launch has always answered, plus the
- * slots the signed attestation challenge names (#320 §B) — a random draw from a
- * wider pool, different at every launch, so a fork that answers five constants
- * is caught by the sixth question. A slot name from the server only ever
- * selects an entry of SLOT_READERS below; it never reaches the shell.
- *
- * This is a userland fingerprint on an open-source launcher: a cost to ban
- * evasion, not an unspoofable identity. The TPM anchor is what raises that
- * cost, and from 2.0.12 its signature covers this vector (#320 §C).
- *
- * Every collector is best-effort: a slot that cannot be read is omitted, and
- * an empty vector is valid (the machine just contributes no HWID signal).
- * Collection never throws into the launch path.
+ * Reads the slots requested by the signed challenge, or the core set when
+ * no slots are specified. Only fixed, known readers can reach PowerShell.
+ * Hardware values are untrusted userland observations, not proof of identity.
+ * Collection failures block this launcher. The server must independently
+ * validate evidence quality, TPM trust and bans for every admission route.
+ * No raw measurements are persisted or included in thrown errors here.
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { assertHwidEvidence, HwidVerificationError, isHwidPlaceholder, MAX_HWID_SLOTS, isUsableHwidValue } from "./hwid-evidence.js";
 
 import { windowsSystemToolPath } from "./windows-tools.js";
 
-const execFileAsync = promisify(execFile);
+import { HwidReaderError, startHwidReaderProcess, type HwidReaderHandle, type HwidReaderOptions } from "./hwid-reader-process.js";
+
+export const HWID_READER_CONCURRENCY = 2;
+export const HWID_COLLECTION_TIMEOUT_MS = 10_000;
+export const HWID_GROUP_TIMEOUT_MS = 5_000;
 
 /** The slots every launch answers; the server's HWID_CORE_COMPONENTS. */
 export const HWID_CORE_SLOTS = [
@@ -36,9 +26,8 @@ export const HWID_CORE_SLOTS = [
 
 /**
  * Every slot this launcher can read, with the PowerShell expression that reads
- * it. Fixed text only. Mirrors the server's HWID_COMPONENTS; a slot the server
- * asks for that is missing here is simply not answered, and counts as missing
- * on its side.
+ * it. Fixed text only. A challenge naming an unsupported reader blocks this
+ * launcher rather than silently dropping part of the requested evidence.
  */
 const SLOT_READERS: Readonly<Record<string, string>> = Object.freeze({
   machine_guid: "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography' -Name MachineGuid).MachineGuid",
@@ -64,28 +53,41 @@ const SLOT_READERS: Readonly<Record<string, string>> = Object.freeze({
   system_sku: "(Get-CimInstance Win32_ComputerSystem).SystemSKUNumber",
 });
 
+/** Fixed source families; never derived from shell text supplied by a server. */
+const READER_GROUPS = [
+  { id: "registry", slots: ["machine_guid"] },
+  { id: "firmware", slots: ["smbios_uuid", "baseboard_serial", "baseboard_product", "bios_serial", "bios_version", "bios_release_date", "enclosure_serial", "system_sku"] },
+  { id: "storage", slots: ["disk_serial", "disk_model", "disk_firmware", "volume_serial"] },
+  { id: "compute", slots: ["cpu_processor_id", "cpu_name", "ram_module_serials", "gpu_pnp_device_id", "gpu_name"] },
+  { id: "network", slots: ["mac_addresses"] },
+  { id: "display", slots: ["monitor_edid_serials"] },
+  { id: "os", slots: ["os_install_date"] },
+] as const;
+
+export interface HwidReaderGroup {
+  readonly id: string;
+  readonly slots: readonly string[];
+}
+
+export function groupHwidSlots(slots: readonly string[]): HwidReaderGroup[] {
+  return READER_GROUPS.map(group => ({ id: group.id, slots: group.slots.filter(slot => slots.includes(slot)) }))
+    .filter(group => group.slots.length > 0);
+}
+
 /** Every slot name this launcher knows how to read. */
 export const HWID_KNOWN_SLOTS: readonly string[] = Object.freeze(Object.keys(SLOT_READERS));
 
-/** Values a real machine never legitimately reports; dropped if seen. */
-const PLACEHOLDER_VALUES = new Set([
-  "", "0", "none", "n/a", "na", "null", "default string", "to be filled by o.e.m.",
-  "system serial number", "not applicable", "not available", "无", "00000000",
-  "ffffffff-ffff-ffff-ffff-ffffffffffff", "00000000-0000-0000-0000-000000000000",
-]);
-
 /** Trim, collapse whitespace, lowercase, and reject known placeholders. */
 export function cleanComponent(value: string | undefined | null): string | undefined {
-  if (typeof value !== "string") return undefined;
+  if (!isUsableHwidValue(value)) return undefined;
   const normalized = value.replace(/\s+/g, " ").trim().toLowerCase();
-  if (normalized === "" || PLACEHOLDER_VALUES.has(normalized)) return undefined;
-  return normalized;
+  return isUsableHwidValue(normalized) ? normalized : undefined;
 }
 
 /**
  * The slots to read: the requested names this launcher knows, deduplicated,
- * in request order. Unknown names are dropped silently — the server counts
- * them as unanswered; nothing here guesses at what they might mean.
+ * in request order. The collection entry point separately rejects unsupported
+ * requests; this selection helper never turns arbitrary text into shell code.
  */
 export function selectHwidSlots(requested: readonly string[]): string[] {
   const slots: string[] = [];
@@ -95,73 +97,226 @@ export function selectHwidSlots(requested: readonly string[]): string[] {
   return slots;
 }
 
-/**
- * One PowerShell script reading every requested slot, each in its own
- * try/catch so a broken WMI class costs its slot and nothing else, printing a
- * compact JSON object. One process for the whole vector: ten slots do not mean
- * ten shells.
- */
+/** Each completed read is emitted separately, so a later timeout retains diagnostics. */
 export function buildHwidScript(slots: readonly string[]): string {
+  if (slots.length > MAX_HWID_SLOTS || selectHwidSlots(slots).length !== slots.length) {
+    throw new HwidVerificationError("invalid");
+  }
   return [
     "$ErrorActionPreference = 'Stop'",
-    "$r = @{}",
-    ...slots.map((slot) =>
-      `try { $v = [string](${SLOT_READERS[slot]}); if ($v) { $r['${slot}'] = $v } } catch {}`),
-    "$r | ConvertTo-Json -Compress",
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+    ...slots.map((slot) => [
+      `try { $v = [string](${SLOT_READERS[slot]});`,
+      `$r = @{ slot = '${slot}'; status = 'ok'; value = $v }`,
+      `} catch { $s = 'error'; if ($_.Exception -is [System.UnauthorizedAccessException]) { $s = 'permission_denied' };`,
+      `$r = @{ slot = '${slot}'; status = $s } }`,
+      "$r | ConvertTo-Json -Compress",
+    ].join("\n")),
   ].join("\n");
 }
 
-/** The JSON the script prints, cleaned slot by slot. Anything unreadable is an empty vector. */
-export function parseHwidOutput(stdout: string, slots: readonly string[]): Record<string, string> {
-  const vector: Record<string, string> = {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout.replace(/^﻿/, "").trim() || "{}");
-  } catch {
-    return vector;
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return vector;
-  const record = parsed as Record<string, unknown>;
-  for (const slot of slots) {
-    const value = record[slot];
-    const cleaned = cleanComponent(typeof value === "string" ? value : undefined);
-    if (cleaned !== undefined) vector[slot] = cleaned;
-  }
-  return vector;
+export type HwidSlotStatus = "ok" | "missing" | "unsupported" | "permission_denied" | "timeout" | "error" | "invalid_value" | "cancelled" | "not_collected";
+export interface HwidCollectionResult {
+  readonly status: "complete" | "failed" | "unsupported" | "cancelled";
+  readonly hwid: Record<string, string>;
+  readonly slots: Record<string, HwidSlotStatus>;
+  readonly durationMs: number;
+  readonly failure?: "timeout" | "execution" | "invalid_output" | "empty";
 }
 
-async function runPowerShell(script: string, timeoutMs: number): Promise<string> {
-  // Absolute path, never a bare name: a `powershell.exe` earlier on the user's
-  // PATH would otherwise answer these queries itself. -EncodedCommand carries
-  // the fixed script without any quoting on the command line.
-  const { stdout } = await execFileAsync(
+/** Parse the bounded, line-delimited output of our fixed collector script. */
+export function parseHwidOutput(stdout: string, slots: readonly string[]): Pick<HwidCollectionResult, "hwid" | "slots"> {
+  if (Buffer.byteLength(stdout, "utf8") > 256 * 1024) throw new HwidVerificationError("invalid");
+  const hwid: Record<string, string> = {};
+  const outcomes: Record<string, HwidSlotStatus> = {};
+  for (const line of stdout.replace(/^\uFEFF/u, "").split(/\r?\n/u)) {
+    if (!line.trim()) continue;
+    let record: Record<string, unknown>;
+    try { record = JSON.parse(line); } catch { throw new HwidVerificationError("invalid"); }
+    if (!record || typeof record !== "object" || Array.isArray(record)
+      || typeof record.slot !== "string" || !slots.includes(record.slot)
+      || Object.hasOwn(outcomes, record.slot)) throw new HwidVerificationError("invalid");
+    const slot = record.slot;
+    if (record.status === "error" || record.status === "permission_denied") {
+      outcomes[slot] = record.status;
+    } else if (record.status === "ok" && typeof record.value === "string") {
+      const value = cleanComponent(record.value);
+      if (value !== undefined) { hwid[slot] = value; outcomes[slot] = "ok"; }
+      else outcomes[slot] = isHwidPlaceholder(record.value)
+        ? "missing" : "invalid_value";
+    } else throw new HwidVerificationError("invalid");
+  }
+  return { hwid, slots: outcomes };
+}
+
+export interface HwidCollectionOptions {
+  /** Test seam. Handles must retain ownership until their child has closed. */
+  startReader?: (script: string, options: HwidReaderOptions) => HwidReaderHandle;
+  timeoutMs?: number;
+  groupTimeoutMs?: number;
+  signal?: AbortSignal;
+  /** Test seam; never supplied by the renderer or read from an environment flag. */
+  platform?: NodeJS.Platform;
+}
+
+function startPowerShell(script: string, options: HwidReaderOptions): HwidReaderHandle {
+  return startHwidReaderProcess(
     windowsSystemToolPath("powershell"),
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand",
       Buffer.from(script, "utf16le").toString("base64")],
-    { windowsHide: true, timeout: timeoutMs, maxBuffer: 256 * 1024, encoding: "utf8" },
+    options,
   );
-  return stdout;
 }
 
-/**
- * Collect the fingerprint for the requested slots (the core five by default).
- * Non-Windows returns an empty vector (Linux/Proton is out of scope for v1;
- * the server treats the absence as no HWID signal). Never throws: a shell that
- * fails or times out yields the empty vector.
- */
+/** One attempt, two readers at most, separate group budgets and one overall deadline. */
+export async function collectHwidResult(
+  requested: readonly string[] = HWID_CORE_SLOTS,
+  options: HwidCollectionOptions = {},
+): Promise<HwidCollectionResult> {
+  const started = performance.now();
+  const timeoutMs = options.timeoutMs ?? HWID_COLLECTION_TIMEOUT_MS;
+  const groupTimeoutMs = options.groupTimeoutMs ?? HWID_GROUP_TIMEOUT_MS;
+  const validTimeout = (value: number): boolean => Number.isFinite(value) && value > 0 && value <= 60_000;
+  if (!validTimeout(timeoutMs) || !validTimeout(groupTimeoutMs)
+    || requested.length === 0 || requested.length > MAX_HWID_SLOTS
+    || requested.some(slot => !/^[a-z0-9_]{1,40}$/.test(slot))
+    || new Set(requested).size !== requested.length) throw new HwidVerificationError("invalid");
+  const slots = selectHwidSlots(requested);
+  const outcomes: Record<string, HwidSlotStatus> = Object.fromEntries(requested.map(slot => [slot, "unsupported"]));
+  const hwid: Record<string, string> = {};
+  const result = (status: HwidCollectionResult["status"], failure?: HwidCollectionResult["failure"]): HwidCollectionResult => ({
+    status, hwid: Object.freeze({ ...hwid }), slots: Object.freeze({ ...outcomes }),
+    durationMs: Math.max(0, performance.now() - started), ...(failure ? { failure } : {}),
+  });
+  if (options.signal?.aborted) return result("cancelled");
+  if ((options.platform ?? process.platform) !== "win32" || slots.length !== requested.length) return result("unsupported");
+  for (const slot of slots) outcomes[slot] = "not_collected";
+  const groups = groupHwidSlots(slots);
+  const attempt = new AbortController();
+  const handles: HwidReaderHandle[] = [];
+  let failure: HwidCollectionResult["failure"];
+  let nextGroup = 0;
+  const fail = (reason: NonNullable<HwidCollectionResult["failure"]>): void => {
+    failure ??= reason;
+    attempt.abort();
+  };
+  const cancel = (): void => attempt.abort();
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  const overallTimer = setTimeout(() => fail("timeout"), timeoutMs);
+
+  const runGroup = async (group: HwidReaderGroup): Promise<void> => {
+    const groupStarted = performance.now();
+    const budget = Math.min(groupTimeoutMs, timeoutMs - (groupStarted - started));
+    if (budget <= 0) { fail("timeout"); return; }
+    if (attempt.signal.aborted) return;
+    const controller = new AbortController();
+    let expired = false;
+    let rejectInterrupted!: (error: Error) => void;
+    const interrupted = new Promise<never>((_, reject) => { rejectInterrupted = reject; });
+    const abort = (): void => {
+      controller.abort();
+      rejectInterrupted(new HwidReaderError("cancelled"));
+    };
+    attempt.signal.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(() => {
+      expired = true;
+      controller.abort();
+      rejectInterrupted(new HwidReaderError("timeout"));
+    }, budget);
+    let handle: HwidReaderHandle | undefined;
+    try {
+      // Attach a rejection observer before invoking an injected reader which
+      // may synchronously cancel the whole attempt.
+      void interrupted.catch(() => undefined);
+      handle = (options.startReader ?? startPowerShell)(buildHwidScript(group.slots), {
+        signal: controller.signal, timeoutMs: budget,
+      });
+      handles.push(handle);
+      const stdout = await Promise.race([handle.output, interrupted]);
+      if (attempt.signal.aborted) {
+        for (const slot of group.slots) outcomes[slot] = "cancelled";
+        return;
+      }
+      if (performance.now() - groupStarted >= budget || performance.now() - started >= timeoutMs) {
+        expired = true;
+        throw new HwidReaderError("timeout");
+      }
+      const parsed = parseHwidOutput(stdout, group.slots);
+      if (performance.now() - groupStarted >= budget || performance.now() - started >= timeoutMs) {
+        expired = true;
+        throw new HwidReaderError("timeout");
+      }
+      Object.assign(outcomes, parsed.slots);
+      Object.assign(hwid, parsed.hwid);
+      if (group.slots.some(slot => !Object.hasOwn(parsed.slots, slot)
+        || ["error", "permission_denied", "invalid_value"].includes(outcomes[slot]))) {
+        for (const slot of group.slots) if (!Object.hasOwn(parsed.slots, slot)) outcomes[slot] = "error";
+        const readFailed = group.slots.some(slot => ["error", "permission_denied"].includes(parsed.slots[slot]));
+        fail(readFailed ? "execution" : "invalid_output");
+      }
+    } catch (error) {
+      // Only this attempt's handles may contribute diagnostic rows. A failed
+      // group never becomes successful because another group returned data.
+      if (error instanceof HwidReaderError && error.stdout) {
+        try {
+          const parsed = parseHwidOutput(error.stdout, group.slots);
+          Object.assign(outcomes, parsed.slots);
+          Object.assign(hwid, parsed.hwid);
+        } catch { /* malformed diagnostic output is discarded */ }
+      }
+      const timedOut = expired || (error instanceof HwidReaderError && error.reason === "timeout")
+        || performance.now() - groupStarted >= budget || performance.now() - started >= timeoutMs;
+      for (const slot of group.slots) {
+        if (outcomes[slot] === "not_collected") {
+          outcomes[slot] = timedOut ? "timeout" : attempt.signal.aborted ? "cancelled" : "error";
+        }
+      }
+      if (!attempt.signal.aborted) {
+        const invalidOutput = error instanceof HwidVerificationError
+          || (error instanceof HwidReaderError && error.reason === "output_limit");
+        fail(timedOut ? "timeout" : invalidOutput ? "invalid_output" : "execution");
+      }
+    } finally {
+      clearTimeout(timer);
+      attempt.signal.removeEventListener("abort", abort);
+      controller.abort();
+      // Keep the worker slot until its actual process has closed. The work
+      // deadline can expire before OS cleanup finishes; never overlap a
+      // replacement reader with a process that is still terminating.
+      if (handle) await handle.closed;
+    }
+  };
+
+  const worker = async (): Promise<void> => {
+    while (!attempt.signal.aborted && nextGroup < groups.length) {
+      await runGroup(groups[nextGroup++]);
+    }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(HWID_READER_CONCURRENCY, groups.length) }, () => worker()));
+  } finally {
+    clearTimeout(overallTimer);
+    attempt.abort();
+    await Promise.all(handles.map(handle => handle.closed));
+    options.signal?.removeEventListener("abort", cancel);
+  }
+  if (options.signal?.aborted) return result("cancelled");
+  if (failure) return result("failed", failure);
+  if (performance.now() - started >= timeoutMs) return result("failed", "timeout");
+  return Object.keys(hwid).length ? result("complete") : result("failed", "empty");
+}
+
+/** Only a completed, nonempty attempt may reach TPM signing and the ticket request. */
 export async function collectHwid(
   requested: readonly string[] = HWID_CORE_SLOTS,
-  options: { run?: (script: string) => Promise<string>; timeoutMs?: number } = {},
+  options: HwidCollectionOptions = {},
 ): Promise<Record<string, string>> {
-  if (process.platform !== "win32") return {};
-  const slots = selectHwidSlots(requested);
-  if (slots.length === 0) return {};
-  const timeoutMs = options.timeoutMs ?? 10_000;
-  const run = options.run ?? ((script: string) => runPowerShell(script, timeoutMs));
-  try {
-    return parseHwidOutput(await run(buildHwidScript(slots)), slots);
-  } catch {
-    // best-effort: no shell, no fingerprint, no failed launch.
-    return {};
+  const result = await collectHwidResult(requested, options);
+  if (result.status !== "complete") {
+    throw new HwidVerificationError(result.status === "cancelled" ? "cancelled"
+      : result.status === "unsupported" ? "unsupported"
+        : result.failure === "timeout" ? "timeout" : "unavailable");
   }
+  assertHwidEvidence(result.hwid);
+  return result.hwid;
 }

@@ -1,5 +1,13 @@
 # ROTK Launcher
 
+## Hardware verification hardening
+
+The launcher blocks ticket requests after failed hardware collection or unavailable
+integrity verification. This also applies to ticket refreshes. See the
+[implementation checklist and compatibility notes](docs/HWID_HARDENING.md) and the
+[required backend/game-server work](docs/BACKEND_SECURITY_REQUIREMENTS.md).
+These local checks do not replace server-side admission enforcement.
+
 ## Private Debug reports (2.0.8)
 
 In Settings → Debug, **Debug and send session reports** is an explicit opt-in to
