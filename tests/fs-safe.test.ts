@@ -1,5 +1,24 @@
-import { describe, expect, it } from "vitest";
-import { describeSystemError, retryFs } from "../electron/services/fs-safe.js";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  assertExecutableNotRunning,
+  describeSystemError,
+  installFileIfChanged,
+  retryFs,
+} from "../electron/services/fs-safe.js";
+
+const roots: string[] = [];
+async function temporaryRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "vitest-fs-safe-"));
+  roots.push(root);
+  return root;
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 function systemError(code: string, path?: string, syscall?: string): NodeJS.ErrnoException {
   return Object.assign(new Error(code), { code, path, syscall });
@@ -33,6 +52,34 @@ describe("retryFs", () => {
       throw systemError("EPERM");
     }, { attempts: 4, baseDelayMs: 1 })).rejects.toMatchObject({ code: "EPERM" });
     expect(calls).toBe(4);
+  });
+});
+
+describe("installFileIfChanged", () => {
+  it("leaves an identical target alone and replaces a different one", async () => {
+    const root = await temporaryRoot();
+    const source = join(root, "source.dll");
+    const target = join(root, "target.dll");
+    await writeFile(source, "shim-v2");
+    await writeFile(target, "shim-v2");
+    const before = await stat(target);
+
+    await expect(installFileIfChanged(source, target)).resolves.toBe(false);
+    expect((await stat(target)).mtimeMs).toBe(before.mtimeMs);
+
+    await writeFile(target, "vanilla");
+    await expect(installFileIfChanged(source, target)).resolves.toBe(true);
+    await expect(readFile(target, "utf8")).resolves.toBe("shim-v2");
+  });
+});
+
+describe("assertExecutableNotRunning", () => {
+  it("accepts an executable nobody holds, and a missing one", async () => {
+    const root = await temporaryRoot();
+    const executable = join(root, "H1Z1.exe");
+    await writeFile(executable, "MZ");
+    await expect(assertExecutableNotRunning(executable)).resolves.toBeUndefined();
+    await expect(assertExecutableNotRunning(join(root, "missing.exe"))).resolves.toBeUndefined();
   });
 });
 

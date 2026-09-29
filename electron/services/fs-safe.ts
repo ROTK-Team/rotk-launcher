@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, open, rename, rm, stat, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 
 // Antivirus, indexer and sync clients hold freshly written files for a moment,
@@ -58,6 +58,40 @@ export async function atomicWriteFile(
     await retryFs(() => rename(temporary, target));
   } finally {
     await rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+// Only writes when the content differs, so a healthy install is left alone.
+export async function installFileIfChanged(source: string, target: string): Promise<boolean> {
+  const [sourceStat, targetStat] = await Promise.all([
+    stat(source),
+    stat(target).catch(() => null),
+  ]);
+  if (
+    targetStat?.isFile()
+    && targetStat.size === sourceStat.size
+    && await sha256File(target) === await sha256File(source)
+  ) {
+    return false;
+  }
+  await atomicCopyFile(source, target);
+  return true;
+}
+
+// A running exe can't be opened for writing (EBUSY). Catches a game left open
+// by a previous launcher session, which GameLauncher.isRunning() can't see.
+export async function assertExecutableNotRunning(executablePath: string, attempts = 5): Promise<void> {
+  // An antivirus scan can hold the exe for a moment too; a running game stays busy.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await (await open(executablePath, "r+")).close();
+      return;
+    } catch (error) {
+      // Missing or read-only executables are reported by the regular checks.
+      if ((error as NodeJS.ErrnoException).code !== "EBUSY") return;
+      if (attempt >= attempts) throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100 * 2 ** (attempt - 1)));
+    }
   }
 }
 

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
+import { assertExecutableNotRunning, atomicWriteFile, installFileIfChanged } from "./fs-safe.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { InstalledClientConfig, LauncherConfig } from "./config-store.js";
@@ -178,8 +179,8 @@ async function prepareClient(
   // All subsequent I/O and the spawned process use the same physical root that
   // passed policy validation. This prevents a logical junction alias from
   // steering configuration and execution to a different tree.
-  const activeShimPath = join(root, "steam_api64.dll");
-  await copyFile(request.bundledShimPath, activeShimPath);
+  await assertExecutableNotRunning(join(root, "H1Z1.exe"));
+  await installFileIfChanged(request.bundledShimPath, join(root, "steam_api64.dll"));
   await assertVivoxCompatibility(root);
   // The attestation pass has already installed or removed the shotgun sprint
   // proxy for the mode the server directed; preparation only rechecks it so a
@@ -196,19 +197,17 @@ async function prepareClient(
   const configPath = join(root, "ClientConfig.ini");
   const configBackupPath = join(root, "ClientConfig.original.ini");
   if (!existsSync(configBackupPath)) await copyFile(configPath, configBackupPath);
-  const synchronized = synchronizeClientConfig(
-    await readFile(configPath, "utf8"),
-    request.runtime,
-    localCreateSessionUrl,
-  );
-  await writeFile(configPath, synchronized, "ascii");
-  await writeFile(join(root, "steam_persona_name.txt"), `${launchIdentity.displayName}\n`, "utf8");
+  const currentConfig = await readFile(configPath, "utf8");
+  const synchronized = synchronizeClientConfig(currentConfig, request.runtime, localCreateSessionUrl);
+  // utf8, not ascii: an ascii write turned a BOM into a stray 0xFF byte.
+  if (synchronized !== currentConfig) await atomicWriteFile(configPath, synchronized);
+  await atomicWriteFile(join(root, "steam_persona_name.txt"), `${launchIdentity.displayName}\n`);
 
   const battleyePath = join(root, "BattlEye", "BEClient_x64.cfg");
   if (existsSync(battleyePath)) {
     const current = await readFile(battleyePath, "utf8");
     const patched = current.replace(/MasterPort\s+\d+/i, "MasterPort 20099");
-    if (patched !== current) await writeFile(battleyePath, patched, "ascii");
+    if (patched !== current) await atomicWriteFile(battleyePath, patched);
   }
   return root;
 }
@@ -319,6 +318,8 @@ export class GameLauncher {
     const installation = request.config.installation;
     if (!installation) throw new Error("Installe d’abord le client ROTK.");
     const installationRoot = await validateInstalledClient(installation);
+    // Before attestation and the ticket, which are single-use.
+    await assertExecutableNotRunning(join(installationRoot, "H1Z1.exe"));
     const localLogs = join(request.logsRoot, installation.installId, "local");
     const failureLogs = join(request.logsRoot, installation.installId, "failure");
     await mkdir(localLogs, { recursive: true });
