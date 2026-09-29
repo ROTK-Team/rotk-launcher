@@ -610,26 +610,30 @@ export class AssetSyncService {
     const timeout = setTimeout(() => controller.abort(), MANIFEST_TIMEOUT_MS);
     const abortUpstream = (): void => controller.abort(signal?.reason as Error | undefined);
     signal?.addEventListener("abort", abortUpstream, { once: true });
+    if (signal?.aborted) abortUpstream();
     try {
-      const response = await this.fetchFollowingRedirects(this.feedUrl, controller.signal);
-      const body = await response.text();
-      if (Buffer.byteLength(body, "utf8") > MAX_FEED_BYTES) throw new Error("Feed too large");
-      const manifest = parseAssetManifest(JSON.parse(stripByteOrderMark(body)));
-      if (!this.discoverReleaseAssets) return manifest;
-
-      const releaseResponse = await this.fetchFollowingRedirects(
-        this.releaseApiUrl,
-        controller.signal,
-        RELEASE_API_HOSTS,
-      );
-      const releaseBody = await releaseResponse.text();
-      if (Buffer.byteLength(releaseBody, "utf8") > MAX_RELEASE_METADATA_BYTES) {
-        throw manifestError("metadonnees de release GitHub trop volumineuses");
-      }
-      return mergeGitHubReleaseAssets(
-        manifest,
-        JSON.parse(stripByteOrderMark(releaseBody)),
-      );
+      // Independent URLs; both requests share the same launch budget. Attach
+      // handlers to both immediately, including when one fails before the other.
+      const [manifest, release] = await Promise.all([
+        (async () => {
+          const response = await this.fetchFollowingRedirects(this.feedUrl, controller.signal);
+          const body = await response.text();
+          if (Buffer.byteLength(body, "utf8") > MAX_FEED_BYTES) throw new Error("Feed too large");
+          return parseAssetManifest(JSON.parse(stripByteOrderMark(body)));
+        })(),
+        this.discoverReleaseAssets ? (async (): Promise<unknown> => {
+          const response = await this.fetchFollowingRedirects(this.releaseApiUrl, controller.signal, RELEASE_API_HOSTS);
+          const body = await response.text();
+          if (Buffer.byteLength(body, "utf8") > MAX_RELEASE_METADATA_BYTES) {
+            throw manifestError("metadonnees de release GitHub trop volumineuses");
+          }
+          return JSON.parse(stripByteOrderMark(body)) as unknown;
+        })() : Promise.resolve(null),
+      ]);
+      return this.discoverReleaseAssets ? mergeGitHubReleaseAssets(manifest, release) : manifest;
+    } catch (error) {
+      controller.abort();
+      throw error;
     } finally {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abortUpstream);
@@ -761,8 +765,7 @@ export class AssetSyncService {
       const staging = join(dirname(target), `.rotk-staging-${randomUUID()}`);
       assertSafeGeneratedStagingPath(staging, target);
       try {
-        await extractZipEntry(cachePath, entry, staging);
-        const stagedHash = await sha256File(staging);
+        const stagedHash = await extractZipEntry(cachePath, entry, staging);
         await this.backupOriginal(root, relativePath, target, ownedFiles);
         await rename(staging, target);
         installedFiles.push({ path: relativePath, sha256: stagedHash, size: entry.uncompressedSize });

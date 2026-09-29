@@ -1,3 +1,9 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+static DWORD WINAPI own_window(HWND window, LPDWORD process) {
+    (void)window; *process = GetCurrentProcessId(); return GetCurrentThreadId();
+}
+#define GetWindowThreadProcessId own_window
 #define DirectInput8Create RotkTestDirectInput8Create
 #define DllCanUnloadNow RotkTestDllCanUnloadNow
 #define DllGetClassObject RotkTestDllGetClassObject
@@ -9,7 +15,7 @@
 #undef NDEBUG
 #include <assert.h>
 int main(void) {
-    BYTE *image = VirtualAlloc(NULL, 0x800000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    BYTE *image = VirtualAlloc(NULL, 0x4780000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     BYTE actor[0x1100] = {0}, vt[0x500] = {0}; DWORD old;
     const BYTE setter[] = {0x89,0x91,0xa0,0x09,0,0,0xc3};
     assert(image); stance_base=image;
@@ -33,6 +39,44 @@ int main(void) {
     assert(!stance_action_pressed(action+0x18)); action[0x130]=1;
     assert(stance_action_pressed(action+0x18)); assert(!stance_action(manager,"ROTKConsole"));
     *(uintptr_t *)(context+0x88)=15; assert(!stance_action(manager,"ToggleWeaponStance"));
+    BYTE infantry[0xc0]={0}, fire[0x190]={0}, aim[0x190]={0}; uintptr_t inputs[16]={0};
+    *(uintptr_t *)(manager+0x2d8+(stance_hash("Infantry")&1023)*8)=(uintptr_t)infantry;
+    *(uintptr_t *)(infantry+8)=(uintptr_t)"Infantry"; *(uint32_t *)(infantry+0x10)=8;
+    *(uintptr_t *)(infantry+0x80)=(uintptr_t)inputs; *(uintptr_t *)(infantry+0x88)=16;
+    BYTE *nodes[]={fire,aim}; const char *names[]={"Fire","SecondaryFire"};
+    for (unsigned i=0;i<2;++i) {
+        BYTE *entry=nodes[i]; unsigned bucket=stance_hash(names[i])&15;
+        *(uintptr_t *)(entry+8)=(uintptr_t)names[i]; *(uint32_t *)(entry+0x10)=(uint32_t)strlen(names[i]);
+        *(uintptr_t *)(entry+0x188)=inputs[bucket]; inputs[bucket]=(uintptr_t)entry;
+        assert(stance_context_action(manager,"Infantry",names[i])==entry+0x18);
+        assert(!stance_action_pressed(entry+0x18)); entry[0x130]=1;
+        assert(stance_action_pressed(stance_context_action(manager,"Infantry",names[i])));
+        assert(!stance_context_action(manager,"GroundVehicle",names[i]));
+        entry[0x130]=0;
+    }
+    assert(!stance_context_action(NULL,"Infantry","Fire"));
+    /* Exercise the real actor hook with logical actions, not physical buttons. */
+    static BYTE game[0x384e0], ui[0x350];
+    const BYTE no_focus[]={0x31,0xc0,0xc3};
+    memcpy(image+0x1c138e0,no_focus,sizeof(no_focus));
+    assert(VirtualProtect(image+0x1c138e0,sizeof(no_focus),PAGE_EXECUTE_READ,&old));
+    assert(FlushInstructionCache(GetCurrentProcess(),image+0x1c138e0,sizeof(no_focus)));
+    *(uintptr_t *)(image+0x476dc08)=(uintptr_t)game;
+    *(uintptr_t *)(game+0x384d8)=(uintptr_t)ui;
+    *(uintptr_t *)(game+0x382c8)=(uintptr_t)manager;
+    *(uintptr_t *)actor=(uintptr_t)(image+0x387fdb0);
+    *(uintptr_t *)(image+0x387fdb0+0x4d8)=(uintptr_t)(image+0x7a2de);
+    *(uintptr_t *)(context+0x88)=16; action[0x130]=0;
+    stance_enabled=TRUE; stance_last_actor=actor;
+    for (unsigned i=0;i<2;++i) {
+        stance_initialized=TRUE; *(int *)(actor+0x9a0)=0;
+        nodes[i][0x130]=1; stance_idle(actor);
+        assert(stance_u32(actor+0x9a0)==1);
+        nodes[i][0x130]=0;
+    }
+    *(int *)(actor+0x9a0)=0; stance_idle(actor);
+    assert(stance_u32(actor+0x9a0)==0);
+    puts("PASS real stance hook raises for remapped Infantry Fire/SecondaryFire only");
     VirtualFree(image,0,MEM_RELEASE);
     puts("PASS: native virtual setter thunk, foreign target refusal, input registry, pressed bit and corrupt table refusal.");
     return 0;

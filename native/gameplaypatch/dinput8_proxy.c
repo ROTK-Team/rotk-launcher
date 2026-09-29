@@ -640,6 +640,7 @@ static BOOL install_patch_pair(BYTE *image_base) {
 }
 
 #include "weapon_stance.h"
+#include "respawn_address.h"
 
 static DWORD WINAPI watchdog_worker(LPVOID parameter) {
     (void)parameter;
@@ -700,6 +701,12 @@ static DWORD WINAPI patch_worker(LPVOID parameter) {
         patch_log(
             "ROTK shotgun sprint: marker removed before install; skipped.\n");
         return 0U;
+    }
+    {
+        int repair = respawn_address_install(image_base);
+        patch_log(repair == 1 ? "ROTK CZ respawn: continuation address repaired.\n" :
+                  repair == 0 ? "ROTK CZ respawn: unsupported continuation; skipped.\n" :
+                                "ROTK CZ respawn: memory protection failure.\n");
     }
     if (install_patch_pair(image_base)) {
         patch_log(

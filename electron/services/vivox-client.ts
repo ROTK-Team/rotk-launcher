@@ -9,7 +9,7 @@ export const VIVOX_STOCK_V4_SHA256 =
 export const VIVOX_STOCK_V5_SHA256 =
   "33a7f704eda23dda9ccbd9eba1fda2f0589211e9c61ec9d1f9c797acc624ea44";
 export const VIVOX_PROXY_SHA256 =
-  "199f0d288f5bec010c5cf20802eb1dc162d27a05b57699268666e93575fec6dd";
+  "8ab1f2379c61b81391492edb84875610ffbe4d3a8d97a180c73355d989ac27a2";
 export const CROUCH_PARITY_MARKER_NAME = "rotk-crouch-parity.ini";
 
 const CROUCH_CLIENT_BUILD_ID = "h1z1-1.0.326.439939";
@@ -22,7 +22,7 @@ if (!CROUCH_CLIENT_BUILD) {
 
 export const CROUCH_PARITY_MARKER_CONTENTS = [
   "mode=patch-v2",
-  "animation=v12-ads-safe-cache256-lru2s-pose-only-js-sine-idle400-200-move250",
+  "animation=v13-perf1-ads-safe-cache256-hints-quiet-pose-only-interruptible-sine-idle400-200-move250",
   "cameraScalePitch=disabled",
   `h1z1Sha256=${CROUCH_CLIENT_BUILD.executableSha256.toUpperCase()}`,
   `proxySha256=${VIVOX_PROXY_SHA256.toUpperCase()}`,
@@ -148,7 +148,7 @@ async function deployVivoxCompatibilityWithPolicy(
   }
 
   const activeHash = await fileHash(activePath);
-  const backupHash = await fileHash(backupPath);
+  let backupHash = await fileHash(backupPath);
 
   if (backupHash !== policy.stockV4Sha256) {
     const legacyBackupHash = await fileHash(legacyBackupPath);
@@ -159,9 +159,10 @@ async function deployVivoxCompatibilityWithPolicy(
     } else {
       throw new Error("La sauvegarde du SDK Vivox historique est invalide.");
     }
+    backupHash = await fileHash(backupPath);
   }
 
-  if (await fileHash(backupPath) !== policy.stockV4Sha256) {
+  if (backupHash !== policy.stockV4Sha256) {
     throw new Error("La sauvegarde du SDK Vivox historique est invalide.");
   }
 
@@ -174,19 +175,21 @@ async function deployVivoxCompatibilityWithPolicy(
   }
 
   // Repair an absent, stale, or corrupt Vivox 5 runtime from the validated copy.
-  if (await fileHash(v5Path) !== policy.stockV5Sha256) {
+  let runtimeHash = await fileHash(v5Path);
+  if (runtimeHash !== policy.stockV5Sha256) {
     await atomicCopy(bundledRuntimePath, v5Path);
+    runtimeHash = await fileHash(v5Path);
   }
-  if (await fileHash(v5Path) !== policy.stockV5Sha256) {
+  if (runtimeHash !== policy.stockV5Sha256) {
     throw new Error("La version Vivox 5 attendue est absente du client H1Z1.");
   }
 
   // Avoid rewriting the proxy on every launch, but always verify the final state.
   if (activeHash !== policy.proxySha256) {
     await atomicCopy(bundledProxyPath, activePath);
-  }
-  if (await fileHash(activePath) !== policy.proxySha256) {
-    throw new Error("Le proxy vocal ROTK n'a pas \u00e9t\u00e9 copi\u00e9 correctement.");
+    if (await fileHash(activePath) !== policy.proxySha256) {
+      throw new Error("Le proxy vocal ROTK n'a pas \u00e9t\u00e9 copi\u00e9 correctement.");
+    }
   }
 
   // This marker is the native hook's explicit opt-in. There is no user-facing
@@ -205,6 +208,32 @@ async function deployVivoxCompatibilityWithPolicy(
       "Le patch crouch ROTK obligatoire n'a pas \u00e9t\u00e9 activ\u00e9 correctement.",
     );
   }
+}
+
+/** Re-read installed bytes before spawn; never repair after attestation.
+ * Bundle validation/migration belongs to the earlier deployment pass. No
+ * persistent digest cache: a same-size edit between the passes must fail. */
+async function assertVivoxCompatibilityWithPolicy(
+  root: string,
+  policy: VivoxDeploymentPolicy,
+): Promise<void> {
+  await assertSupportedH1Z1(root, policy);
+  if (await fileHash(join(root, "vivoxsdk_x64.dll")) !== policy.proxySha256) {
+    throw new Error("Le proxy vocal ROTK n'a pas \u00e9t\u00e9 copi\u00e9 correctement.");
+  }
+  if (await fileHash(join(root, "vivoxsdk_x64_v5.dll")) !== policy.stockV5Sha256) {
+    throw new Error("La version Vivox 5 attendue est absente du client H1Z1.");
+  }
+  if (await fileHash(join(root, "vivoxsdk_x64.original.dll")) !== policy.stockV4Sha256) {
+    throw new Error("La sauvegarde du SDK Vivox historique est invalide.");
+  }
+  if (await readFile(join(root, CROUCH_PARITY_MARKER_NAME), "ascii").catch(() => "") !== policy.crouchMarkerContents) {
+    throw new Error("Le patch crouch ROTK obligatoire n'a pas \u00e9t\u00e9 activ\u00e9 correctement.");
+  }
+}
+
+export async function assertVivoxCompatibility(root: string): Promise<void> {
+  await assertVivoxCompatibilityWithPolicy(root, DEFAULT_POLICY);
 }
 
 /**
@@ -226,5 +255,6 @@ export async function deployVivoxCompatibility(
 
 export const vivoxClientInternals = {
   deployVivoxCompatibilityWithPolicy,
+  assertVivoxCompatibilityWithPolicy,
   sha256,
 };

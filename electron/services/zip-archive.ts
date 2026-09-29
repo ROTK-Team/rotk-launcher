@@ -1,4 +1,5 @@
 import { createReadStream, createWriteStream } from "node:fs";
+import { createHash } from "node:crypto";
 import { mkdir, open, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -189,7 +190,7 @@ export async function extractZipEntry(
   filePath: string,
   entry: ZipFileEntry,
   targetPath: string,
-): Promise<void> {
+): Promise<string> {
   if (entry.directory) throw invalid("extraction d’un dossier");
 
   const handle = await open(filePath, "r");
@@ -213,9 +214,10 @@ export async function extractZipEntry(
   if (entry.compressedSize === 0) {
     if (entry.uncompressedSize !== 0) throw invalid(`entrée plus petite qu’annoncé (${entry.name.slice(0, 80)})`);
     await pipeline([], createWriteStream(targetPath, { flags: "wx" }));
-    return;
+    return createHash("sha256").digest("hex");
   }
   let producedBytes = 0;
+  const hash = createHash("sha256");
   const sizeGuard = new Transform({
     transform(chunk: Buffer, _encoding, callback) {
       producedBytes += chunk.byteLength;
@@ -223,6 +225,7 @@ export async function extractZipEntry(
         callback(invalid(`entrée plus grande qu’annoncé (${entry.name.slice(0, 80)})`));
         return;
       }
+      hash.update(chunk);
       callback(null, chunk);
     },
   });
@@ -244,6 +247,9 @@ export async function extractZipEntry(
   if (!written.isFile() || written.size !== entry.uncompressedSize) {
     throw invalid(`écriture incomplète (${entry.name.slice(0, 80)})`);
   }
+  // Digest of the successfully written stream, not an independent disk read.
+  // Verify files and launch attestation retain their own integrity checks.
+  return hash.digest("hex");
 }
 
 export const zipArchiveInternals = {

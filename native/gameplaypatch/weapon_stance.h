@@ -1,4 +1,4 @@
-/* PS3 stance v16 port. Runs on the game's actor thread, never a polling thread.
+/* PS3 stance v17. Runs on the game's actor thread, never a polling thread.
  * Owns only idle RVA 1659000 (15 bytes) and console call F4341D (5 bytes).
  * Crouch/Vivox/Steam and the existing CanSprint v3 edits are independent.
  * Removing the marker disables behavior; restart removes every native hook.
@@ -35,12 +35,12 @@ static BOOL stance_name(BYTE *node, const char *name) {
     return length < sizeof(text) && stance_u32(node + 0x10) == length &&
         stance_read((void *)stance_ptr(node + 8), text, length) && memcmp(text, name, length) == 0;
 }
-static BYTE *stance_action(BYTE *manager, const char *name) {
+static BYTE *stance_context_action(BYTE *manager, const char *context_name, const char *name) {
     BYTE *context; unsigned int i, j; uintptr_t count; BYTE *table, *action;
     if (!manager) return NULL;
-    context = (BYTE *)stance_ptr(manager + 0x2d8 + (stance_hash("Generic") & 1023U) * 8U);
+    context = (BYTE *)stance_ptr(manager + 0x2d8 + (stance_hash(context_name) & 1023U) * 8U);
     for (i = 0; i < 128 && context; ++i, context = (BYTE *)stance_ptr(context + 0xb8)) {
-        if (!stance_name(context, "Generic")) continue;
+        if (!stance_name(context, context_name)) continue;
         count = stance_ptr(context + 0x88);
         if (!count || count > 65536 || (count & (count - 1))) return NULL;
         table = (BYTE *)stance_ptr(context + 0x80);
@@ -51,6 +51,9 @@ static BYTE *stance_action(BYTE *manager, const char *name) {
         return NULL;
     }
     return NULL;
+}
+static BYTE *stance_action(BYTE *manager, const char *name) {
+    return stance_context_action(manager, "Generic", name);
 }
 static BOOL stance_action_pressed(BYTE *action) {
     BYTE flags = 0;
@@ -113,8 +116,12 @@ static void stance_idle(BYTE *actor) {
         stance_pressed = FALSE; return;
     }
     manager = (BYTE *)stance_ptr(game + 0x382c8); action = stance_action(manager, "ToggleWeaponStance");
-    pressed = stance_action_pressed(action); fire = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-    aim = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0; raw = (int)stance_u32(actor + 0x9a0);
+    pressed = stance_action_pressed(action);
+    /* Use the engine's Infantry actions, including remaps/gamepad triggers.
+     * A missing context must not fall back to unrelated physical mouse keys. */
+    fire = stance_action_pressed(stance_context_action(manager, "Infantry", "Fire"));
+    aim = stance_action_pressed(stance_context_action(manager, "Infantry", "SecondaryFire"));
+    raw = (int)stance_u32(actor + 0x9a0);
     if (!stance_initialized && (raw == 1 || raw == 2)) stance_initialized = TRUE;
     if ((fire || aim) && (raw == 0 || raw == -1)) {
         stance_set(actor, 1); stance_initialized = TRUE;
@@ -207,5 +214,5 @@ static void stance_install(BYTE *base) {
         patch_log("ROTK stance: guarded installation refused; disabled.\n"); return;
     }
     InterlockedExchange(&stance_enabled, 1);
-    patch_log("ROTK stance: native v16 idle and console installed.\n");
+    patch_log("ROTK stance: native v17 idle and console installed.\n");
 }

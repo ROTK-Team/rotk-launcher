@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CROUCH_PARITY_MARKER_CONTENTS,
   VIVOX_PROXY_SHA256,
@@ -10,6 +10,14 @@ import {
 } from "../electron/services/vivox-client.js";
 
 const temporaryDirectories: string[] = [];
+const reads = vi.hoisted(() => [] as string[]);
+vi.mock("node:fs", async (original) => {
+  const fs = await original<typeof import("node:fs")>();
+  return { ...fs, createReadStream: (...args: Parameters<typeof fs.createReadStream>) => {
+    reads.push(String(args[0]));
+    return fs.createReadStream(...args);
+  } };
+});
 
 function hash(contents: string): string {
   return createHash("sha256").update(contents).digest("hex");
@@ -78,6 +86,33 @@ afterEach(async () => {
 });
 
 describe("Vivox client deployment", () => {
+  it("hashes each healthy installed file once per pass and does not revalidate bundles in the final check", async () => {
+    const fixture = await createFixture();
+    await writeFile(join(fixture.root, "vivoxsdk_x64.dll"), contents.v4);
+    await deploy(fixture);
+    reads.length = 0;
+    await deploy(fixture);
+    for (const name of ["H1Z1.exe", "vivoxsdk_x64.dll", "vivoxsdk_x64_v5.dll", "vivoxsdk_x64.original.dll"]) {
+      expect(reads.filter(path => path === join(fixture.root, name))).toHaveLength(1);
+    }
+    reads.length = 0;
+    await vivoxClientInternals.assertVivoxCompatibilityWithPolicy(fixture.root, policy);
+    expect(reads).toHaveLength(4);
+    expect(reads).not.toContain(fixture.proxy);
+    expect(reads).not.toContain(fixture.runtime);
+  });
+
+  it.each(["H1Z1.exe", "vivoxsdk_x64.dll", "vivoxsdk_x64_v5.dll", "vivoxsdk_x64.original.dll", "rotk-crouch-parity.ini"])(
+    "refuses same-size drift of %s after deployment, without repairing it", async name => {
+      const fixture = await createFixture();
+      await writeFile(join(fixture.root, "vivoxsdk_x64.dll"), contents.v4);
+      await deploy(fixture);
+      const path = join(fixture.root, name);
+      const changed = Buffer.from(await readFile(path)); changed[0] ^= 1;
+      await writeFile(path, changed);
+      await expect(vivoxClientInternals.assertVivoxCompatibilityWithPolicy(fixture.root, policy)).rejects.toThrow();
+      expect(await readFile(path)).toEqual(changed);
+    });
   it("ships the ADS-safe mandatory production marker", () => {
     expect(CROUCH_PARITY_MARKER_CONTENTS).toContain("mode=patch-v2\n");
     expect(CROUCH_PARITY_MARKER_CONTENTS).toContain("cameraScalePitch=disabled\n");

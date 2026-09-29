@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -49,7 +50,9 @@ describe("ROTK asset pack zip reader", () => {
     ]);
 
     for (const entry of entries.filter((candidate) => !candidate.directory)) {
-      await extractZipEntry(archivePath, entry, join(workDirectory, "out", ...entry.name.split("/")));
+      const target = join(workDirectory, "out", ...entry.name.split("/"));
+      const digest = await extractZipEntry(archivePath, entry, target);
+      expect(digest).toBe(createHash("sha256").update(await readFile(target)).digest("hex"));
     }
     expect(await readFile(join(workDirectory, "out", "Resources", "texture.dat"), "utf8")).toBe("stored payload");
     expect(await readFile(join(workDirectory, "out", "Resources", "ui", "layout.xml"), "utf8")).toBe("<layout>déflaté</layout>");
@@ -70,6 +73,15 @@ describe("ROTK asset pack zip reader", () => {
       await writeFile(archivePath, buildZip([{ name, data: "boom" }]));
       await expect(readZipDirectory(archivePath, LIMITS)).rejects.toThrow("Archive d’assets invalide");
     }
+  });
+
+  it("hashes a multi-chunk deflate stream and rejects a failed output instead of returning a digest", async () => {
+    const payload = Buffer.alloc(900_000, 0x61);
+    const archive = await writeArchive([{ name: "large.dat", data: payload, method: 8 }]);
+    const [entry] = await readZipDirectory(archive, LIMITS);
+    const target = join(workDirectory, "large.out");
+    expect(await extractZipEntry(archive, entry, target)).toBe(createHash("sha256").update(payload).digest("hex"));
+    await expect(extractZipEntry(archive, entry, target)).rejects.toThrow();
   });
 
   it("rejects encrypted archives and unknown compression methods", async () => {

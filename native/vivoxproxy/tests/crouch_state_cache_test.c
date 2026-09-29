@@ -36,6 +36,7 @@ static SRWLOCK g_test_cache_lock = SRWLOCK_INIT;
 static crouch_transition_state g_thread_states[CROUCH_STATE_CAPACITY];
 static volatile LONG g_thread_failures;
 static volatile LONG64 g_test_call_sequence;
+static size_t g_test_hints[CROUCH_STATE_CAPACITY];
 static HANDLE g_thread_start_event;
 
 static void *fake_network(uintptr_t value) {
@@ -50,8 +51,10 @@ static crouch_transition_state *acquire_with_sequence(
     int64_t now,
     int64_t call_sequence,
     crouch_state_cache_lookup *lookup) {
-    return crouch_state_cache_acquire(
+    return crouch_state_cache_acquire_hint(
         states,
+        CROUCH_STATE_CAPACITY,
+        g_test_hints,
         CROUCH_STATE_CAPACITY,
         fake_network(network_id),
         generation,
@@ -441,7 +444,50 @@ static void test_serialized_thread_stress(void) {
     assert(occupied_count(g_thread_states) == 1U);
 }
 
+static void test_hints_and_measure(void) {
+    static crouch_transition_state reference[CROUCH_STATE_CAPACITY], hinted[CROUCH_STATE_CAPACITY];
+    size_t hints[CROUCH_STATE_CAPACITY] = {0};
+    uint32_t random = 17;
+    for (int64_t n = 1; n <= 10000; ++n) {
+        random = random * 1664525U + 1013904223U;
+        /* Includes deliberate hint collisions, pressure, expiry and generations. */
+        void *network = fake_network((random % 300U + 1U) * 256U);
+        uintptr_t generation = 1U + (random >> 24U) % 2U;
+        crouch_state_cache_lookup a, b;
+        int64_t sequence = n % 13 == 0 ? 1 : n;
+        crouch_transition_state *left = crouch_state_cache_acquire(reference, CROUCH_STATE_CAPACITY,
+            network, generation, 1, n, 2000, sequence, &a);
+        crouch_transition_state *right = crouch_state_cache_acquire_hint(hinted, CROUCH_STATE_CAPACITY,
+            hints, CROUCH_STATE_CAPACITY, network, generation, 1, n, 2000, sequence, &b);
+        assert((left == NULL) == (right == NULL));
+        assert(!left || left-reference == right-hinted);
+        assert(a.event == b.event && a.previous_network == b.previous_network);
+        assert(a.previous_generation == b.previous_generation && a.previous_control_generation == b.previous_control_generation);
+        assert(memcmp(reference, hinted, sizeof(reference)) == 0);
+    }
+    LARGE_INTEGER frequency, begin, end;
+    QueryPerformanceFrequency(&frequency);
+    for (int run=0; run<3; ++run) {
+        double times[2];
+        for (int fast=0; fast<2; ++fast) {
+            memset(reference, 0, sizeof(reference)); memset(hints, 0, sizeof(hints));
+            QueryPerformanceCounter(&begin);
+            for (int64_t n=1; n<=500000; ++n) {
+                void *network=fake_network((uintptr_t)(n%200+1));
+                crouch_transition_state *entry = fast
+                    ? crouch_state_cache_acquire_hint(reference, CROUCH_STATE_CAPACITY, hints, CROUCH_STATE_CAPACITY, network,1,1,n,2000,n,NULL)
+                    : crouch_state_cache_acquire(reference,CROUCH_STATE_CAPACITY,network,1,1,n,2000,n,NULL);
+                assert(entry != NULL);
+            }
+            QueryPerformanceCounter(&end);
+            times[fast] = (double)(end.QuadPart-begin.QuadPart)*1000/frequency.QuadPart;
+        }
+        printf("CACHE benchmark 200 networks / 500000 calls: scan %.3f ms, hints %.3f ms\n",times[0],times[1]);
+    }
+}
+
 int main(void) {
+    test_hints_and_measure();
     test_full_solo_handoff_has_headroom();
     test_old_hash_collisions_preserve_parallel_transitions();
     test_ttl_boundary();

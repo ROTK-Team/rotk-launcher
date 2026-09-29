@@ -7,11 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GameLauncher, type GameLaunchDiagnostics, type LaunchRequest } from '../electron/services/game-launcher.js';
 import { RUNTIME_CONFIGS } from '../electron/services/runtime-config.js';
 
-const mocks = vi.hoisted(() => ({ spawn: vi.fn(), gatewayClose: vi.fn(async () => undefined) }));
+const mocks = vi.hoisted(() => ({ spawn: vi.fn(), gatewayClose: vi.fn(async () => undefined),
+  deployVoice: vi.fn(async () => undefined), checkVoice: vi.fn(async () => undefined) }));
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
 vi.mock('../electron/services/path-policy.js', () => ({ validateInstallDestination: async (root: string) => root }));
 vi.mock('../electron/services/installer.js', () => ({ readInstallationMarker: async () => ({ schemaVersion: 1, installId: 'fixture' }) }));
-vi.mock('../electron/services/vivox-client.js', () => ({ deployVivoxCompatibility: async () => undefined }));
+vi.mock('../electron/services/vivox-client.js', () => ({ deployVivoxCompatibility: mocks.deployVoice,
+  assertVivoxCompatibility: mocks.checkVoice }));
 vi.mock('../electron/services/gameplay-patch.js', () => ({
   assertGameplayPatchState: async () => undefined,
   applyGameplayPatchMode: async () => "up-to-date",
@@ -37,6 +39,8 @@ class GameChild extends EventEmitter {
 const roots: string[] = [];
 const children: GameChild[] = [];
 beforeEach(() => {
+  mocks.deployVoice.mockClear();
+  mocks.checkVoice.mockReset().mockResolvedValue(undefined);
   mocks.gatewayClose.mockClear();
   mocks.spawn.mockReset().mockImplementation(() => { const child = new GameChild(); children.push(child); return child; });
 });
@@ -67,6 +71,19 @@ async function fixture() {
 }
 
 describe('game lifecycle remains independent of diagnostics', () => {
+  it('repairs voice once before attestation and refuses drift before spawn', async () => {
+    const f = await fixture();
+    f.request.attest = vi.fn(async () => {
+      expect(mocks.deployVoice).toHaveBeenCalledOnce();
+      expect(mocks.checkVoice).not.toHaveBeenCalled();
+      return { status: 'not-applicable', clientPatchMode: 'clean' } as const;
+    });
+    mocks.checkVoice.mockRejectedValueOnce(new Error('installed voice changed'));
+    await expect(f.launcher.launch(f.request)).rejects.toThrow('installed voice changed');
+    expect(mocks.deployVoice).toHaveBeenCalledOnce();
+    expect(mocks.checkVoice).toHaveBeenCalledOnce();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
   it('awaits prepared session evidence before creating the game process', async () => {
     const f = await fixture(), prepared = deferred();
     const clientRoot = f.request.config.installation!.root;

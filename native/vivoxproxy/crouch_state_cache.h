@@ -23,6 +23,8 @@ typedef struct crouch_transition_state {
     float start_output;
     float target;
     double duration_seconds;
+    double phase;
+    int64_t evaluated_counter;
     int64_t start_counter;
     int64_t transition_end_counter;
     int64_t last_move_counter;
@@ -212,6 +214,25 @@ static crouch_transition_state *crouch_state_cache_acquire(
         now_counter,
         call_sequence);
     return selected;
+}
+
+/* Hint only: the state identity is still checked by acquire under the same
+ * lock. Collisions and evictions fall back to the existing bounded scan. */
+static crouch_transition_state *crouch_state_cache_acquire_hint(
+    crouch_transition_state *states, size_t capacity, size_t *hints, size_t hint_count,
+    void *network, uintptr_t generation, uintptr_t control_generation,
+    int64_t now, int64_t stale, int64_t sequence, crouch_state_cache_lookup *lookup) {
+    uintptr_t key = (uintptr_t)network;
+    size_t bucket = ((key >> 4U) ^ (key >> 16U)) % hint_count;
+    size_t index = hints[bucket];
+    if (index < capacity && states[index].network == network && network != NULL) {
+        return crouch_state_cache_acquire(states + index, 1U, network,
+            generation, control_generation, now, stale, sequence, lookup);
+    }
+    crouch_transition_state *state = crouch_state_cache_acquire(states, capacity,
+        network, generation, control_generation, now, stale, sequence, lookup);
+    if (state != NULL) hints[bucket] = (size_t)(state - states);
+    return state;
 }
 
 #endif

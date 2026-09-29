@@ -6,19 +6,30 @@ import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
 export const GAMEPLAY_PATCH_FILE_NAME = "dinput8.dll";
 export const GAMEPLAY_PATCH_SHA256 =
-  "6ca1a0b1c28f8d11482a416e9f9d8b6330db253a78ed79b9301ec31198ce7845";
-export const GAMEPLAY_PATCH_BYTES = 33_792;
+  "2c8c7d65f8410a2f05f58318978b44f08860c4f5647b5474a11bf70a0ebc0b3a";
+export const GAMEPLAY_PATCH_BYTES = 34_304;
 
 /**
  * Marker next to H1Z1.exe. The proxy enables the sprint byte pair and guarded
  * stance hooks only with this exact mode and patch list. Removing it disables
  * stance behavior and restores the sprint bytes within two seconds; dormant
- * trampolines remain until the game exits. Full removal requires a restart.
+ * trampolines and the CZ continuation-address repair remain until the game
+ * exits. Full removal requires a restart.
  */
 export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
 
 /** Exact retired ROTK artifacts an automatic migration may replace. */
 export const RETIRED_GAMEPLAY_PATCHES = Object.freeze([
+  Object.freeze({
+    // Local v17 before the CZ continuation-address repair.
+    sha256: "f27379c09f04db9abbeeaee56a0231fe7aeaa2e9570e670091c75a85871e67db",
+    bytes: 33_792,
+  }),
+  Object.freeze({
+    // v16 physical mouse polling -> v17 configured Infantry actions.
+    sha256: "6ca1a0b1c28f8d11482a416e9f9d8b6330db253a78ed79b9301ec31198ce7845",
+    bytes: 33_792,
+  }),
   Object.freeze({ sha256: "36fba2037b0c9b1829e7c7e8bbedbcf5a962f495de4e8c63880b785745dcac3a", bytes: 25_088 }),
   Object.freeze({
     // Launcher 1.4.3, retired in 1.4.4 after the crash reports.

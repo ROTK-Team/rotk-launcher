@@ -299,6 +299,10 @@ static WCHAR g_original_path[32768];
 static INIT_ONCE g_original_once = INIT_ONCE_STATIC_INIT;
 static INIT_ONCE g_config_once = INIT_ONCE_STATIC_INIT;
 static SRWLOCK g_voice_lock = SRWLOCK_INIT;
+/* Serialize grant/credential mutations without blocking vx_get_message's
+ * account/session bookkeeping for the duration of a network request. Neither
+ * lock crosses the original SDK call (which may call back into the proxy). */
+static SRWLOCK g_grant_lock = SRWLOCK_INIT;
 static vx_issue_request3_fn g_issue_request;
 static vx_get_message_fn g_get_message;
 static destroy_evt_fn g_destroy_evt;
@@ -2693,7 +2697,7 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
             "[rotk-vivoxproxy] issue: type=0x08 action=join");
     }
 
-    AcquireSRWLockExclusive(&g_voice_lock);
+    AcquireSRWLockExclusive(&g_grant_lock);
     SecureZeroMemory(&grant, sizeof(grant));
     if (!InitOnceExecuteOnce(
             &g_config_once,
@@ -2702,7 +2706,7 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
             NULL) ||
         !g_config.valid) {
         SecureZeroMemory(&grant, sizeof(grant));
-        ReleaseSRWLockExclusive(&g_voice_lock);
+        ReleaseSRWLockExclusive(&g_grant_lock);
         proxy_trace_once(
             TRACE_CONFIG_INVALID,
             "[rotk-vivoxproxy] intercept: local config invalid");
@@ -2713,13 +2717,14 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
     if (!copy_requested_channel(request, request_type, requested_channel) ||
         !fetch_grant(action, requested_channel, &grant)) {
         SecureZeroMemory(&grant, sizeof(grant));
-        ReleaseSRWLockExclusive(&g_voice_lock);
+        ReleaseSRWLockExclusive(&g_grant_lock);
         proxy_trace_once(
             TRACE_GRANT_FAILED,
             "[rotk-vivoxproxy] intercept: grant fetch failed");
         return issue_original_with_trace(
             request, request_count, TRUE);
     }
+    AcquireSRWLockExclusive(&g_voice_lock);
     if (request_type == REQUEST_LOGIN) {
         mutated = mutate_login(request, &grant);
     } else if (request_type == REQUEST_SESSION) {
@@ -2739,6 +2744,7 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
     }
     SecureZeroMemory(&grant, sizeof(grant));
     ReleaseSRWLockExclusive(&g_voice_lock);
+    ReleaseSRWLockExclusive(&g_grant_lock);
     proxy_trace_once(
         TRACE_GRANT_READY,
         "[rotk-vivoxproxy] intercept: grant ready");

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ASSET_RELEASE_API_URL,
   AssetSyncService,
@@ -77,6 +77,7 @@ describe("ROTK asset sync", () => {
   const temporaryDirectories: string[] = [];
 
   afterEach(async () => {
+    vi.useRealTimers();
     await Promise.all(temporaryDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true })));
   });
@@ -101,6 +102,90 @@ describe("ROTK asset sync", () => {
       discoverReleaseAssets: false,
     });
   }
+
+  it("starts both metadata requests before either responds and waits for both before installing", async () => {
+    const { userData, root } = await setup();
+    const requests = new Map<string, (response: Response) => void>();
+    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
+      fetchImpl: (async input => new Promise<Response>(resolve => requests.set(String(input), resolve))) as typeof fetch });
+    const pending = sync.sync(root);
+    await vi.waitFor(() => expect(requests.size).toBe(2));
+    requests.get(FEED_URL)!(new Response(JSON.stringify(manifest([]))));
+    expect(await sync.readState()).toBeNull();
+    requests.get(ASSET_RELEASE_API_URL)!(new Response(JSON.stringify(release([]))));
+    expect((await pending).status).toBe("updated");
+  });
+
+  it.each([FEED_URL, ASSET_RELEASE_API_URL])("aborts the other metadata read when %s is invalid", async failedUrl => {
+    const { userData, root } = await setup();
+    let cancelled = false;
+    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
+      fetchImpl: (async (input, init) => {
+        if (String(input) === failedUrl) return new Response("invalid-json");
+        return new Promise<Response>((_resolve, reject) => {
+          init!.signal!.addEventListener("abort", () => { cancelled = true; reject(new Error("cancelled peer")); }, { once: true });
+        });
+      }) as typeof fetch });
+    await expect(sync.sync(root)).rejects.toThrow();
+    expect(cancelled).toBe(true);
+    expect(await sync.readState()).toBeNull();
+  });
+
+  it("propagates cancellation to both metadata reads", async () => {
+    const { userData, root } = await setup();
+    const controller = new AbortController();
+    let started = 0, cancelled = 0;
+    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
+      fetchImpl: (async (_input, init) => new Promise<Response>((_resolve, reject) => {
+        started++;
+        init!.signal!.addEventListener("abort", () => { cancelled++; reject(new Error("cancelled")); }, { once: true });
+      })) as typeof fetch });
+    const pending = expect(sync.sync(root, { signal: controller.signal })).rejects.toThrow();
+    await vi.waitFor(() => expect(started).toBe(2));
+    controller.abort();
+    await pending;
+    expect(cancelled).toBe(2);
+  });
+
+  it.each([false, true])("uses one timeout budget and respects an already-aborted signal (preaborted=%s)", async preaborted => {
+    const { userData, root } = await setup();
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    if (preaborted) controller.abort();
+    let markStarted!: () => void;
+    const bothStarted = new Promise<void>(resolve => { markStarted = resolve; });
+    let started = 0, cancelled = 0;
+    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
+      fetchImpl: (async (_input, init) => new Promise<Response>((_resolve, reject) => {
+        if (++started === 2) markStarted();
+        const abort = () => { cancelled++; reject(new Error("cancelled")); };
+        if (init!.signal!.aborted) abort();
+        else init!.signal!.addEventListener("abort", abort, { once: true });
+      })) as typeof fetch });
+    const pending = expect(sync.sync(root, { signal: controller.signal })).rejects.toThrow();
+    await bothStarted;
+    if (!preaborted) {
+      await vi.advanceTimersByTimeAsync(9999);
+      expect(cancelled).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    await pending;
+    expect(cancelled).toBe(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("Verify files independently detects same-size ZIP content drift after streaming installation", async () => {
+    const { userData, root } = await setup();
+    const payload = buildZip([{ name: "test.dat", data: "original", method: 8 }]);
+    const entry = assetEntry("stream.zip", payload, { type: "zip", installPath: "." });
+    const sync = service(userData, { [FEED_URL]: () => new Response(JSON.stringify(manifest([entry]))),
+      [entry.url]: () => new Response(new Uint8Array(payload)) });
+    await sync.sync(root);
+    await writeFile(join(root, "test.dat"), "tampered");
+    expect((await sync.sync(root)).status).toBe("up-to-date");
+    expect((await sync.verify(root)).status).toBe("updated");
+    expect(await readFile(join(root, "test.dat"), "utf8")).toBe("original");
+  });
 
   describe("manifest validation", () => {
     const payload = Buffer.from("payload");

@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "6CA1A0B1C28F8D11482A416E9F9D8B6330DB253A78ED79B9301EC31198CE7845"
-$expectedBytes = 33792
+$expectedHash = "2C8C7D65F8410A2F05F58318978B44F08860C4F5647B5474A11BF70A0EBC0B3A"
+$expectedBytes = 34304
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
@@ -186,6 +186,17 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) { throw "Weapon stance test compilation failed." }
 & $stanceExe
 if ($LASTEXITCODE -ne 0) { throw "Weapon stance test failed." }
+
+$respawnExe = Join-Path $testRoot "respawn_address_test.exe"
+& $zig.Source @(
+    "cc", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $respawnExe, (Join-Path $root "tests\respawn_address_test.c"), "-luser32"
+)
+if ($LASTEXITCODE -ne 0) { throw "CZ respawn test compilation failed." }
+& $respawnExe --unpatched
+if ($LASTEXITCODE -ne -1073741819) { throw "CZ native access violation was not reproduced." }
+& $respawnExe
+if ($LASTEXITCODE -ne 0) { throw "CZ respawn repair test failed." }
 
 Write-Host "Shotgun sprint and weapon stance DirectInput proxy tests passed."
 Write-Host "  Size $actualBytes bytes"

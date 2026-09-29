@@ -95,7 +95,7 @@ jobs:
           }
 
           $gameplayHash = (Get-FileHash -LiteralPath $allowedGameplayDll -Algorithm SHA256).Hash
-          if ($gameplayHash -ne "6CA1A0B1C28F8D11482A416E9F9D8B6330DB253A78ED79B9301EC31198CE7845") {
+          if ($gameplayHash -ne "2C8C7D65F8410A2F05F58318978B44F08860C4F5647B5474A11BF70A0EBC0B3A") {
             throw "Unexpected shotgun sprint proxy SHA-256: $gameplayHash"
           }
           $gameplaySidecar = ((Get-Content -LiteralPath "$allowedGameplayDll.sha256" -Raw) -split "\s+")[0]
@@ -214,7 +214,7 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File native/vivoxproxy/build-v5-compat.ps1 -OutputPath $alternateProxy
           if ($LASTEXITCODE -ne 0) { throw "Second reference Vivox build failed." }
           $alternateHash = (Get-FileHash -LiteralPath $alternateProxy -Algorithm SHA256).Hash
-          if ($hash -ne $alternateHash -or $hash -ne "199F0D288F5BEC010C5CF20802EB1DC162D27A05B57699268666E93575FEC6DD") {
+          if ($hash -ne $alternateHash -or $hash -ne "8AB1F2379C61B81391492EDB84875610FFBE4D3A8D97A180C73355D989AC27A2") {
             throw "The reference Vivox source build changed: $hash / $alternateHash"
           }
           # Prove neither source build overwrote the release input or sidecar.
@@ -242,4 +242,5 @@ jobs:
             resources/patches/dinput8.dll
             resources/patches/dinput8.dll.sha256
             resources/patches/vivoxsdk_x64.dll
+            resources/patches/vivoxsdk_x64.dll.sha256
             resources/deathcomm/RotkDeathcomm.exe

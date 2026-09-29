@@ -19,7 +19,7 @@ import {
   assertGameplayPatchState,
   type GameplayPatchMode,
 } from "./gameplay-patch.js";
-import { deployVivoxCompatibility } from "./vivox-client.js";
+import { assertVivoxCompatibility, deployVivoxCompatibility } from "./vivox-client.js";
 import { prepareInterfaceInputProfile } from "./interface-input-profile.js";
 import { prepareWeaponStanceProfile, WEAPON_STANCE_ENABLED } from "./weapon-stance-profile.js";
 import { startDeathcommClient } from "./deathcomm-client.js";
@@ -180,11 +180,7 @@ async function prepareClient(
   // steering configuration and execution to a different tree.
   const activeShimPath = join(root, "steam_api64.dll");
   await copyFile(request.bundledShimPath, activeShimPath);
-  await deployVivoxCompatibility(
-    root,
-    request.bundledVivoxProxyPath,
-    request.bundledVivoxRuntimePath,
-  );
+  await assertVivoxCompatibility(root);
   // The attestation pass has already installed or removed the shotgun sprint
   // proxy for the mode the server directed; preparation only rechecks it so a
   // concurrent drift cannot ride into the process.
