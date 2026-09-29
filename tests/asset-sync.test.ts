@@ -388,6 +388,20 @@ describe("ROTK asset sync", () => {
     await expect(stat(join(userData, "asset-cache"))).rejects.toThrow();
   });
 
+  it("reuses packs from the old userData cache without downloading them", async () => {
+    const { userData, root } = await setup();
+    const payload = Buffer.from("cached sounds");
+    const entry = assetEntry("sounds.pack", payload);
+    await mkdir(join(userData, "asset-cache"), { recursive: true });
+    await writeFile(join(userData, "asset-cache", `${entry.sha256}.pack`), payload);
+    const calls: string[] = [];
+    await service(userData, { [FEED_URL]: () => new Response(JSON.stringify(manifest([entry]))) }, calls).sync(root);
+    expect(calls).toEqual([FEED_URL]);
+    await expect(readFile(join(root, "sounds.pack"), "utf8")).resolves.toBe("cached sounds");
+    await expect(stat(join(assetStorage(root), "asset-cache", `${entry.sha256}.pack`))).resolves.toBeTruthy();
+    await expect(stat(join(userData, "asset-cache"))).rejects.toThrow();
+  });
+
   it("retries a download after a server error", async () => {
     const { userData, root } = await setup();
     const payload = Buffer.from("custom sounds");

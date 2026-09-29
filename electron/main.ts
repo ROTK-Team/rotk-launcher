@@ -53,7 +53,7 @@ import {
   resolveBundledDeathcommPath,
 } from "./constants.js";
 import { ConfigStore } from "./services/config-store.js";
-import { adoptExistingClient, inspectDestination, installClient } from "./services/installer.js";
+import { adoptExistingClient, cleanupInstallLeftovers, inspectDestination, installClient } from "./services/installer.js";
 import {
   GameLauncher,
   validateInstalledClient,
@@ -1545,6 +1545,9 @@ async function initialize(): Promise<void> {
     }
   }
   startupLog.mark("installation-checked", `phase=${phase}`);
+  if (config.installation && phase === "ready") {
+    void cleanupInstallLeftovers(config.installation.root).catch(() => undefined);
+  }
   const quarantined = await findQuarantinedPatches();
   if (quarantined.length > 0) {
     startupLog.mark("bundled-patches-damaged", quarantined.join(" | "));

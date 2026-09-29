@@ -512,6 +512,25 @@ export async function installClient(request: InstallRequest): Promise<Installati
   return marker;
 }
 
+const LEFTOVER_FILE = /^\.rotk-staging-|\.rotk-part$|\.rotk-[0-9a-f-]{36}\.tmp$/i;
+
+/**
+ * Remove what interrupted runs left behind around an install: staging
+ * folders of launchers <= 2.0.23 next to it (up to 17 GB each) and
+ * temporary files in the folders the launcher writes to. Best-effort.
+ */
+export async function cleanupInstallLeftovers(root: string): Promise<void> {
+  await removeLegacyStagingDirectories(root);
+  for (const directory of [root, join(root, "Resources", "Assets")]) {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.isFile() && LEFTOVER_FILE.test(entry.name)) {
+        await rm(join(directory, entry.name), { force: true }).catch(() => undefined);
+      }
+    }
+  }
+}
+
 export const installerInternals = {
   enumerateSource,
   ensureDiskSpace,

@@ -545,6 +545,7 @@ export class AssetSyncService {
         : new Error("Le flux d’assets ROTK est indisponible. Vérifie ta connexion puis réessaie.");
     }
 
+    await this.adoptLegacyCache(manifest);
     const previousRecords = new Map((state?.assets ?? []).map((asset) => [asset.name, asset]));
     const ownedFiles = new Set(
       (state?.assets ?? []).flatMap((asset) =>
@@ -995,6 +996,21 @@ export class AssetSyncService {
       flag: "wx",
     });
     await retryFs(() => rename(temporaryPath, this.statePath));
+  }
+
+  /** Move still-current packs out of the old userData cache instead of downloading them again. */
+  private async adoptLegacyCache(manifest: AssetManifest): Promise<void> {
+    if (this.legacyCacheDirectory === this.cacheDirectory) return;
+    const entries = await readdir(this.legacyCacheDirectory).catch(() => [] as string[]);
+    if (entries.length === 0) return;
+    const keep = new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`));
+    await mkdir(this.cacheDirectory, { recursive: true });
+    for (const entry of entries) {
+      if (!keep.has(entry) || await exists(join(this.cacheDirectory, entry))) continue;
+      // Instant on the same drive; across drives (EXDEV) it is left to be
+      // removed and downloaded again when needed.
+      await rename(join(this.legacyCacheDirectory, entry), join(this.cacheDirectory, entry)).catch(() => undefined);
+    }
   }
 
   private async pruneCache(manifest: AssetManifest): Promise<void> {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  cleanupInstallLeftovers,
   inspectDestination,
   installClient,
   installerInternals,
@@ -77,6 +78,24 @@ describe("installer destination handling", () => {
 
     await installerInternals.removeLegacyStagingDirectories(destination);
     expect((await readdir(root)).sort()).toEqual(["Other"]);
+  });
+
+  it("cleans leftovers of interrupted runs around an install, and nothing else", async () => {
+    const root = await temporaryRoot();
+    const install = join(root, "ROTK");
+    const assets = join(install, "Resources", "Assets");
+    await mkdir(assets, { recursive: true });
+    await mkdir(join(root, ".rotk-staging-old", "Resources"), { recursive: true });
+    await writeFile(join(assets, ".rotk-staging-1a2b"), "partial pack");
+    await writeFile(join(assets, "assets_x64_0.pack2.rotk-part"), "partial copy");
+    await writeFile(join(install, "steam_api64.dll.rotk-0f8fad5b-d9cb-469f-a165-70867728950e.tmp"), "tmp");
+    await writeFile(join(assets, "assets_x64_0.pack2"), "pack");
+    await writeFile(join(install, ".rotk-installation.json"), "{}");
+
+    await cleanupInstallLeftovers(install);
+    expect(await readdir(root)).toEqual(["ROTK"]);
+    expect(await readdir(assets)).toEqual(["assets_x64_0.pack2"]);
+    expect((await readdir(install)).sort()).toEqual([".rotk-installation.json", "Resources"]);
   });
 
   it("skips files an earlier run finished and keeps player settings", async () => {
