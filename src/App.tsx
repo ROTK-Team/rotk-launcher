@@ -72,13 +72,18 @@ export default function App() {
     void window.rotk.detectSource();
   }, [setupOpen, detectAttempted, snapshot]);
 
+  const operationInFlight = useRef(false);
   const perform = useCallback(async (operation: () => Promise<OperationResult<unknown>>) => {
+    // A second click while an operation runs must not release `busy` early.
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setBusy(true);
     setTransientError(null);
     try {
       const result = await operation();
       if (!result.ok && !result.cancelled) setTransientError(result.error ?? copy.app.operationFailed);
     } finally {
+      operationInFlight.current = false;
       setBusy(false);
     }
   }, [copy.app.operationFailed]);
