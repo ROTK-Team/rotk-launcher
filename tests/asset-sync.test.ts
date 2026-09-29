@@ -106,7 +106,7 @@ describe("ROTK asset sync", () => {
   it("starts both metadata requests before either responds and waits for both before installing", async () => {
     const { userData, root } = await setup();
     const requests = new Map<string, (response: Response) => void>();
-    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
+    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL, discoverReleaseAssets: true,
       fetchImpl: (async input => new Promise<Response>(resolve => requests.set(String(input), resolve))) as typeof fetch });
     const pending = sync.sync(root);
     await vi.waitFor(() => expect(requests.size).toBe(2));
@@ -119,7 +119,7 @@ describe("ROTK asset sync", () => {
   it.each([FEED_URL, ASSET_RELEASE_API_URL])("aborts the other metadata read when %s is invalid", async failedUrl => {
     const { userData, root } = await setup();
     let cancelled = false;
-    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
+    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL, discoverReleaseAssets: true,
       fetchImpl: (async (input, init) => {
         if (String(input) === failedUrl) return new Response("invalid-json");
         return new Promise<Response>((_resolve, reject) => {
@@ -135,7 +135,7 @@ describe("ROTK asset sync", () => {
     const { userData, root } = await setup();
     const controller = new AbortController();
     let started = 0, cancelled = 0;
-    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
+    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL, discoverReleaseAssets: true,
       fetchImpl: (async (_input, init) => new Promise<Response>((_resolve, reject) => {
         started++;
         init!.signal!.addEventListener("abort", () => { cancelled++; reject(new Error("cancelled")); }, { once: true });
@@ -155,7 +155,7 @@ describe("ROTK asset sync", () => {
     let markStarted!: () => void;
     const bothStarted = new Promise<void>(resolve => { markStarted = resolve; });
     let started = 0, cancelled = 0;
-    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
+    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL, discoverReleaseAssets: true,
       fetchImpl: (async (_input, init) => new Promise<Response>((_resolve, reject) => {
         if (++started === 2) markStarted();
         const abort = () => { cancelled++; reject(new Error("cancelled")); };
@@ -291,6 +291,7 @@ describe("ROTK asset sync", () => {
       userDataDirectory: userData,
       feedUrl: FEED_URL,
       releaseApiUrl: ASSET_RELEASE_API_URL,
+      discoverReleaseAssets: true,
       fetchImpl: makeFetch({
         [FEED_URL]: () => new Response(JSON.stringify(manifest([]))),
         [ASSET_RELEASE_API_URL]: () => new Response(JSON.stringify(metadata)),
@@ -318,6 +319,7 @@ describe("ROTK asset sync", () => {
       userDataDirectory: userData,
       feedUrl: FEED_URL,
       releaseApiUrl: ASSET_RELEASE_API_URL,
+      discoverReleaseAssets: true,
       fetchImpl: makeFetch({
         [FEED_URL]: () => new Response(JSON.stringify(manifest([]))),
         [ASSET_RELEASE_API_URL]: () => new Response(JSON.stringify(metadata)),
@@ -329,6 +331,72 @@ describe("ROTK asset sync", () => {
     await expect(
       stat(join(root, "Resources", "Assets", "another.pack2")),
     ).rejects.toThrow();
+  });
+
+  it("resumes a partial download with a Range request", async () => {
+    const { userData, root } = await setup();
+    const payload = Buffer.from("0123456789".repeat(100));
+    const entry = assetEntry("big.pack", payload, { installPath: "data/big.pack" });
+    const cacheDirectory = join(userData, "asset-cache");
+    await mkdir(cacheDirectory, { recursive: true });
+    await writeFile(join(cacheDirectory, `${entry.sha256}.pack.part`), payload.subarray(0, 400));
+    const ranges: Array<string | null> = [];
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        const range = new Headers(init?.headers).get("range");
+        ranges.push(range);
+        if (range !== "bytes=400-") return new Response(new Uint8Array(payload));
+        return new Response(new Uint8Array(payload.subarray(400)), {
+          status: 206,
+          headers: { "content-range": `bytes 400-999/${payload.length}` },
+        });
+      }) as typeof fetch,
+    });
+
+    await sync.sync(root);
+    expect(ranges).toEqual(["bytes=400-"]);
+    expect(await readFile(join(root, "data", "big.pack"))).toEqual(payload);
+  });
+
+  it("retries a download after a server error", async () => {
+    const { userData, root } = await setup();
+    const payload = Buffer.from("custom sounds");
+    const entry = assetEntry("sounds.pack", payload);
+    let downloads = 0;
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        downloads += 1;
+        return downloads === 1 ? new Response("busy", { status: 503 }) : new Response(new Uint8Array(payload));
+      }) as typeof fetch,
+    });
+
+    await sync.sync(root);
+    expect(downloads).toBe(2);
+    await expect(readFile(join(root, "sounds.pack"), "utf8")).resolves.toBe("custom sounds");
+  });
+
+  it("does not retry a missing asset", async () => {
+    const { userData, root } = await setup();
+    const entry = assetEntry("gone.pack", Buffer.from("x"));
+    let downloads = 0;
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        downloads += 1;
+        return new Response("not found", { status: 404 });
+      }) as typeof fetch,
+    });
+
+    await expect(sync.sync(root)).rejects.toThrow(/HTTP 404/);
+    expect(downloads).toBe(1);
   });
 
   it("installs file and zip assets, backs up originals and keeps state", async () => {

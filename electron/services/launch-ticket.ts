@@ -256,15 +256,19 @@ export async function createLaunchTicket(
         redirect: "error",
         signal: controller.signal,
       });
-    } catch {
-      throw new Error("Unable to reach the ROTK account service");
+    } catch (error) {
+      // Keep the network cause (timeout, DNS, TLS...) visible for support.
+      const cause = controller.signal.aborted
+        ? "timeout"
+        : ((error as { cause?: { code?: string } })?.cause?.code ?? (error as Error)?.message ?? "");
+      throw new Error(`Unable to reach the ROTK account service${cause ? ` (${cause})` : ""}`);
     }
 
     let payload: unknown;
     try {
       payload = await response.json();
     } catch {
-      throw new Error("Invalid response from the ROTK account service");
+      throw new Error(`Invalid response from the ROTK account service (HTTP ${response.status})`);
     }
     if (!response.ok) throw serviceError(response.status, payload, options.attestationUnavailableReason);
     return parseTicketResponse(payload, {

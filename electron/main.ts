@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, statfs } from "node:fs/promises";
 import { join, basename, dirname, parse, resolve } from "node:path";
+import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -115,6 +116,16 @@ import {
 } from "./services/gameplay-patch.js";
 
 app.setName(APP_NAME);
+// Also trust the Windows certificate store. Antivirus HTTPS scanning (Kaspersky,
+// ESET, Avast...) installs its root there, and Node's fetch only knows its own
+// bundled list, so every request failed on those machines.
+try {
+  tls.setDefaultCACertificates([
+    ...new Set([...tls.getCACertificates("default"), ...tls.getCACertificates("system")]),
+  ]);
+} catch {
+  // Keep the bundled list.
+}
 if (!app.isPackaged && process.env.ROTK_USER_DATA_DIR) {
   app.setPath("userData", resolve(process.env.ROTK_USER_DATA_DIR));
 } else {
