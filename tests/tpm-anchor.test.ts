@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   activateTpmAnchor,
@@ -51,7 +54,7 @@ describe("collectTpmAnchor / activateTpmAnchor", () => {
     if (process.platform !== "win32") return;
     let seen: Record<string, string> | null = null;
     const material = await collectTpmAnchor("rotk-tpm-bind-v1\0abc", {
-      run: async (script, env) => { seen = env; expect(script).toContain("rotk-tpm-aik-v1"); return fullLine; },
+      run: async (script, env) => { if (script.includes("rotk-tpm-aik-v1")) seen = env; return fullLine; },
     });
     // Base64: the binding message's NUL separators cannot travel in an environment variable.
     expect(seen).toEqual({ ROTK_TPM_MESSAGE_B64: Buffer.from("rotk-tpm-bind-v1\0abc", "utf8").toString("base64") });
@@ -124,6 +127,24 @@ describe("enrolTpmAnchor", () => {
       fetchImpl: challenge, run: async () => { throw new Error("The command was blocked."); },
     });
     expect(outcome).toEqual({ state: "failed", reason: "the TPM did not activate the credential" });
+  });
+});
+
+describe("TPM endorsement cache", () => {
+  it("reads the endorsement key once per machine", async () => {
+    if (process.platform !== "win32") return;
+    const directory = await mkdtemp(join(tmpdir(), "vitest-tpm-"));
+    try {
+      const cachePath = join(directory, "tpm-endorsement.v1.json");
+      const scripts: string[] = [];
+      const run = async (script: string) => { scripts.push(script); return fullLine; };
+      await collectTpmAnchor("one", { run, endorsementCachePath: cachePath });
+      await collectTpmAnchor("two", { run, endorsementCachePath: cachePath });
+      expect(scripts.filter((script) => script.includes("Add-Type"))).toHaveLength(1);
+      expect(scripts).toHaveLength(3);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 

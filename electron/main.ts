@@ -538,7 +538,9 @@ async function attestInstallation(
     // Both TPM steps sign the same message; run them side by side.
     const [tpmProof, anchor] = await Promise.all([
       collectTpmProof(bindingMessage).catch(() => null),
-      collectTpmAnchor(bindingMessage).catch(() => null),
+      collectTpmAnchor(bindingMessage, {
+        endorsementCachePath: join(userDataDirectory, "tpm-endorsement.v1.json"),
+      }).catch(() => null),
     ]);
     // Level-2 anchor (#320 §A): the TPM identity key signs the same message,
     // and the server is told which endorsement key it lives under — a
