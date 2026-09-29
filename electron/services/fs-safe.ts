@@ -80,16 +80,18 @@ export async function installFileIfChanged(source: string, target: string): Prom
 
 // A running exe can't be opened for writing (EBUSY). Catches a game left open
 // by a previous launcher session, which GameLauncher.isRunning() can't see.
-export async function assertExecutableNotRunning(executablePath: string): Promise<void> {
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
-  try {
-    handle = await open(executablePath, "r+");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EBUSY") {
-      throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+export async function assertExecutableNotRunning(executablePath: string, attempts = 5): Promise<void> {
+  // An antivirus scan can hold the exe for a moment too; a running game stays busy.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await (await open(executablePath, "r+")).close();
+      return;
+    } catch (error) {
+      // Missing or read-only executables are reported by the regular checks.
+      if ((error as NodeJS.ErrnoException).code !== "EBUSY") return;
+      if (attempt >= attempts) throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100 * 2 ** (attempt - 1)));
     }
-  } finally {
-    await handle?.close().catch(() => undefined);
   }
 }
 

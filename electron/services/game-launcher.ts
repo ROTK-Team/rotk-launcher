@@ -323,6 +323,8 @@ export class GameLauncher {
     const installation = request.config.installation;
     if (!installation) throw new Error("Installe d’abord le client ROTK.");
     const installationRoot = await validateInstalledClient(installation);
+    // Before attestation and the ticket, which are single-use.
+    await assertExecutableNotRunning(join(installationRoot, "H1Z1.exe"));
     const localLogs = join(request.logsRoot, installation.installId, "local");
     const failureLogs = join(request.logsRoot, installation.installId, "failure");
     await mkdir(localLogs, { recursive: true });

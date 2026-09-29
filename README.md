@@ -32,7 +32,7 @@ Le launcher inspecte le chemin logique et physique sélectionné :
 
 Cette règle évite tout conflit avec la version live sans imposer une nouvelle copie à l’utilisateur qui possède déjà un client Alpha ou une installation indépendante.
 
-La validation porte aussi sur le chemin physique afin qu’une jonction ou un lien symbolique ne permette pas de contourner la règle. La copie passe par un dossier temporaire, vérifie les fichiers critiques en SHA-256 et n’est rendue active qu’après finalisation.
+La validation porte aussi sur le chemin physique afin qu’une jonction ou un lien symbolique ne permette pas de contourner la règle. La copie est écrite directement dans le dossier ROTK choisi (par défaut `Games\ROTK` sur le disque de Steam) : un marqueur `.rotk-install-pending.json` réserve le dossier pendant la copie, les fichiers critiques sont vérifiés en SHA-256, puis `.rotk-installation.json` est écrit en dernier. Une copie annulée ou interrompue reprend là où elle s’est arrêtée.
 
 Une installation terminée est mémorisée dans `%APPDATA%\ROTK Launcher\config.v1.json`, avec une copie de secours locale. Le même chemin canonique est utilisé par les versions suivantes du launcher ; les anciens dossiers de configuration connus sont migrés automatiquement. Le sélecteur du client ne réapparaît que si aucune installation valide n’a encore été enregistrée.
 

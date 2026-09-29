@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import {
-  copyFile,
   lstat,
   mkdir,
   readFile,
@@ -13,7 +15,6 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { InstallProgress } from "../../shared/contracts.js";
-import { isAttestationExcluded } from "../../shared/attestation.js";
 import {
   CRITICAL_CLIENT_FILES,
   INSTALL_MARKER_NAME,
@@ -29,6 +30,7 @@ import { identifyClientBuild } from "./client-build.js";
 import { deployVivoxCompatibility } from "./vivox-client.js";
 import {
   assertExecutableNotRunning,
+  atomicCopyFile,
   atomicWriteFile,
   installFileIfChanged,
   retryFs,
@@ -40,6 +42,11 @@ const MINIMUM_DISK_HEADROOM = 2 * 1024 * 1024 * 1024;
 // ponytail: fixed at 3, enough to keep small files moving next to a big pack
 // without thrashing an HDD. Tune if HDD installs get slower.
 const COPY_CONCURRENCY = 3;
+// Big buffers make a stream copy as fast as CopyFileW, and unlike CopyFileW it
+// can be cancelled and reports progress while a 2 GB pack is copied.
+const COPY_CHUNK_BYTES = 4 * 1024 * 1024;
+// Files the game rewrites for the player; an existing copy is never replaced.
+const PLAYER_FILES = new Set(["useroptions.ini", "inputprofile_user.xml"]);
 const PARTIAL_SUFFIX = ".rotk-part";
 // NTFS, utimes and FAT don't share the same mtime precision.
 const MTIME_TOLERANCE_MS = 2_000;
@@ -193,23 +200,39 @@ async function ensureDiskSpace(parent: string, requiredBytes: number): Promise<v
   }
 }
 
-// Skip files an earlier run already copied. Player files the game rewrites
-// (UserOptions.ini...) are kept as is.
-async function needsCopy(source: SourceFile, targetPath: string): Promise<boolean> {
+// Skip files an earlier run already copied. When repairing a finished install,
+// only missing files are copied: the others may be ROTK assets or patches.
+async function needsCopy(source: SourceFile, targetPath: string, onlyMissing = false): Promise<boolean> {
   const target = await stat(targetPath).catch(() => null);
   if (!target?.isFile()) return true;
-  if (isAttestationExcluded(source.relativePath.split("\\").join("/"))) return false;
+  if (onlyMissing || PLAYER_FILES.has(source.relativePath.toLocaleLowerCase("en-US"))) return false;
   return target.size !== source.size
     || Math.abs(target.mtimeMs - source.modifiedAt.getTime()) > MTIME_TOLERANCE_MS;
 }
 
-async function copyClientFile(source: SourceFile, targetPath: string): Promise<void> {
+async function copyClientFile(
+  source: SourceFile,
+  targetPath: string,
+  signal: AbortSignal,
+  onBytes: (amount: number) => void,
+): Promise<void> {
   await mkdir(dirname(targetPath), { recursive: true });
   const partialPath = `${targetPath}${PARTIAL_SUFFIX}`;
   await rm(partialPath, { force: true });
-  await retryFs(() => copyFile(source.absolutePath, partialPath));
+  const meter = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      onBytes(chunk.byteLength);
+      callback(null, chunk);
+    },
+  });
+  await pipeline(
+    createReadStream(source.absolutePath, { highWaterMark: COPY_CHUNK_BYTES }),
+    meter,
+    createWriteStream(partialPath, { highWaterMark: COPY_CHUNK_BYTES }),
+    { signal },
+  );
   // Same mtime as the source so a resumed install can skip it.
-  await utimes(partialPath, source.modifiedAt, source.modifiedAt);
+  await retryFs(() => utimes(partialPath, source.modifiedAt, source.modifiedAt));
   await retryFs(() => rename(partialPath, targetPath));
   const copied = await stat(targetPath);
   if (!copied.isFile() || copied.size !== source.size) {
@@ -217,9 +240,10 @@ async function copyClientFile(source: SourceFile, targetPath: string): Promise<v
   }
 }
 
+// Backups are kept forever, so a crash must never leave a truncated one.
 async function copyOnce(source: string, destination: string): Promise<void> {
   if (await stat(destination).then(() => true, () => false)) return;
-  await retryFs(() => copyFile(source, destination));
+  await atomicCopyFile(source, destination);
 }
 
 async function patchBattlEye(root: string): Promise<void> {
@@ -232,7 +256,7 @@ async function patchBattlEye(root: string): Promise<void> {
   const patched = current.replace(/MasterPort\s+\d+/i, "MasterPort 20099");
   if (patched === current) return;
   await copyOnce(configPath, `${configPath}.original`);
-  await atomicWriteFile(configPath, patched, "ascii");
+  await atomicWriteFile(configPath, patched);
 }
 
 async function deployOpenSourceShim(root: string, shimPath: string): Promise<void> {
@@ -339,23 +363,25 @@ export async function installClient(request: InstallRequest): Promise<Installati
       "Le dossier ROTK choisi contient déjà d’autres fichiers. Choisis un dossier vide.",
     );
   }
-  if (state === "installed") {
-    // Already a ROTK client: repair it instead of refusing.
-    return adoptExistingClient({ ...request, root: destinationRoot });
-  }
+  // Installing onto a finished ROTK client repairs it: missing files come
+  // back from the source, patches are checked, the install id is kept.
+  const existingMarker = state === "installed" ? await readInstallationMarker(destinationRoot) : null;
+  const repairing = existingMarker !== null;
 
   await mkdir(destinationRoot, { recursive: true });
   await removeLegacyStagingDirectories(destinationRoot);
   const pending = (await readPendingMarker(destinationRoot)) ?? {
     schemaVersion: 1 as const,
-    installId: randomUUID(),
+    installId: existingMarker?.installId ?? randomUUID(),
     sourceRoot,
     startedAt: new Date().toISOString(),
   };
-  await atomicWriteFile(
-    join(destinationRoot, INSTALL_PENDING_MARKER_NAME),
-    `${JSON.stringify({ ...pending, sourceRoot }, null, 2)}\n`,
-  );
+  if (!repairing) {
+    await atomicWriteFile(
+      join(destinationRoot, INSTALL_PENDING_MARKER_NAME),
+      `${JSON.stringify({ ...pending, sourceRoot }, null, 2)}\n`,
+    );
+  }
 
   request.onProgress({
     phase: "scanning",
@@ -377,7 +403,7 @@ export async function installClient(request: InstallRequest): Promise<Installati
   let completedBytes = 0;
   let filesCompleted = 0;
   for (const file of files) {
-    if (await needsCopy(file, join(destinationRoot, file.relativePath))) {
+    if (await needsCopy(file, join(destinationRoot, file.relativePath), repairing)) {
       toCopy.push(file);
     } else {
       completedBytes += file.size;
@@ -404,23 +430,31 @@ export async function installClient(request: InstallRequest): Promise<Installati
   // Biggest files first, small ones fill the other lanes.
   const queue = [...toCopy].sort((left, right) => right.size - left.size);
   const worker = async (): Promise<void> => {
-    for (let next = queue.shift(); next; next = queue.shift()) {
-      if (request.signal.aborted) throw request.signal.reason ?? new Error("Installation annulée");
-      emitCopyProgress(next.relativePath);
-      await copyClientFile(next, join(destinationRoot, next.relativePath));
-      completedBytes += next.size;
-      filesCompleted += 1;
-      emitCopyProgress(next.relativePath);
+    try {
+      for (let next = queue.shift(); next; next = queue.shift()) {
+        if (request.signal.aborted) throw request.signal.reason ?? new Error("Installation annulée");
+        emitCopyProgress(next.relativePath);
+        await copyClientFile(next, join(destinationRoot, next.relativePath), request.signal, (amount) => {
+          completedBytes += amount;
+          emitCopyProgress(next.relativePath);
+        });
+        filesCompleted += 1;
+        emitCopyProgress(next.relativePath, true);
+      }
+    } catch (error) {
+      queue.length = 0; // stop the other lanes after their current file
+      throw error;
     }
   };
   const lanes = Array.from({ length: Math.min(COPY_CONCURRENCY, queue.length) }, worker);
   const outcomes = await Promise.allSettled(lanes);
   const failure = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
-  if (failure) {
-    queue.length = 0;
-    throw failure.reason;
-  }
+  if (failure) throw failure.reason;
   emitCopyProgress("", true);
+  const throwIfCancelled = (): void => {
+    if (request.signal.aborted) throw request.signal.reason ?? new Error("Installation annulée");
+  };
+  throwIfCancelled();
 
   request.onProgress({
     phase: "verifying",
@@ -430,12 +464,11 @@ export async function installClient(request: InstallRequest): Promise<Installati
     totalFiles: files.length,
     currentFile: "",
   });
+  const copiedNow = new Set(toCopy.map((file) => file.relativePath.toLocaleLowerCase("en-US")));
   for (const fileName of CRITICAL_CLIENT_FILES) {
-    // On resume steam_api64.dll may already be the shim; it gets checked when deployed.
-    if (fileName === "steam_api64.dll" && await stat(join(destinationRoot, "steam_api64.original.dll")).then(() => true, () => false)) {
-      continue;
-    }
     if (fileName === "ClientConfig.ini") continue; // rewritten on every launch
+    // A repaired client keeps its patched DLLs; the patch step checks them.
+    if (repairing && !copiedNow.has(fileName.toLocaleLowerCase("en-US"))) continue;
     if (await sha256File(join(destinationRoot, fileName)) !== sourceCriticalHashes[fileName]) {
       throw new Error(`La copie de ${fileName} ne correspond pas à la source.`);
     }
@@ -444,6 +477,7 @@ export async function installClient(request: InstallRequest): Promise<Installati
     }
   }
 
+  throwIfCancelled();
   request.onProgress({
     phase: "configuring",
     completedBytes,
@@ -458,11 +492,11 @@ export async function installClient(request: InstallRequest): Promise<Installati
     schemaVersion: 1,
     installId: pending.installId,
     clientBuildId: clientBuild.id,
-    sourceRoot,
-    installedAt: new Date().toISOString(),
+    sourceRoot: existingMarker?.sourceRoot ?? sourceRoot,
+    installedAt: existingMarker?.installedAt ?? new Date().toISOString(),
     launcherVersion: request.launcherVersion,
     patchVersion: CLIENT_PATCH_VERSION,
-    criticalHashes: sourceCriticalHashes,
+    criticalHashes: existingMarker?.criticalHashes ?? sourceCriticalHashes,
   };
   request.onProgress({
     phase: "finalizing",

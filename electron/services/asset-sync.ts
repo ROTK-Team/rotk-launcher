@@ -705,6 +705,7 @@ export class AssetSyncService {
     asset: AssetManifestEntry,
     signal: AbortSignal | undefined,
     onBytes: (amount: number) => void,
+    restartedClean = false,
   ): Promise<string> {
     await mkdir(this.cacheDirectory, { recursive: true });
     const cachePath = join(this.cacheDirectory, `${asset.sha256}.pack`);
@@ -736,6 +737,11 @@ export class AssetSyncService {
 
     if (await sha256File(partialPath) !== asset.sha256) {
       await rm(partialPath, { force: true });
+      // A bad resumed part is worth one clean download before giving up.
+      if (!restartedClean) {
+        restartedClean = true;
+        return this.ensureCachedAsset(asset, signal, onBytes, true);
+      }
       throw new Error(`L’asset ${asset.name} est corrompu (empreinte SHA-256 inattendue).`);
     }
     await retryFs(() => rename(partialPath, cachePath));
@@ -809,6 +815,11 @@ export class AssetSyncService {
         throw new DownloadStalledError(asset.name);
       }
     } catch (error) {
+      // The server refused the Range: drop the part and start over.
+      if (error instanceof Error && error.message.includes("HTTP 416")) {
+        await rm(partialPath, { force: true });
+        throw new DownloadStalledError(asset.name);
+      }
       // Report the stall, not the internal AbortError it caused.
       if (controller.signal.reason instanceof DownloadStalledError && !signal?.aborted) {
         throw controller.signal.reason;

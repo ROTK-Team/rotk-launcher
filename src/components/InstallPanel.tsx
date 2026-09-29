@@ -84,7 +84,9 @@ export function InstallPanel({
   useEffect(() => {
     if (!open || !requiresCopy) return;
     let current = true;
-    void window.rotk.listInstallDrives().then((value) => { if (current) setDrives(value); });
+    window.rotk.listInstallDrives()
+      .then((value) => { if (current) setDrives(value); })
+      .catch(() => undefined);
     return () => { current = false; };
   }, [open, requiresCopy, snapshot.selection.destinationRoot]);
 

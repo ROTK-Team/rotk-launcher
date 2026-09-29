@@ -344,12 +344,22 @@ function destinationOnDrive(driveRoot: string): string {
   return join(driveRoot, RECOMMENDED_INSTALL_PARENT_NAME, ROTK_INSTALL_DIRECTORY_NAME);
 }
 
-// A sleeping or disconnected network drive can take a long time to answer.
+// A disconnected network drive can hold statfs for a long time, and each
+// pending call ties up a libuv thread: never start a second one per drive.
+const pendingDriveStats = new Map<string, Promise<Awaited<ReturnType<typeof statfs>> | null>>();
+
 async function statDrive(root: string): Promise<InstallDrive | null> {
+  let pending = pendingDriveStats.get(root);
+  if (!pending) {
+    pending = statfs(root).catch(() => null).finally(() => pendingDriveStats.delete(root));
+    pendingDriveStats.set(root, pending);
+  }
+  let timer: NodeJS.Timeout | undefined;
   const disk = await Promise.race([
-    statfs(root).catch(() => null),
-    new Promise<null>((resolveTimeout) => setTimeout(() => resolveTimeout(null), 2_000)),
+    pending,
+    new Promise<null>((resolveTimeout) => { timer = setTimeout(() => resolveTimeout(null), 2_000); }),
   ]);
+  clearTimeout(timer);
   if (!disk || Number(disk.blocks) === 0) return null;
   return {
     root,
@@ -1113,7 +1123,7 @@ function registerIpc(): void {
         }
         // The copy resumes on the next attempt, so the selection stays. A client
         // that was already installed before this attempt stays playable.
-        phase = await installationRoot()
+        phase = await installationRoot().catch(() => null)
           ? "ready"
           : sourceKind === "copy-required" ? "destination-selected" : "source-selected";
         progress = null;
@@ -1453,14 +1463,16 @@ async function initialize(): Promise<void> {
   assetSyncPackVersion = assetState?.packVersion ?? null;
   assetSyncLastAt = assetState?.syncedAt ?? null;
   if (config.installation) {
-    // Play validates again, so a drive that was asleep or not mounted yet only
-    // needs a click on Play instead of a launcher restart.
     phase = "ready";
     try {
       await validateInstalledClient(config.installation);
     } catch (error) {
       logOperationError(error);
       lastErrorRaw = rawErrorMessage(error);
+      // A drive not mounted yet or a locked file can clear up: Play checks
+      // again. A damaged installation sends the player to the setup panel.
+      const driveReady = await stat(parse(config.installation.root).root).then(() => true, () => false);
+      if (driveReady && !isSystemError(error)) phase = "error";
     }
   }
   startupLog.mark("installation-checked", `phase=${phase}`);
