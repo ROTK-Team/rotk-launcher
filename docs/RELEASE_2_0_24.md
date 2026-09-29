@@ -14,9 +14,8 @@ longer stuck, antivirus and network robustness, Simplified Chinese.
 - A pending marker (`.rotk-install-pending.json`) claims the folder, the
   install marker is written last. A cancelled, failed or killed install
   resumes where it stopped (size + mtime per file).
-- Copy uses 4 MB streams on 3 lanes: about as fast as `CopyFile` here, but
-  cancellable and with progress inside big packs. A failing lane stops the
-  others.
+- Copy uses 4 MB streams on 3 lanes: as fast as `CopyFile`, but cancellable
+  and with progress inside big packs.
 - Installing onto a finished ROTK folder repairs it (missing files come back,
   assets and `UserOptions.ini` / `InputProfile_User.xml` are kept) instead of
   "the ROTK folder already exists". A folder with someone else's files is
@@ -27,7 +26,7 @@ longer stuck, antivirus and network robustness, Simplified Chinese.
   When no client is found, a button opens `steam://install/433850` and the
   launcher looks again when the window gets focus back.
 - Startup removes leftovers around the configured install: old staging
-  folders (one real profile had 10 GB left since July) and temporary files.
+  folders and temporary files.
 - A copy abandoned on one drive is removed when the player installs elsewhere.
 - Backups (`*.original.*`) are written atomically.
 
@@ -73,8 +72,8 @@ longer stuck, antivirus and network robustness, Simplified Chinese.
   network errors, 5xx and stalls (30 s without data). A corrupt resumed file is
   downloaded once more from scratch; a 416 drops the part.
 - Release auto-discovery through the GitHub API is off: `feed.json` is the only
-  source (a discovered pack would be missing from the attestation payloads,
-  and the anonymous API is limited to 60 requests/hour per IP).
+  source (discovered packs were missing from the attestation payloads, and the
+  anonymous API allows 60 requests/hour per IP).
 - Asset cache and backups moved from `%APPDATA%` (always C:) to the game drive,
   `<parent>\.<install>-assets`. Old backups are still restored, still-current
   packs are moved from the old cache, the rest of it is removed.
