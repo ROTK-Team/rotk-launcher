@@ -57,8 +57,8 @@ the setup panel — offline/dev mode).
     {
       "name": "rotk-ui-pack",
       "version": "1.0.0",
-      "url": "https://github.com/h1z1rotk/assets/releases/download/assets-v1.0.0/rotk-ui-pack.zip",
-      "sha256": "<sha256 of the zip>",
+      "url": "https://github.com/h1z1rotk/assets/releases/download/assets-v1.0.0/rotk-ui-pack.payload",
+      "sha256": "<sha256 of the archive>",
       "size": 12345678,
       "installPath": ".",
       "type": "zip"
@@ -125,10 +125,10 @@ alone does not distribute the fix.
 
 1. Run `scripts/package-asset-packs.ps1 -SourceDirectory <packs dir>
    -OutputDirectory <out> -PackVersion X.Y.Z`. It zips **each file into its own
-   payload**, enforces the section 4 caps, and writes both `feed.json` and the
+   `.payload` archive**, enforces the section 4 caps, and writes both `feed.json` and the
    attestation payload manifest.
 2. Create the stable GitHub release `assets-vX.Y.Z` on `h1z1rotk/assets` and attach
-   the generated zips.
+   the generated `.payload` files.
 3. Commit both `feed.json` and `asset-payloads.v1.json` to `main`, together.
 4. Publish the attestation payload manifest with the server policy.
 5. At the next launch or **Verify files**, missing or changed packs are downloaded.
