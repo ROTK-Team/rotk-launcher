@@ -198,7 +198,6 @@ const FRENCH_ERRORS = new Map<string, string>([
   ["The ROTK account service is temporarily unavailable", "Le service de compte ROTK est momentanément indisponible. Réessaie dans quelques minutes."],
   ["The ROTK account service refused the launch request", "Le service de compte ROTK a refusé le lancement."],
   ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "Les fichiers du jeu ne correspondent pas à l’installation ROTK officielle. Utilise « Vérifier les fichiers », puis réessaie."],
-  ["This launcher version is too old to verify the game files. Update the launcher.", "Cette version du launcher est trop ancienne. Mets le launcher à jour."],
   ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "Ce compte ROTK n’est pas encore prêt. Connecte-toi sur le site ROTK, puis réessaie."],
   ["Unable to reach the ROTK integrity service", "Impossible de joindre le service de vérification ROTK. Vérifie ta connexion."],
   ["The ROTK integrity service is temporarily unavailable", "Le service de vérification ROTK est momentanément indisponible."],
@@ -206,6 +205,7 @@ const FRENCH_ERRORS = new Map<string, string>([
 ]);
 
 const DYNAMIC_FRENCH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+  [/^This launcher version is too old to verify the game files\. Update the launcher\.(?: Required version: (.+)\.)?$/, (match) => `Cette version du launcher n’est pas acceptée par le serveur. Mets le launcher à jour${match[1] ? ` (version attendue : ${match[1]})` : ""}.`],
   [/^Unable to reach the ROTK account service(?: \((.+)\))?$/, (match) => `Impossible de joindre le service de compte ROTK${match[1] ? ` (${match[1]})` : ""}. Vérifie ta connexion, ton pare-feu ou ton antivirus.`],
   [/^Invalid response from the ROTK account service(?: \(HTTP (\d+)\))?$/, (match) => `Réponse invalide du service de compte ROTK${match[1] ? ` (HTTP ${match[1]})` : ""}. Réessaie dans quelques minutes.`],
   [/^ROTK could not verify your game files: (.+) Check your connection and try again\.$/, (match) => `ROTK n’a pas pu vérifier tes fichiers de jeu : ${match[1]} Vérifie ta connexion puis réessaie.`],
@@ -247,7 +247,6 @@ const CHINESE_ERRORS = new Map<string, string>([
   ["The ROTK account service is temporarily unavailable", "ROTK 账号服务暂时不可用，请几分钟后重试。"],
   ["The ROTK account service refused the launch request", "ROTK 账号服务拒绝了本次启动。"],
   ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "游戏文件与 ROTK 官方版本不一致。请点击“验证文件”后重试。"],
-  ["This launcher version is too old to verify the game files. Update the launcher.", "启动器版本过旧，请先更新启动器。"],
   ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "此 ROTK 账号还不能进入游戏。请先登录 ROTK 网站，然后重试。"],
   ["Unable to reach the ROTK integrity service", "无法连接 ROTK 校验服务，请检查网络。"],
   ["The ROTK integrity service is temporarily unavailable", "ROTK 校验服务暂时不可用。"],
@@ -265,6 +264,7 @@ const CHINESE_ERRORS = new Map<string, string>([
 ]);
 
 const DYNAMIC_CHINESE_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+  [/^This launcher version is too old to verify the game files\. Update the launcher\.(?: Required version: (.+)\.)?$/, (match) => `服务器不接受当前版本的启动器，请先更新启动器${match[1] ? `（需要版本 ${match[1]}）` : ""}。`],
   [/^Espace disque insuffisant : (.+) Go sont nécessaires\.$/, (match) => `磁盘空间不足，需要 ${match[1]} GB。`],
   [/^Espace disque insuffisant pour les assets : (.+) Go sont nécessaires\.$/, (match) => `磁盘空间不足，下载资源需要 ${match[1]} GB。`],
   [/^Un fichier du launcher a disparu : (.+)\. Ton antivirus l’a probablement mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher\.$/, (match) => `启动器文件丢失：${match[1]}。很可能被杀毒软件隔离了，请在 Windows 安全中心恢复它，或重新安装启动器。`],

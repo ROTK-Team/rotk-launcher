@@ -165,18 +165,37 @@ function parseTicketResponse(
   assertLaunchTicketFresh(identity, MINIMUM_TICKET_LIFETIME_MS, timing.receivedAtMonotonicMs);
   return identity;
 }
+/** The server keeps an exact list of accepted launcher versions and names the latest. */
+export function launcherUpdateRequiredError(payload: unknown): Error {
+  const required = payload && typeof payload === "object"
+    ? (payload as Record<string, unknown>).requiredVersion
+    : null;
+  const version = typeof required === "string" && /^[0-9A-Za-z.+-]{1,32}$/.test(required) ? required : null;
+  const error = new Error(
+    "This launcher version is too old to verify the game files. Update the launcher."
+      + (version ? ` Required version: ${version}.` : ""),
+  );
+  // Tagged so the launch flow can make the update mandatory (block Play,
+  // trigger the updater) rather than only showing the message.
+  (error as { code?: string }).code = "launcher_update_required";
+  return error;
+}
+
 function serviceError(status: number, value: unknown, attestationUnavailableReason?: string): Error {
   const payload = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   const errorCode = payload?.error ?? null;
+  // The server also answers a missing attestation with launcher_update_required
+  // (failureCode missing_attestation). Only a real version refusal is an update.
+  const missingAttestation = payload?.failureCode === "missing_attestation";
+  if (errorCode === "launcher_update_required" && !(missingAttestation && attestationUnavailableReason)) {
+    return launcherUpdateRequiredError(payload);
+  }
   // Enforcement refuses either an installation that failed verification, or one
   // that submitted no attestation at all. When we already know the launcher
   // could not run attestation, that second case is not a tamper and not an old
   // launcher: say so, so the player checks their connection instead of chasing
   // a phantom update or a "verify files" that will not help.
-  if (
-    (errorCode === "attestation_failed" || errorCode === "launcher_update_required")
-    && attestationUnavailableReason
-  ) {
+  if ((errorCode === "attestation_failed" || errorCode === "launcher_update_required") && attestationUnavailableReason) {
     return new Error(
       `ROTK could not verify your game files: ${attestationUnavailableReason} `
       + "Check your connection and try again.",
@@ -186,15 +205,6 @@ function serviceError(status: number, value: unknown, attestationUnavailableReas
     return new Error(
       "The game files do not match the official ROTK installation. Use Verify files, then try again.",
     );
-  }
-  if (errorCode === "launcher_update_required") {
-    const error = new Error(
-      "This launcher version is too old to verify the game files. Update the launcher.",
-    );
-    // Tagged so the launch flow can make the update mandatory (block Play,
-    // trigger the updater) rather than only showing the message.
-    (error as { code?: string }).code = "launcher_update_required";
-    return error;
   }
   if (errorCode === "account_banned") {
     const expiresAt = typeof payload?.expiresAt === "string" ? payload.expiresAt : null;
