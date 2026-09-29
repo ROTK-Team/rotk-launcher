@@ -114,6 +114,16 @@ export interface Copy {
     failed: string;
     retry: string;
     dismiss: string;
+    close: string;
+    promptTitle: string;
+    readyTitle: string;
+    promptDetail: string;
+    currentVersion: string;
+    newVersion: string;
+    later: string;
+    closeGame: string;
+    check: string;
+    requiredDetail: string;
   };
   install: {
     notSelected: string;
@@ -282,14 +292,24 @@ const COPY: Record<AppLocale, Copy> = {
     },
     update: {
       available: (version) => `LAUNCHER UPDATE ${version} AVAILABLE`,
-      availableDetail: "Downloaded securely from the official GitHub releases.",
+      availableDetail: "Get the latest improvements and fixes before playing.",
       download: "UPDATE",
       downloading: "DOWNLOADING UPDATE",
       restart: "RESTART TO INSTALL",
-      restartDetail: "The launcher restarts and installs the signed update.",
+      restartDetail: "Restart the launcher to install the update, then launch the game again.",
       failed: "UPDATE DOWNLOAD FAILED",
       retry: "RETRY",
       dismiss: "Hide update notification",
+      close: "Close update reminder",
+      promptTitle: "UPDATE BEFORE YOU PLAY",
+      readyTitle: "YOUR UPDATE IS READY",
+      promptDetail: "Update the ROTK launcher to play with the latest version of the game. Download the update, then restart the launcher to install it.",
+      currentVersion: "INSTALLED",
+      newVersion: "AVAILABLE",
+      later: "LATER",
+      closeGame: "Close the game before restarting the launcher.",
+      check: "CHECK FOR UPDATE",
+      requiredDetail: "The server requires a newer launcher. If the update cannot be found, check your connection and try again.",
     },
     install: {
       notSelected: "NOT SELECTED",
@@ -479,14 +499,24 @@ const COPY: Record<AppLocale, Copy> = {
     },
     update: {
       available: (version) => `MISE À JOUR ${version} DISPONIBLE`,
-      availableDetail: "Téléchargée de façon sécurisée depuis les releases GitHub officielles.",
+      availableDetail: "Profite des dernières améliorations et corrections avant de jouer.",
       download: "METTRE À JOUR",
       downloading: "TÉLÉCHARGEMENT",
       restart: "REDÉMARRER POUR INSTALLER",
-      restartDetail: "Le launcher redémarre et installe la mise à jour signée.",
+      restartDetail: "Redémarre le launcher pour installer la mise à jour, puis relance le jeu.",
       failed: "ÉCHEC DU TÉLÉCHARGEMENT",
       retry: "RÉESSAYER",
       dismiss: "Masquer la notification de mise à jour",
+      close: "Fermer le rappel de mise à jour",
+      promptTitle: "METS À JOUR AVANT DE JOUER",
+      readyTitle: "LA MISE À JOUR EST PRÊTE",
+      promptDetail: "Mets à jour le launcher ROTK pour jouer avec la dernière version du jeu. Télécharge la mise à jour, puis redémarre le launcher pour l’installer.",
+      currentVersion: "VERSION INSTALLÉE",
+      newVersion: "NOUVELLE VERSION",
+      later: "PLUS TARD",
+      closeGame: "Ferme le jeu avant de redémarrer le launcher.",
+      check: "RECHERCHER LA MISE À JOUR",
+      requiredDetail: "Le serveur exige un launcher plus récent. Si la mise à jour reste introuvable, vérifie ta connexion puis réessaie.",
     },
     install: {
       notSelected: "NON SÉLECTIONNÉ",

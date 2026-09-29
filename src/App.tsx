@@ -6,6 +6,8 @@ import { LauncherFooter } from "./components/LauncherFooter";
 import { NewsCarousel } from "./components/NewsCarousel";
 import { PlayerIdentityPanel } from "./components/PlayerIdentityPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { hasLauncherUpdate } from "../shared/launcher-update";
+import { LauncherUpdatePrompt } from "./components/LauncherUpdatePrompt";
 import { WindowChrome } from "./components/WindowChrome";
 import { useI18n } from "./i18n";
 
@@ -14,6 +16,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<LauncherSnapshot | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
   const [identityOpen, setIdentityOpen] = useState(false);
+  const [updatePromptOpen, setUpdatePromptOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [transientError, setTransientError] = useState<string | null>(null);
   const [detectAttempted, setDetectAttempted] = useState(false);
@@ -111,7 +114,11 @@ export default function App() {
   const install = () => perform(() => window.rotk.install());
   const play = () => perform(() => window.rotk.play());
   const onPrimary = () => {
-    if (snapshot.canPlay) void play();
+    if (hasLauncherUpdate(snapshot.launcherUpdate) || snapshot.updateRequired) {
+      setUpdatePromptOpen(true);
+      if (!hasLauncherUpdate(snapshot.launcherUpdate)) void window.rotk.checkLauncherUpdate();
+    }
+    else if (snapshot.canPlay) void play();
     else if (snapshot.installationRoot && !snapshot.playerIdentity.configured) {
       setSetupOpen(false);
       setIdentityOpen(true);
@@ -150,6 +157,15 @@ export default function App() {
         }}
         onSelectLaunchProfile={(serverId, role) =>
           void perform(() => window.rotk.setLaunchProfile(serverId, role))}
+      />
+      <LauncherUpdatePrompt
+        snapshot={snapshot}
+        open={updatePromptOpen}
+        busy={working}
+        onClose={() => setUpdatePromptOpen(false)}
+        onCheck={() => void window.rotk.checkLauncherUpdate()}
+        onDownload={() => void perform(() => window.rotk.downloadLauncherUpdate())}
+        onInstall={() => void perform(() => window.rotk.installLauncherUpdate())}
       />
       <PlayerIdentityPanel
         snapshot={snapshot}

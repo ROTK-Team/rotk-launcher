@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LauncherUpdateSummary } from "../shared/contracts.js";
+import { hasLauncherUpdate } from "../shared/launcher-update.js";
 import {
   LauncherUpdateService,
   type DownloadProgressLike,
@@ -159,5 +160,32 @@ describe("launcher self-update service", () => {
     updater.emit("update-available", { version: "0.3.0" });
     updater.emit("download-progress", { percent: 50 });
     expect(service.state).toMatchObject({ status: "update-available", progressPercent: null });
+  });
+
+  it("keeps a known mandatory update across timer checks and download failures", async () => {
+    const { updater, service } = createService();
+    await service.check();
+    updater.emit("update-available", { version: "2.0.24" });
+    expect(hasLauncherUpdate(service.state)).toBe(true);
+    updater.checkForUpdates.mockRejectedValue(new Error("offline"));
+    await service.check();
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(service.state.status).toBe("update-available");
+    service.download();
+    expect(hasLauncherUpdate(service.state)).toBe(true);
+    updater.emit("error", new Error("offline"));
+    await service.check();
+    expect(service.state).toMatchObject({ status: "error", availableVersion: "2.0.24" });
+    expect(hasLauncherUpdate(service.state)).toBe(true);
+    service.download();
+    updater.emit("update-downloaded");
+    expect(hasLauncherUpdate(service.state)).toBe(true);
+  });
+
+  it("does not block launch just because the initial update check is offline", async () => {
+    const { updater, service } = createService();
+    updater.checkForUpdates.mockRejectedValue(new Error("offline"));
+    await service.check();
+    expect(hasLauncherUpdate(service.state)).toBe(false);
   });
 });
