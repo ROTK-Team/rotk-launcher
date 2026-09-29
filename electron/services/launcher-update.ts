@@ -1,4 +1,5 @@
 import type { LauncherUpdateSummary } from "../../shared/contracts.js";
+import { hasLauncherUpdate } from "../../shared/launcher-update.js";
 
 export interface UpdateInfoLike {
   version: string;
@@ -105,8 +106,7 @@ export class LauncherUpdateService {
     if (!this.updater) return;
     if (
       this.current.status === "checking"
-      || this.current.status === "downloading"
-      || this.current.status === "downloaded"
+      || hasLauncherUpdate(this.current)
     ) {
       return;
     }

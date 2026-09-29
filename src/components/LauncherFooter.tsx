@@ -1,4 +1,5 @@
-import { CircleAlert, KeyRound, Play, RotateCcw, Settings2 } from "lucide-react";
+import { CircleAlert, Download, KeyRound, Play, RotateCcw, Settings2 } from "lucide-react";
+import { hasLauncherUpdate } from "../../shared/launcher-update";
 import type { LauncherSnapshot } from "../../shared/contracts";
 import type { PlayerRole, ServerId } from "../../shared/launch-profile";
 import { useI18n, type Copy } from "../i18n";
@@ -75,8 +76,11 @@ export function LauncherFooter({
   const ready = snapshot.canPlay;
   const running = snapshot.phase === "running" || snapshot.phase === "launching";
   const installing = snapshot.phase === "installing";
+  const updatePending = snapshot.updateRequired || hasLauncherUpdate(snapshot.launcherUpdate);
   const needsAccountKey = snapshot.phase === "ready" && !snapshot.playerIdentity.configured;
-  const primaryLabel = ready
+  const primaryLabel = updatePending && !running && !installing
+    ? copy.update.download
+    : ready
     ? copy.footer.play
     : running
       ? copy.footer.inGame
@@ -118,7 +122,7 @@ export function LauncherFooter({
         onClick={onPrimary}
       >
         <span className="play-button__copy"><small>RETURN OF THE KING</small><strong>{primaryLabel}</strong></span>
-        <Play size={24} fill="currentColor" />
+        {updatePending && !running && !installing ? <Download size={24} /> : <Play size={24} fill="currentColor" />}
       </button>
     </footer>
   );

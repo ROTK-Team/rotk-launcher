@@ -34,6 +34,7 @@ export const MAIN_COPY = {
       `The launcher window's process stopped (${reason}). Restart the launcher; if this happens again, send %APPDATA%\\ROTK Launcher\\startup.log to the ROTK team.`,
     launcherError: (id: string, message: string) => `Launcher error ${id}: ${message}`,
     update: {
+      required: "Update the ROTK launcher before playing.",
       unavailable: "Launcher updates are only available in the installed launcher.",
       "no-update": "No launcher update is available yet.",
       "not-downloaded": "The launcher update has not been downloaded yet.",
@@ -81,6 +82,7 @@ export const MAIN_COPY = {
       "no-update": "Aucune mise à jour du launcher n’est disponible pour l’instant.",
       "not-downloaded": "La mise à jour du launcher n’a pas encore été téléchargée.",
       gameRunning: "Ferme H1Z1 avant de mettre à jour le launcher.",
+      required: "Mets à jour le launcher ROTK avant de jouer.",
     },
     assets: {
       busy: "Une synchronisation des assets est déjà en cours.",

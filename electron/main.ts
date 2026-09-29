@@ -77,6 +77,7 @@ import {
 import { UpdateFeedService } from "./services/update-feed.js";
 import { AssetSyncService } from "./services/asset-sync.js";
 import { LauncherUpdateService } from "./services/launcher-update.js";
+import { hasLauncherUpdate } from "../shared/launcher-update.js";
 import electronUpdater from "electron-updater";
 import { localizeServiceError, MAIN_COPY } from "./i18n.js";
 import { identityFromPlayerKey } from "./services/player-identity.js";
@@ -562,7 +563,7 @@ async function snapshot(): Promise<LauncherSnapshot> {
     progress,
     error: lastErrorRaw ? localizeServiceError(lastErrorRaw, currentLocale) : null,
     gamePid,
-    updateRequired,
+    updateRequired: updateRequired || hasLauncherUpdate(launcherUpdate.state),
     canPlay:
       phase === "ready"
       && configuredRoot !== null
@@ -570,7 +571,7 @@ async function snapshot(): Promise<LauncherSnapshot> {
       && !gameLauncher.isRunning()
       && !debugSettingWrite && !diagnosticWorkInProgress()
       // A mandatory update blocks Play until a newer launcher is installed.
-      && !updateRequired,
+      && !updateRequired && !hasLauncherUpdate(launcherUpdate.state),
   };
 }
 
@@ -1003,6 +1004,9 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC_CHANNELS.play,
     trustedHandler(async (): Promise<OperationResult<{ pid: number }>> => {
+      if (updateRequired || hasLauncherUpdate(launcherUpdate.state)) {
+        return { ok: false, error: MAIN_COPY[currentLocale].update.required };
+      }
       if (phase !== "ready" || debugSettingWrite || diagnosticWorkInProgress()) return { ok: false, error: MAIN_COPY[currentLocale].clientNotReady };
       const selectedKey = activeKey();
       if (!selectedKey) {

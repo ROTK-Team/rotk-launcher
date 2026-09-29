@@ -54,10 +54,16 @@ idle → checking → update-available → downloading → downloaded
 
 ## 5. UI (renderer)
 
-- Discreet banner in the footer/window chrome: “Update vX.Y.Z available” + **Update**
-  button → progress bar → **Restart to install**.
-- Never a blocking modal; the user can decline (the banner stays, re-offered on next
-  startup).
+- Large banner above the footer: version, readable detail and **Update** action,
+  download progress and **Restart to install**. Dismissal applies to that version
+  and state; errors, completion and a new version can be shown again.
+- A known available update is mandatory before the next game launch. The primary
+  button becomes **Update** and opens a modal even after dismissing the banner.
+  **Later**, Escape and close return to the launcher without launching the game.
+- Main-process Play IPC also refuses pending updates. A server version rejection
+  remains authoritative even if update metadata cannot be loaded; the modal offers
+  another check. A periodic check cannot erase a known pending update.
+- Installation stays user-driven and is disabled while the game is running.
 - en/fr strings added to both existing i18n layers.
 
 ## 6. Tests (`tests/launcher-update.test.ts`)
