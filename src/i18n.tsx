@@ -144,6 +144,8 @@ export interface Copy {
     detectedBadge: string;
     recommendedBadge: string;
     subfolderHint: string;
+    driveLabel: string;
+    driveFree: (gigabytes: number) => string;
     resumeHint: string;
     choose: string;
     cancelCopy: string;
@@ -331,6 +333,8 @@ const COPY: Record<AppLocale, Copy> = {
       detectedBadge: "AUTO-DETECTED",
       recommendedBadge: "RECOMMENDED",
       subfolderHint: "A ROTK subfolder is created automatically in the chosen location — no need to create it yourself.",
+      driveLabel: "INSTALL DRIVE",
+      driveFree: (gigabytes) => `${gigabytes} GB free`,
       resumeHint: "You can cancel or close the launcher: the copy picks up where it stopped.",
       choose: "CHOOSE",
       cancelCopy: "CANCEL",
@@ -539,6 +543,8 @@ const COPY: Record<AppLocale, Copy> = {
       detectedBadge: "DÉTECTÉ AUTO",
       recommendedBadge: "RECOMMANDÉ",
       subfolderHint: "Un sous-dossier ROTK est créé automatiquement dans l’emplacement choisi — inutile de le créer toi-même.",
+      driveLabel: "DISQUE D’INSTALLATION",
+      driveFree: (gigabytes) => `${gigabytes} Go libres`,
       resumeHint: "Tu peux annuler ou fermer le launcher : la copie reprendra là où elle s’est arrêtée.",
       choose: "CHOISIR",
       cancelCopy: "ANNULER",

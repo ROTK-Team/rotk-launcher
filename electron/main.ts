@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, stat } from "node:fs/promises";
-import { join, basename, dirname, parse, resolve, sep } from "node:path";
+import { mkdir, readFile, stat, statfs } from "node:fs/promises";
+import { join, basename, dirname, parse, resolve } from "node:path";
 import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import {
@@ -22,6 +22,7 @@ import {
   type AssetSyncSummary,
   type AssetSyncWarning,
   type ClientSourceKind,
+  type InstallDrive,
   type LauncherPhase,
   type LauncherSnapshot,
   type OperationResult,
@@ -336,9 +337,40 @@ async function refreshServerStatus(): Promise<void> {
   await broadcastSnapshot();
 }
 
-function recommendedDestinationPath(): string {
-  const systemDrive = process.env.SystemDrive ?? "C:";
-  return join(`${systemDrive}${sep}`, RECOMMENDED_INSTALL_PARENT_NAME, ROTK_INSTALL_DIRECTORY_NAME);
+// Free space wanted before a drive is suggested: the client plus the assets.
+const RECOMMENDED_FREE_BYTES = 25 * 1024 ** 3;
+
+function destinationOnDrive(driveRoot: string): string {
+  return join(driveRoot, RECOMMENDED_INSTALL_PARENT_NAME, ROTK_INSTALL_DIRECTORY_NAME);
+}
+
+// A disconnected network drive can hold statfs for a long time, and each
+// pending call ties up a libuv thread: never start a second one per drive.
+const pendingDriveStats = new Map<string, Promise<Awaited<ReturnType<typeof statfs>> | null>>();
+
+async function statDrive(root: string): Promise<InstallDrive | null> {
+  let pending = pendingDriveStats.get(root);
+  if (!pending) {
+    pending = statfs(root).catch(() => null).finally(() => pendingDriveStats.delete(root));
+    pendingDriveStats.set(root, pending);
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const disk = await Promise.race([
+    pending,
+    new Promise<null>((resolveTimeout) => { timer = setTimeout(() => resolveTimeout(null), 2_000); }),
+  ]);
+  clearTimeout(timer);
+  if (!disk || Number(disk.blocks) === 0) return null;
+  return {
+    root,
+    freeBytes: Number(disk.bavail) * Number(disk.bsize),
+    totalBytes: Number(disk.blocks) * Number(disk.bsize),
+  };
+}
+
+async function listInstallDrives(): Promise<InstallDrive[]> {
+  const drives = await Promise.all([..."CDEFGHIJKLMNOPQRSTUVWXYZ"].map((letter) => statDrive(`${letter}:\\`)));
+  return drives.filter((drive): drive is InstallDrive => drive !== null);
 }
 
 /** Validates a destination and refuses folders holding someone else's files. */
@@ -353,20 +385,27 @@ async function acceptDestination(candidate: string): Promise<string> {
 }
 
 /**
- * Pre-fill the ROTK destination with the recommended default so a detected or
- * freshly selected Steam client only needs one Install click. A half-finished
- * or finished ROTK folder is fine: installing resumes or repairs it.
+ * Pre-fill the destination so a detected Steam client only needs one click.
+ * Prefers the Steam drive, then the system drive. A half-finished or finished
+ * ROTK folder is fine: installing resumes or repairs it.
  */
 async function applyRecommendedDestination(): Promise<void> {
   if (sourceKind !== "copy-required" || !sourceRoot) return;
-  try {
-    destinationRoot = await acceptDestination(recommendedDestinationPath());
-    destinationRecommended = true;
-    phase = "destination-selected";
-  } catch {
-    destinationRoot = null;
-    destinationRecommended = false;
+  const drives = [parse(sourceRoot).root, `${process.env.SystemDrive ?? "C:"}\\`];
+  for (const drive of [...new Set(drives.map((value) => value.toUpperCase()))]) {
+    try {
+      const details = await statDrive(drive);
+      if (!details || details.freeBytes < RECOMMENDED_FREE_BYTES) continue;
+      destinationRoot = await acceptDestination(destinationOnDrive(drive));
+      destinationRecommended = true;
+      phase = "destination-selected";
+      return;
+    } catch {
+      // Try the next drive; the player can still pick one.
+    }
   }
+  destinationRoot = null;
+  destinationRecommended = false;
 }
 
 function assetSyncSummary(): AssetSyncSummary {
@@ -1000,6 +1039,34 @@ function registerIpc(): void {
         phase = "error";
         await broadcastSnapshot();
         return result;
+      }
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.listInstallDrives,
+    trustedHandler(async () => listInstallDrives()),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.chooseInstallDrive,
+    trustedHandler(async (_event, root: unknown): Promise<OperationResult<{ destinationRoot: string }>> => {
+      const copy = MAIN_COPY[currentLocale];
+      if (!sourceRoot) return { ok: false, error: copy.selectSourceFirst };
+      if (sourceKind !== "copy-required") return { ok: false, error: copy.destinationNotNeeded };
+      if (installAbortController) return { ok: false, error: copy.installationInProgress };
+      if (typeof root !== "string" || !/^[C-Z]:\\$/.test(root) || !(await statDrive(root))) {
+        return { ok: false, error: copy.driveUnavailable };
+      }
+      try {
+        destinationRoot = await acceptDestination(destinationOnDrive(root));
+        destinationRecommended = false;
+        phase = "destination-selected";
+        lastErrorRaw = null;
+        await broadcastSnapshot();
+        return { ok: true, value: { destinationRoot } };
+      } catch (error) {
+        return operationError<{ destinationRoot: string }>(error);
       }
     }),
   );
