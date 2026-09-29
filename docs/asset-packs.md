@@ -16,20 +16,19 @@ requiring a launcher release. The pipeline is implemented by
 1. Fetch `feed.json` from
    `https://raw.githubusercontent.com/h1z1rotk/assets/main/feed.json`
    (HTTPS only, 10 s timeout, 1 MB cap).
-2. Fetch the latest stable GitHub release metadata. Every conventional `foo.zip`
-   release asset is merged over the feed as `Resources/Assets/foo.pack2`, using the
-   size and SHA-256 digest returned by GitHub.
-3. Diff the merged catalog against the local state (`asset-state.v1.json` in the launcher `userData`):
+2. Diff the catalog against the local state (`asset-state.v1.json` in the launcher `userData`):
    an asset is (re)installed when it is new, its `version`/`sha256` changed, or one of
    its installed files is missing (the **Verify files** action additionally re-hashes
    every installed file).
-4. Download into `userData/asset-cache/` (a cached pack with the right SHA-256 is
-   reused without any network call), verify the streamed SHA-256 against the manifest,
-   then install atomically (staging file + `rename`) into the ROTK installation.
-5. Client files overwritten for the first time are backed up under
+3. Download into `userData/asset-cache/` (a cached pack with the right SHA-256 is
+   reused without any network call). Downloads go to a `.part` file and resume with
+   a `Range` request after a network drop or a restart. The SHA-256 is checked
+   against the manifest, then the files are installed atomically (staging file +
+   `rename`) into the ROTK installation.
+4. Client files overwritten for the first time are backed up under
    `userData/asset-backups/` — **Restore vanilla client** puts them back and deletes
-   everything the merged catalog added.
-6. Assets removed from the merged catalog are uninstalled on the next sync (backup restored
+   everything the catalog added.
+5. Assets removed from the catalog are uninstalled on the next sync (backup restored
    or file deleted).
 
 Metadata that cannot be fetched **never blocks the game** once a first sync completed:
@@ -42,9 +41,11 @@ the setup panel — offline/dev mode).
 - `feed.json` at the root of `main` — the always-current manifest.
 - Binaries attached as **GitHub Release assets** (never committed): stable URLs, no
   git size limits.
-- Every conventional `foo.zip` uploaded to the latest stable release is discovered
-  automatically as `Resources/Assets/foo.pack2`; no `feed.json` edit is required.
-- `feed.json` remains available for non-pack payloads and explicit legacy entries.
+- Only what `feed.json` lists is installed. The launcher no longer reads the
+  GitHub releases API (it was rate-limited to 60 requests/hour per IP, and a pack
+  missing from the feed would also be missing from the attestation payloads).
+- Keep naming release payloads `*.payload`, not `*.zip`: launchers up to 2.0.23
+  still pick up any `foo.zip` of the latest release on their own.
 
 ## 3. Manifest format
 
@@ -128,11 +129,10 @@ alone does not distribute the fix.
    attestation payload manifest.
 2. Create the stable GitHub release `assets-vX.Y.Z` on `h1z1rotk/assets` and attach
    the generated zips.
-3. Done for conventional pack ZIPs: launchers discover them from the latest release.
-4. Commit `feed.json` only for non-pack payloads or explicit legacy entries.
-5. Publish the generated attestation payload manifest with the server policy.
-6. At the next launch or **Verify files**, missing or changed packs are downloaded.
-   To roll back, remove/replace the release asset or publish a newer stable release.
+3. Commit both `feed.json` and `asset-payloads.v1.json` to `main`, together.
+4. Publish the attestation payload manifest with the server policy.
+5. At the next launch or **Verify files**, missing or changed packs are downloaded.
+   To roll back, commit the previous `feed.json` and payload manifest.
 
 Manual fallback: build payloads yourself (avoid blocked extensions and
 protected paths), `Get-FileHash -Algorithm SHA256`, then edit `feed.json` by

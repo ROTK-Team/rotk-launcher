@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ASSET_RELEASE_API_URL,
@@ -16,6 +16,11 @@ import { buildZip } from "./helpers/build-zip.js";
 
 const FEED_URL = "https://raw.githubusercontent.com/rotk/rotk-assets/main/feed.json";
 const INSTALL_MARKER_NAME = ".rotk-installation.json";
+
+/** Where the launcher keeps cache and backups for an install root. */
+function assetStorage(root: string): string {
+  return join(dirname(root), `.${basename(root)}-assets`);
+}
 
 function sha256(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
@@ -85,7 +90,7 @@ describe("ROTK asset sync", () => {
   async function setup(): Promise<{ userData: string; root: string }> {
     const userData = await mkdtemp(join(tmpdir(), "rotk-asset-userdata-"));
     const root = await mkdtemp(join(tmpdir(), "rotk-asset-client-"));
-    temporaryDirectories.push(userData, root);
+    temporaryDirectories.push(userData, root, assetStorage(root));
     await writeFile(join(root, INSTALL_MARKER_NAME), "{}\n");
     return { userData, root };
   }
@@ -337,7 +342,7 @@ describe("ROTK asset sync", () => {
     const { userData, root } = await setup();
     const payload = Buffer.from("0123456789".repeat(100));
     const entry = assetEntry("big.pack", payload, { installPath: "data/big.pack" });
-    const cacheDirectory = join(userData, "asset-cache");
+    const cacheDirectory = join(assetStorage(root), "asset-cache");
     await mkdir(cacheDirectory, { recursive: true });
     await writeFile(join(cacheDirectory, `${entry.sha256}.pack.part`), payload.subarray(0, 400));
     const ranges: Array<string | null> = [];
@@ -359,6 +364,28 @@ describe("ROTK asset sync", () => {
     await sync.sync(root);
     expect(ranges).toEqual(["bytes=400-"]);
     expect(await readFile(join(root, "data", "big.pack"))).toEqual(payload);
+  });
+
+  it("restores backups made by older launchers and drops their C: cache", async () => {
+    const { userData, root } = await setup();
+    await mkdir(join(root, "data"), { recursive: true });
+    await writeFile(join(root, "data", "sounds.pack"), "custom sounds");
+    await mkdir(join(userData, "asset-backups", "data"), { recursive: true });
+    await writeFile(join(userData, "asset-backups", "data", "sounds.pack"), "vanilla sounds");
+    await mkdir(join(userData, "asset-cache"), { recursive: true });
+    await writeFile(join(userData, "asset-cache", "old.pack"), "old");
+    await writeFile(join(userData, "asset-state.v1.json"), JSON.stringify({
+      schemaVersion: 1, packVersion: "0.9.0", syncedAt: "2026-09-01T00:00:00Z",
+      assets: [{
+        name: "rotk-sounds", version: "0.9.0", sha256: sha256("custom sounds"),
+        installedFiles: [{ path: "data/sounds.pack", sha256: sha256("custom sounds"), size: 13 }],
+      }],
+    }));
+
+    // The pack left the feed: the original comes back from the old backup.
+    await service(userData, { [FEED_URL]: () => new Response(JSON.stringify(manifest([]))) }).sync(root);
+    await expect(readFile(join(root, "data", "sounds.pack"), "utf8")).resolves.toBe("vanilla sounds");
+    await expect(stat(join(userData, "asset-cache"))).rejects.toThrow();
   });
 
   it("retries a download after a server error", async () => {
@@ -425,7 +452,7 @@ describe("ROTK asset sync", () => {
     expect(outcome).toEqual({ status: "updated", packVersion: "1.0.0" });
     expect(await readFile(join(root, "data", "sounds.pack"), "utf8")).toBe("custom sounds");
     expect(await readFile(join(root, "Resources", "texture.dat"), "utf8")).toBe("custom texture");
-    expect(await readFile(join(userData, "asset-backups", "data", "sounds.pack"), "utf8")).toBe("vanilla sounds");
+    expect(await readFile(join(assetStorage(root), "asset-backups", "data", "sounds.pack"), "utf8")).toBe("vanilla sounds");
 
     const state = await sync.readState();
     expect(state?.packVersion).toBe("1.0.0");
@@ -522,7 +549,7 @@ describe("ROTK asset sync", () => {
     await expect(sync.sync(root)).rejects.toThrow("est corrompu");
     await expect(stat(join(root, "evil.dat"))).rejects.toThrow();
     expect(await sync.readState()).toBeNull();
-    const cacheEntries = await readdir(join(userData, "asset-cache"));
+    const cacheEntries = await readdir(join(assetStorage(root), "asset-cache"));
     expect(cacheEntries).toEqual([]);
   });
 
@@ -631,6 +658,6 @@ describe("ROTK asset sync", () => {
     expect(await readFile(join(root, "replaced.pack"), "utf8")).toBe("vanilla bytes");
     await expect(stat(join(root, "added.pack"))).rejects.toThrow();
     expect(await sync.readState()).toBeNull();
-    await expect(stat(join(userData, "asset-backups"))).rejects.toThrow();
+    await expect(stat(join(assetStorage(root), "asset-backups"))).rejects.toThrow();
   });
 });
