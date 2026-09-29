@@ -193,7 +193,25 @@ const FRENCH_ERRORS = new Map<string, string>([
   ["Unknown ROTK server", "Serveur ROTK inconnu."],
   ["Unknown ROTK launch role", "Mode de lancement ROTK inconnu."],
   ["Unknown ROTK launch profile", "Profil de lancement ROTK inconnu."],
+  ["The ROTK launcher key was rejected", "La clé launcher ROTK a été refusée. Recopie-la depuis ton compte sur le site."],
+  ["Too many ROTK authentication attempts. Wait a moment and try again", "Trop de tentatives de connexion ROTK. Attends un peu puis réessaie."],
+  ["The ROTK account service is temporarily unavailable", "Le service de compte ROTK est momentanément indisponible. Réessaie dans quelques minutes."],
+  ["The ROTK account service refused the launch request", "Le service de compte ROTK a refusé le lancement."],
+  ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "Les fichiers du jeu ne correspondent pas à l’installation ROTK officielle. Utilise « Vérifier les fichiers », puis réessaie."],
+  ["This launcher version is too old to verify the game files. Update the launcher.", "Cette version du launcher est trop ancienne. Mets le launcher à jour."],
+  ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "Ce compte ROTK n’est pas encore prêt. Connecte-toi sur le site ROTK, puis réessaie."],
+  ["Unable to reach the ROTK integrity service", "Impossible de joindre le service de vérification ROTK. Vérifie ta connexion."],
+  ["The ROTK integrity service is temporarily unavailable", "Le service de vérification ROTK est momentanément indisponible."],
+  ["Too many ROTK integrity checks. Wait a moment and try again", "Trop de vérifications ROTK. Attends un peu puis réessaie."],
 ]);
+
+const DYNAMIC_FRENCH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+  [/^Unable to reach the ROTK account service(?: \((.+)\))?$/, (match) => `Impossible de joindre le service de compte ROTK${match[1] ? ` (${match[1]})` : ""}. Vérifie ta connexion, ton pare-feu ou ton antivirus.`],
+  [/^Invalid response from the ROTK account service(?: \(HTTP (\d+)\))?$/, (match) => `Réponse invalide du service de compte ROTK${match[1] ? ` (HTTP ${match[1]})` : ""}. Réessaie dans quelques minutes.`],
+  [/^ROTK could not verify your game files: (.+) Check your connection and try again\.$/, (match) => `ROTK n’a pas pu vérifier tes fichiers de jeu : ${match[1]} Vérifie ta connexion puis réessaie.`],
+  [/^This ROTK account is suspended until (.+?)\.(?: Reason: (.+))?$/, (match) => `Ce compte ROTK est suspendu jusqu’au ${match[1]}.${match[2] ? ` Raison : ${match[2]}` : ""}`],
+  [/^This ROTK account is permanently banned\.(?: Reason: (.+))?$/, (match) => `Ce compte ROTK est banni définitivement.${match[1] ? ` Raison : ${match[1]}` : ""}`],
+];
 
 const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
   [/^H1Z1 s’est fermé pendant son initialisation \(code Windows (.+)\)\.$/, (match) => `H1Z1 closed during initialization (Windows code ${match[1]}).`],
@@ -224,6 +242,16 @@ const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string
 ];
 
 const CHINESE_ERRORS = new Map<string, string>([
+  ["The ROTK launcher key was rejected", "ROTK 启动器密钥无效，请到网站账号页面重新复制。"],
+  ["Too many ROTK authentication attempts. Wait a moment and try again", "登录尝试次数过多，请稍后再试。"],
+  ["The ROTK account service is temporarily unavailable", "ROTK 账号服务暂时不可用，请几分钟后重试。"],
+  ["The ROTK account service refused the launch request", "ROTK 账号服务拒绝了本次启动。"],
+  ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "游戏文件与 ROTK 官方版本不一致。请点击“验证文件”后重试。"],
+  ["This launcher version is too old to verify the game files. Update the launcher.", "启动器版本过旧，请先更新启动器。"],
+  ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "此 ROTK 账号还不能进入游戏。请先登录 ROTK 网站，然后重试。"],
+  ["Unable to reach the ROTK integrity service", "无法连接 ROTK 校验服务，请检查网络。"],
+  ["The ROTK integrity service is temporarily unavailable", "ROTK 校验服务暂时不可用。"],
+  ["Too many ROTK integrity checks. Wait a moment and try again", "校验请求过于频繁，请稍后再试。"],
   ["Installation annulée.", "安装已取消。"],
   ["Le dossier ROTK choisi contient déjà d’autres fichiers. Choisis un dossier vide.", "所选的 ROTK 文件夹里已经有其他文件，请选择一个空文件夹。"],
   ["H1Z1 est déjà lancé depuis cette installation.", "H1Z1 正在运行，请先关闭游戏。"],
@@ -246,10 +274,23 @@ const DYNAMIC_CHINESE_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string
   [/^Client H1Z1 incomplet : (.+) est introuvable\.$/, (match) => `H1Z1 客户端不完整：找不到 ${match[1]}。请在 Steam 中验证游戏文件完整性。`],
   [/^Le téléchargement de l’asset (.+) s’est interrompu\.$/, (match) => `资源 ${match[1]} 下载中断，请检查网络后重试。`],
   [/^Téléchargement d’assets refusé \(HTTP (\d+)\)\.$/, (match) => `资源下载失败（HTTP ${match[1]}），请稍后重试。`],
+  [/^Unable to reach the ROTK account service(?: \((.+)\))?$/, (match) => `无法连接 ROTK 账号服务${match[1] ? `（${match[1]}）` : ""}。请检查网络、防火墙或杀毒软件设置。`],
+  [/^Invalid response from the ROTK account service(?: \(HTTP (\d+)\))?$/, (match) => `ROTK 账号服务返回异常${match[1] ? `（HTTP ${match[1]}）` : ""}，请几分钟后重试。`],
+  [/^ROTK could not verify your game files: (.+) Check your connection and try again\.$/, (match) => `ROTK 无法验证你的游戏文件：${match[1]} 请检查网络后重试。`],
+  [/^This ROTK account is suspended until (.+?)\.(?: Reason: (.+))?$/, (match) => `此 ROTK 账号已被封禁至 ${match[1]}。${match[2] ? `原因：${match[2]}` : ""}`],
+  [/^This ROTK account is permanently banned\.(?: Reason: (.+))?$/, (match) => `此 ROTK 账号已被永久封禁。${match[1] ? `原因：${match[1]}` : ""}`],
 ];
 
 export function localizeServiceError(message: string, locale: AppLocale): string {
-  if (locale === "fr") return FRENCH_ERRORS.get(message) ?? message;
+  if (locale === "fr") {
+    const exact = FRENCH_ERRORS.get(message);
+    if (exact) return exact;
+    for (const [pattern, translate] of DYNAMIC_FRENCH_ERRORS) {
+      const match = message.match(pattern);
+      if (match) return translate(match);
+    }
+    return message;
+  }
   if (locale === "zh") {
     const exact = CHINESE_ERRORS.get(message);
     if (exact) return exact;
