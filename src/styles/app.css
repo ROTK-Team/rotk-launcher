@@ -38,6 +38,16 @@
   box-sizing: border-box;
 }
 
+/* Chinese: a proper CJK face, and no wide tracking (it only suits Latin caps). */
+html:lang(zh) {
+  --display: "Eurostile", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-family: "Inter", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+html:lang(zh) * {
+  letter-spacing: normal !important;
+}
+
 html,
 body,
 #root {

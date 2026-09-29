@@ -216,6 +216,11 @@ function diagnosticCopy(): { failed: string; invalid: string; save: string; exis
     invalid: "La demande de diagnostic est invalide.", save: "Enregistrer le rapport de diagnostic ROTK",
     exists: "Ce fichier existe déjà. Choisis un autre nom pour conserver les deux rapports.",
     settings: "Le réglage de capture pourra être changé une fois la session terminée.",
+  } : currentLocale === "zh" ? {
+    failed: "诊断未能完成。已保存的报告仍然可用。",
+    invalid: "诊断请求无效。", save: "保存 ROTK 诊断报告",
+    exists: "文件已存在。请换一个文件名，以免覆盖之前的报告。",
+    settings: "游戏结束后才能修改记录设置。",
   } : {
     failed: "The diagnostic operation could not be completed. Previously saved reports are still available.",
     invalid: "The diagnostic request is invalid.", save: "Save ROTK diagnostic report",
@@ -1451,6 +1456,10 @@ function createWindow(): BrowserWindow {
 
 async function initialize(): Promise<void> {
   startupLog.mark("ready");
+  // Until the window reports the player's choice, follow Windows: a startup
+  // error box then reads in the right language.
+  const systemLanguage = app.getLocale().toLowerCase();
+  currentLocale = systemLanguage.startsWith("zh") ? "zh" : systemLanguage.startsWith("fr") ? "fr" : "en";
   // The window comes first: a step below that stalls (a sleeping drive under
   // the installation root, a slow profile) still leaves a launcher on screen,
   // and a renderer or GPU child that cannot start is seen and logged rather
