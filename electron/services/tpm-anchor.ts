@@ -14,9 +14,9 @@
  * Elevation: the EK public part and the activation are available to any user
  * through the PCP; reading the EK *certificate* (what proves the TPM is a real
  * one) and running the activation command are refused by Windows to a
- * standard user (TBS blocks the command). The launcher therefore runs
- * elevated (requestedExecutionLevel in package.json); when it is not, the
- * pieces that need it are simply absent and the server records that.
+ * standard user (TBS blocks the command). The launcher runs as the invoking
+ * user since 2.0.15, so those pieces are usually absent and the server
+ * records that.
  *
  * Best-effort everywhere: no TPM, no provider, a blocked command or a refused
  * read yield null and the launch proceeds. The launcher never self-exempts;
@@ -24,6 +24,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 
 import { windowsSystemToolPath } from "./windows-tools.js";
@@ -52,17 +53,15 @@ public static class RotkNCrypt {
  * Opens (or creates, once) the identity key, signs the message passed
  * base64-encoded in ROTK_TPM_MESSAGE_B64 (the binding message carries NUL
  * separators, which a child's environment cannot), exports the Windows public
- * blob and the TPM2B_PUBLIC
- * the PCP key blob carries, reads the endorsement key's public part and what
- * it can of the EK certificate chain, and prints one JSON line. .NET Framework
- * 4.x compatible so it runs under the stock Windows PowerShell 5.1.
+ * blob and the TPM2B_PUBLIC the PCP key blob carries, and prints one JSON
+ * line. Plain .NET Framework 4.x, so it runs under the stock Windows
+ * PowerShell 5.1 without compiling anything.
  */
 const COLLECT_SCRIPT = `
 $ErrorActionPreference = "Stop"
 $encoded = $env:ROTK_TPM_MESSAGE_B64
 if ([string]::IsNullOrEmpty($encoded)) { throw "no message" }
 $data = [Convert]::FromBase64String($encoded)
-${NCRYPT_INTEROP}
 $provider = [System.Security.Cryptography.CngProvider]::new("Microsoft Platform Crypto Provider")
 if ([System.Security.Cryptography.CngKey]::Exists("${KEY_NAME}", $provider)) {
   $key = [System.Security.Cryptography.CngKey]::Open("${KEY_NAME}", $provider)
@@ -87,6 +86,19 @@ $r = @{
   signature = [Convert]::ToBase64String($sig)
   tpmPublic = [Convert]::ToBase64String($tpmPublic)
 }
+Write-Output ($r | ConvertTo-Json -Compress)
+`;
+
+/**
+ * Reads the endorsement key's public part and what it can of its certificate
+ * chain. The only step that needs Add-Type (it compiles C# with csc.exe, which
+ * antivirus heuristics dislike), and its answer never changes on a machine:
+ * it runs once and the result is cached.
+ */
+const ENDORSEMENT_SCRIPT = `
+$ErrorActionPreference = "Stop"
+${NCRYPT_INTEROP}
+$r = @{}
 $h = [IntPtr]::Zero
 if ([RotkNCrypt]::NCryptOpenStorageProvider([ref]$h, "Microsoft Platform Crypto Provider", 0) -eq 0) {
   try {
@@ -210,6 +222,34 @@ export interface TpmAnchorOptions {
   /** Test seam: runs a script with the given environment and returns its stdout. */
   run?: (script: string, env: Record<string, string>) => Promise<string>;
   timeoutMs?: number;
+  /** Where the endorsement key description is cached; read every time without it. */
+  endorsementCachePath?: string;
+}
+
+function firstJsonLine(stdout: string): Record<string, unknown> {
+  const line = stdout.split(/\r?\n/).map((l) => l.trim()).find((l) => l.startsWith("{"));
+  if (line === undefined) return {};
+  try {
+    const parsed: unknown = JSON.parse(line.replace(/^\uFEFF/, ""));
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+async function readEndorsement(
+  run: (script: string, env: Record<string, string>) => Promise<string>,
+  cachePath: string | undefined,
+): Promise<Record<string, unknown>> {
+  if (cachePath) {
+    const cached = await readFile(cachePath, "utf8").then(firstJsonLine).catch((): Record<string, unknown> => ({}));
+    if (typeof cached["ekPublicKey"] === "string") return cached;
+  }
+  const endorsement = firstJsonLine(await run(ENDORSEMENT_SCRIPT, {}).catch(() => ""));
+  if (cachePath && typeof endorsement["ekPublicKey"] === "string") {
+    await writeFile(cachePath, `${JSON.stringify(endorsement)}\n`, "utf8").catch(() => undefined);
+  }
+  return endorsement;
 }
 
 /**
@@ -220,7 +260,9 @@ export async function collectTpmAnchor(message: string, options: TpmAnchorOption
   if (process.platform !== "win32" || typeof message !== "string" || message === "") return null;
   const run = options.run ?? ((script: string, env: Record<string, string>) => runPowerShell(script, env, options.timeoutMs ?? 20_000));
   try {
-    return parseTpmAnchorOutput(await run(COLLECT_SCRIPT, { ROTK_TPM_MESSAGE_B64: Buffer.from(message, "utf8").toString("base64") }));
+    const signed = firstJsonLine(await run(COLLECT_SCRIPT, { ROTK_TPM_MESSAGE_B64: Buffer.from(message, "utf8").toString("base64") }));
+    const endorsement = await readEndorsement(run, options.endorsementCachePath);
+    return parseTpmAnchorOutput(JSON.stringify({ ...endorsement, ...signed }));
   } catch {
     return null;
   }
