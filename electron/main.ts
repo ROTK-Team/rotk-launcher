@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, stat, statfs } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { join, basename, dirname, parse, resolve } from "node:path";
 import tls from "node:tls";
 import { fileURLToPath } from "node:url";
@@ -64,7 +64,7 @@ import { collectTpmProof } from "./services/tpm-identity.js";
 import { collectTpmAnchor, enrolTpmAnchor } from "./services/tpm-anchor.js";
 import { tpmBindingMessage } from "../shared/attestation.js";
 import { PathPolicyError, classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
-import { locateSteamClient } from "./services/steam-locator.js";
+import { H1Z1_STEAM_APP_ID, locateSteamClient } from "./services/steam-locator.js";
 import {
   runtimeConfigFor,
   runtimeConfigList,
@@ -100,7 +100,7 @@ import {
 } from "./services/integrity-attestation.js";
 import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { StartupLog } from "./services/startup-log.js";
-import { describeSystemError, isSystemError, sha256File } from "./services/fs-safe.js";
+import { describeSystemError, isSystemError, retryFs, sha256File } from "./services/fs-safe.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
@@ -406,6 +406,24 @@ async function applyRecommendedDestination(): Promise<void> {
   }
   destinationRoot = null;
   destinationRecommended = false;
+}
+
+// Where the last unfinished copy was going. A copy left half-way on one drive
+// is dropped when the player installs somewhere else instead.
+function pendingCopyRecordPath(): string {
+  return join(app.getPath("userData"), "pending-install.json");
+}
+
+async function dropAbandonedCopy(nextRoot: string): Promise<void> {
+  const previous = await readFile(pendingCopyRecordPath(), "utf8")
+    .then((text) => (JSON.parse(text) as { root?: unknown }).root)
+    .catch(() => null);
+  if (typeof previous !== "string" || resolve(previous).toLowerCase() === resolve(nextRoot).toLowerCase()) return;
+  // Only a folder we own and never finished: pending marker, no install marker.
+  const root = await validateInstallDestination(previous).catch(() => null);
+  if (!root || await inspectDestination(root) !== "pending") return;
+  await retryFs(() => rm(root, { recursive: true, force: true }));
+  startupLog.mark("abandoned-copy-removed", root);
 }
 
 function assetSyncSummary(): AssetSyncSummary {
@@ -1048,6 +1066,18 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.openSteamInstall,
+    trustedHandler(async (): Promise<OperationResult> => {
+      try {
+        await shell.openExternal(`steam://install/${H1Z1_STEAM_APP_ID}`);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: MAIN_COPY[currentLocale].steamUnavailable };
+      }
+    }),
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.dismissError,
     trustedHandler(async () => {
       lastErrorRaw = null;
@@ -1078,25 +1108,31 @@ function registerIpc(): void {
         const installationRoot = sourceKind === "direct"
           ? sourceRoot
           : destinationRoot as string;
-        const marker = sourceKind === "direct"
-          ? await adoptExistingClient({
-              root: sourceRoot,
-              shimPath: resolveBundledShimPath(),
-              vivoxProxyPath: resolveBundledVivoxProxyPath(),
-              vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
-              launcherVersion: app.getVersion(),
-              onProgress,
-            })
-          : await installClient({
-              sourceRoot,
-              destinationRoot: installationRoot,
-              shimPath: resolveBundledShimPath(),
-              vivoxProxyPath: resolveBundledVivoxProxyPath(),
-              vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
-              launcherVersion: app.getVersion(),
-              signal: installAbortController.signal,
-              onProgress,
-            });
+        let marker: Awaited<ReturnType<typeof installClient>>;
+        if (sourceKind === "direct") {
+          marker = await adoptExistingClient({
+            root: sourceRoot,
+            shimPath: resolveBundledShimPath(),
+            vivoxProxyPath: resolveBundledVivoxProxyPath(),
+            vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
+            launcherVersion: app.getVersion(),
+            onProgress,
+          });
+        } else {
+          await dropAbandonedCopy(installationRoot).catch(() => undefined);
+          await writeFile(pendingCopyRecordPath(), JSON.stringify({ root: installationRoot }));
+          marker = await installClient({
+            sourceRoot,
+            destinationRoot: installationRoot,
+            shimPath: resolveBundledShimPath(),
+            vivoxProxyPath: resolveBundledVivoxProxyPath(),
+            vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
+            launcherVersion: app.getVersion(),
+            signal: installAbortController.signal,
+            onProgress,
+          });
+        }
+        await rm(pendingCopyRecordPath(), { force: true }).catch(() => undefined);
         await configStore.setInstallation({
           installId: marker.installId,
           clientBuildId: marker.clientBuildId,

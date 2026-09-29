@@ -18,6 +18,9 @@ export const STEAM_GAME_DIRECTORY_CANDIDATES = [
   "H1Z1 King of the Kill",
 ] as const;
 
+/** Steam app id of H1Z1 (listed as "Z1 Battle Royale"). */
+export const H1Z1_STEAM_APP_ID = "433850";
+
 export interface SteamLocatorDependencies {
   readRegistrySteamPath(): Promise<string | null>;
   readTextFile(path: string): Promise<string | null>;
@@ -121,7 +124,16 @@ export async function locateSteamClient(
   }
 
   for (const library of libraries) {
-    for (const directoryName of STEAM_GAME_DIRECTORY_CANDIDATES) {
+    // The app manifest names the real folder, whatever the game was called then.
+    const appManifest = await deps.readTextFile(
+      join(library, "steamapps", `appmanifest_${H1Z1_STEAM_APP_ID}.acf`),
+    );
+    const installDirectory = appManifest?.match(/"installdir"\s*"([^"]+)"/i)?.[1];
+    const names = [...new Map(
+      [...(installDirectory ? [installDirectory] : []), ...STEAM_GAME_DIRECTORY_CANDIDATES]
+        .map((name) => [name.toLocaleLowerCase("en-US"), name] as const),
+    ).values()];
+    for (const directoryName of names) {
       const candidate = join(library, "steamapps", "common", directoryName);
       try {
         return await deps.validateCandidate(candidate);

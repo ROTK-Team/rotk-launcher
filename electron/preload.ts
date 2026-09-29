@@ -30,6 +30,7 @@ const api: RotkLauncherApi = {
   listInstallDrives: () => ipcRenderer.invoke(IPC_CHANNELS.listInstallDrives),
   chooseInstallDrive: (root) => ipcRenderer.invoke(IPC_CHANNELS.chooseInstallDrive, root),
   dismissError: () => ipcRenderer.invoke(IPC_CHANNELS.dismissError),
+  openSteamInstall: () => ipcRenderer.invoke(IPC_CHANNELS.openSteamInstall),
   install: () => ipcRenderer.invoke(IPC_CHANNELS.install),
   cancelInstall: () => ipcRenderer.invoke(IPC_CHANNELS.cancelInstall),
   play: () => ipcRenderer.invoke(IPC_CHANNELS.play),

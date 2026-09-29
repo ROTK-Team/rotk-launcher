@@ -72,6 +72,13 @@ export default function App() {
     void window.rotk.detectSource();
   }, [setupOpen, detectAttempted, snapshot]);
 
+  // Back from Steam after installing H1Z1: look for the client again.
+  useEffect(() => {
+    const retry = () => setDetectAttempted(false);
+    window.addEventListener("focus", retry);
+    return () => window.removeEventListener("focus", retry);
+  }, []);
+
   const operationInFlight = useRef(false);
   const perform = useCallback(async (operation: () => Promise<OperationResult<unknown>>) => {
     // A second click while an operation runs must not release `busy` early.
@@ -188,6 +195,7 @@ export default function App() {
         onSelectSource={() => void selectSource()}
         onSelectDestination={() => void selectDestination()}
         onChooseDrive={(root) => void perform(() => window.rotk.chooseInstallDrive(root))}
+        onInstallWithSteam={() => void perform(() => window.rotk.openSteamInstall())}
         onInstall={() => void install()}
         onCancel={() => void window.rotk.cancelInstall()}
         onVerifyAssets={() => void perform(() => window.rotk.verifyAssets())}
