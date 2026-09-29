@@ -79,6 +79,8 @@ export async function startLocalSessionGateway(launchTicket: string): Promise<Lo
     server.once("error", onError);
     server.listen(0, LOOPBACK_HOST, () => {
       server.off("error", onError);
+      // A later socket error must not become an uncaught exception.
+      server.on("error", () => undefined);
       resolve();
     });
   });

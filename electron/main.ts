@@ -1184,7 +1184,7 @@ function registerIpc(): void {
           diagnostics: diagnosticLaunch?.hooks,
           // Best-effort hardware fingerprint; the server hashes it. A failure
           // must never block a launch, so it degrades to no HWID signal.
-          hwid: await collectHwid().catch(() => ({})),
+          fallbackHwid: () => collectHwid(),
           onExit: () => {
             gamePid = null;
             phase = "ready";
