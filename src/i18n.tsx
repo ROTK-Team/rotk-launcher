@@ -19,6 +19,7 @@ export interface Copy {
     change: (current: string) => string;
     english: string;
     french: string;
+    chinese: string;
   };
   chrome: {
     launcher: string;
@@ -201,6 +202,7 @@ const COPY: Record<AppLocale, Copy> = {
       change: (current) => `Change language. Current language: ${current}`,
       english: "English",
       french: "Français",
+      chinese: "简体中文",
     },
     chrome: {
       launcher: "LAUNCHER",
@@ -356,7 +358,7 @@ const COPY: Record<AppLocale, Copy> = {
         scanning: "Scanning H1Z1 client",
         verifying: "SHA-256 verification",
         configuring: "Applying ROTK client configuration",
-        finalizing: "Atomic finalization",
+        finalizing: "Finishing the installation",
       },
     },
     activity: {
@@ -413,6 +415,7 @@ const COPY: Record<AppLocale, Copy> = {
       change: (current) => `Changer de langue. Langue actuelle : ${current}`,
       english: "English",
       french: "Français",
+      chinese: "简体中文",
     },
     chrome: {
       launcher: "LAUNCHER",
@@ -568,7 +571,7 @@ const COPY: Record<AppLocale, Copy> = {
         scanning: "Analyse du client H1Z1",
         verifying: "Vérification SHA-256",
         configuring: "Application du client ROTK",
-        finalizing: "Finalisation atomique",
+        finalizing: "Finalisation de l’installation",
       },
     },
     activity: {
@@ -618,6 +621,219 @@ const COPY: Record<AppLocale, Copy> = {
       autoSync: "Mettre à jour les assets personnalisés automatiquement",
     },
   },
+  zh: {
+    diagnostics: DIAGNOSTICS_COPY.zh,
+    language: {
+      label: "语言",
+      change: (current) => `切换语言。当前语言：${current}`,
+      english: "English",
+      french: "Français",
+      chinese: "简体中文",
+    },
+    chrome: {
+      launcher: "启动器",
+      updates: "开发动态",
+      build: "版本",
+      minimize: "最小化",
+      close: "关闭",
+    },
+    app: {
+      initializing: "正在初始化启动器",
+      operationFailed: "操作失败。",
+      operationInterrupted: "操作已中断",
+      closeError: "关闭",
+    },
+    news: {
+      headline: "重返战场。",
+      latest: "最新消息",
+      fallbackTitle: "关注开发进度",
+      fallbackSummary: "暂时无法获取开发动态，不影响启动器的使用。",
+      fallbackCategory: "开发",
+      label: "ROTK 最新消息",
+      navigation: "消息导航",
+      showItem: (index) => `显示第 ${index} 条消息`,
+      patchNote: "更新说明",
+      devUpdate: "开发动态",
+      version: "版本",
+      readUpdate: "查看详情",
+      previous: "上一条消息",
+      next: "下一条消息",
+    },
+    footer: {
+      play: "开始游戏",
+      inGame: "游戏中",
+      process: "进程",
+      activeProcess: "运行中的进程",
+      launching: "正在启动",
+      preparingClient: "正在准备客户端",
+      installing: "正在安装",
+      secureCopy: "正在复制游戏文件",
+      attention: "注意",
+      ready: "就绪",
+      clientConfigured: "ROTK 客户端已配置",
+      accountRequired: "需要 ROTK 账号",
+      missingAccountKey: "请添加网站上的启动器密钥",
+      setupRequired: "尚未安装",
+      createIndependentInstall: "请选择 H1Z1 客户端",
+      install: "安装",
+      environment: "环境",
+      settings: "安装与设置",
+      playerIdentity: "ROTK 账号密钥",
+      addAccountKey: "添加 ROTK 密钥",
+      adminMode: "管理员",
+      selectServer: "选择 ROTK 服务器和启动模式",
+      playersInGame: "游戏中",
+      playersUnavailable: "—",
+      playersUnknown: "玩家人数不可用",
+    },
+    identity: {
+      panelLabel: "ROTK 账号验证",
+      eyebrow: "ROTK 账号",
+      title: "启动器密钥",
+      intro: "每次启动游戏时，启动器都会用这个密钥关联你的 ROTK 账号、Steam 身份和游戏数据。",
+      roles: {
+        player: "玩家",
+        admin: "管理员 / 版主",
+      },
+      keyLabels: {
+        player: "玩家密钥",
+        admin: "管理员 / 版主密钥",
+      },
+      keyHints: {
+        player: (websiteHost) => `在 ${websiteHost} 依次点击：Avatar > Account settings > ROTK launcher key。`,
+        admin: (websiteHost) => `在 ${websiteHost} 的管理后台获取管理员启动器密钥。仅限获得授权的管理员。`,
+      },
+      keySet: "已保存",
+      keyMissing: "未设置",
+      extraKeys: "其他密钥",
+      extraKeysCount: (configured, total) => `已保存 ${configured}/${total}`,
+      extraKeysHint: "每个 ROTK 服务器的账号是独立的，管理员密钥和玩家密钥也属于不同账号。用不到的可以不填。",
+      placeholder: "32 位十六进制字符",
+      sessionOnly: "密钥已通过 Windows 加密保存在此账户下。启动器不会自动生成密钥。",
+      process: (websiteHost) => `在 ${websiteHost} 上注册或登录，复制密钥，然后保存到这里。`,
+      openAccount: (websiteHost) => `打开 ${websiteHost.toLocaleUpperCase("en-US")}`,
+      invalid: "请输入正好 32 位十六进制字符（0-9、a-f）。",
+      applied: "ROTK 账号密钥已安全保存。",
+      removed: "已从此电脑删除 ROTK 账号密钥。",
+      copied: "已复制 ROTK 账号密钥。",
+      apply: "保存密钥",
+      remove: "删除此密钥",
+      copy: "复制 ROTK 账号密钥",
+      show: "显示 ROTK 账号密钥",
+      hide: "隐藏 ROTK 账号密钥",
+      close: "关闭 ROTK 账号验证",
+    },
+    update: {
+      available: (version) => `启动器更新 ${version} 可用`,
+      availableDetail: "更新后即可获得最新的改进和修复。",
+      download: "更新",
+      downloading: "正在下载更新",
+      restart: "重启以安装",
+      restartDetail: "重启启动器以安装更新，然后重新启动游戏。",
+      failed: "更新下载失败",
+      retry: "重试",
+      dismiss: "隐藏更新通知",
+      close: "关闭更新提醒",
+      promptTitle: "开始游戏前请先更新",
+      readyTitle: "更新已就绪",
+      promptDetail: "更新 ROTK 启动器即可使用最新版本进行游戏。下载更新后，重启启动器进行安装。",
+      currentVersion: "当前版本",
+      newVersion: "新版本",
+      later: "稍后",
+      closeGame: "重启启动器前请先关闭游戏。",
+      check: "检查更新",
+      requiredDetail: "服务器要求使用更新版本的启动器。如果找不到更新，请检查网络连接后重试。",
+    },
+    install: {
+      notSelected: "未选择",
+      closeSetup: "关闭设置",
+      panelLabel: "ROTK 客户端安装",
+      firstInstall: "客户端设置",
+      title: "客户端安装",
+      close: "关闭",
+      intro: "选择 ROTK 要使用的 H1Z1 游戏文件夹。不在 Steam 目录里的客户端会直接使用；Steam 里的客户端会先复制一份，原文件保持不变。",
+      protectionActive: "自动检测",
+      protectionDetail: "选择一个客户端，检查它是否可以直接使用。",
+      isolatedDetected: "已检测到独立客户端",
+      isolatedDetail: "这个客户端不在 Steam 目录里，无需复制。",
+      steamDetected: "已检测到 Steam 客户端",
+      steamDetail: "Steam 里的游戏不会被改动。请为 ROTK 副本选择 Steam 目录以外的位置。",
+      sourceClient: "H1Z1 客户端",
+      rotkInstall: "ROTK 安装位置",
+      detectedBadge: "自动检测",
+      recommendedBadge: "推荐",
+      subfolderHint: "会在所选位置自动创建 ROTK 子文件夹，无需手动创建。",
+      driveLabel: "安装磁盘",
+      driveFree: (gigabytes) => `剩余 ${gigabytes} GB`,
+      resumeHint: "可以随时取消或关闭启动器，下次会从中断的地方继续复制。",
+      noClientFound: "没有找到 H1Z1。请先在 Steam 库中安装 Z1 Battle Royale（Z1 大逃杀），装好后回到这里。",
+      installWithSteam: "通过 STEAM 安装 H1Z1",
+      choose: "选择",
+      cancelCopy: "取消",
+      createInstall: "创建独立副本",
+      useExisting: "使用此客户端",
+      legal: "ROTK 不提供游戏下载，也不分发游戏文件。副本只来自你电脑上已有的游戏。",
+      progressPhases: {
+        scanning: "正在扫描",
+        copying: "正在复制",
+        verifying: "正在校验",
+        configuring: "正在配置",
+        finalizing: "正在完成",
+      },
+      progressFiles: {
+        scanning: "正在扫描 H1Z1 客户端",
+        verifying: "SHA-256 校验",
+        configuring: "正在应用 ROTK 客户端配置",
+        finalizing: "正在完成安装",
+      },
+    },
+    activity: {
+      regionLabel: "启动器操作",
+      eyebrow: "正在进行的操作",
+      installation: "ROTK 客户端安装",
+      assets: "ROTK 游戏资源",
+      integrity: "游戏文件验证",
+      launch: "启动游戏",
+      launcherUpdate: "启动器更新",
+      checkingUpdate: "正在检查更新",
+      checkingAssets: "正在检查 ROTK 资源更新",
+      preparingFiles: "正在准备 H1Z1 客户端文件",
+      integrityDetail: "启动前检查游戏文件是否完整",
+      launchDetail: "正在连接服务器并准备游戏",
+      updateDetail: "正在检查启动器新版本",
+      working: "处理中",
+      files: (completed, total) => `${completed} / ${total} 个文件`,
+      packs: (completed, total) => `${completed} / ${total} 个资源包`,
+      progress: (operation) => `${operation} 进度`,
+    },
+    integrity: {
+      verifying: "正在验证游戏文件",
+    },
+    assets: {
+      title: "ROTK 定制资源",
+      description: "ROTK 的定制资源包从官方地址下载，经过 SHA-256 校验，每次启动前自动更新。",
+      updating: "正在更新资源",
+      status: {
+        idle: "尚未同步",
+        disabled: "同步已关闭",
+        checking: "正在检查",
+        downloading: "正在下载",
+        installing: "正在安装",
+        "up-to-date": "已是最新",
+        warning: "警告",
+        error: "错误",
+      },
+      packVersion: (version) => `资源包 ${version}`,
+      neverSynced: "未安装资源包",
+      warnings: {
+        "feed-unavailable": "暂时无法连接资源服务器，将使用已安装的资源开始游戏。",
+        "sync-failed": "资源更新失败，将使用已安装的资源开始游戏。",
+      },
+      verify: "验证文件",
+      restore: "恢复原版客户端",
+      autoSync: "自动更新 ROTK 定制资源",
+    },
+  },
 };
 
 interface I18nContextValue {
@@ -628,12 +844,20 @@ interface I18nContextValue {
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
+// First run: follow the Windows display language when we have it.
+function systemLocale(): AppLocale {
+  const language = navigator.language.toLowerCase();
+  if (language.startsWith("zh")) return "zh";
+  if (language.startsWith("fr")) return "fr";
+  return "en";
+}
+
 function storedLocale(): AppLocale {
   try {
     const value = window.localStorage.getItem(STORAGE_KEY);
-    return isAppLocale(value) ? value : "en";
+    return isAppLocale(value) ? value : systemLocale();
   } catch {
-    return "en";
+    return systemLocale();
   }
 }
 
