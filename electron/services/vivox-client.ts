@@ -1,8 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants, createReadStream } from "node:fs";
-import { copyFile, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
+import { atomicCopyFile, atomicWriteFile, retryFs } from "./fs-safe.js";
 
 export const VIVOX_STOCK_V4_SHA256 =
   "d6915a466a905ae55f7e20019e01228c92cc86ce793a9fc050b49258a210c7b1";
@@ -64,23 +65,11 @@ async function fileHash(filePath: string): Promise<string> {
 }
 
 async function atomicCopy(source: string, destination: string): Promise<void> {
-  const temporary = `${destination}.rotk-${randomUUID()}.tmp`;
-  try {
-    await copyFile(source, temporary, fsConstants.COPYFILE_EXCL);
-    await rename(temporary, destination);
-  } finally {
-    await rm(temporary, { force: true }).catch(() => undefined);
-  }
+  await atomicCopyFile(source, destination);
 }
 
 async function atomicWrite(destination: string, contents: string): Promise<void> {
-  const temporary = `${destination}.rotk-${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, contents, { encoding: "ascii", flag: "wx" });
-    await rename(temporary, destination);
-  } finally {
-    await rm(temporary, { force: true }).catch(() => undefined);
-  }
+  await atomicWriteFile(destination, contents, "ascii");
 }
 
 async function assertSupportedH1Z1(
@@ -171,7 +160,7 @@ async function deployVivoxCompatibilityWithPolicy(
   // an unexpected DLL. Only our own verified backup is removed; an unknown
   // file under that name stays on disk and gets reported, as it should be.
   if (await fileHash(legacyBackupPath) === policy.stockV4Sha256) {
-    await rm(legacyBackupPath, { force: true });
+    await retryFs(() => rm(legacyBackupPath, { force: true }));
   }
 
   // Repair an absent, stale, or corrupt Vivox 5 runtime from the validated copy.
