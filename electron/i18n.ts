@@ -147,7 +147,25 @@ const FRENCH_ERRORS = new Map<string, string>([
   ["Unknown ROTK server", "Serveur ROTK inconnu."],
   ["Unknown ROTK launch role", "Mode de lancement ROTK inconnu."],
   ["Unknown ROTK launch profile", "Profil de lancement ROTK inconnu."],
+  ["The ROTK launcher key was rejected", "La clé launcher ROTK a été refusée. Recopie-la depuis ton compte sur le site."],
+  ["Too many ROTK authentication attempts. Wait a moment and try again", "Trop de tentatives de connexion ROTK. Attends un peu puis réessaie."],
+  ["The ROTK account service is temporarily unavailable", "Le service de compte ROTK est momentanément indisponible. Réessaie dans quelques minutes."],
+  ["The ROTK account service refused the launch request", "Le service de compte ROTK a refusé le lancement."],
+  ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "Les fichiers du jeu ne correspondent pas à l’installation ROTK officielle. Utilise « Vérifier les fichiers », puis réessaie."],
+  ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "Ce compte ROTK n’est pas encore prêt. Connecte-toi sur le site ROTK, puis réessaie."],
+  ["Unable to reach the ROTK integrity service", "Impossible de joindre le service de vérification ROTK. Vérifie ta connexion."],
+  ["The ROTK integrity service is temporarily unavailable", "Le service de vérification ROTK est momentanément indisponible."],
+  ["Too many ROTK integrity checks. Wait a moment and try again", "Trop de vérifications ROTK. Attends un peu puis réessaie."],
 ]);
+
+const DYNAMIC_FRENCH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+  [/^This launcher version is too old to verify the game files\. Update the launcher\.(?: Required version: (.+)\.)?$/, (match) => `Cette version du launcher n’est pas acceptée par le serveur. Mets le launcher à jour${match[1] ? ` (version attendue : ${match[1]})` : ""}.`],
+  [/^Unable to reach the ROTK account service(?: \((.+)\))?$/, (match) => `Impossible de joindre le service de compte ROTK${match[1] ? ` (${match[1]})` : ""}. Vérifie ta connexion, ton pare-feu ou ton antivirus.`],
+  [/^Invalid response from the ROTK account service(?: \(HTTP (\d+)\))?$/, (match) => `Réponse invalide du service de compte ROTK${match[1] ? ` (HTTP ${match[1]})` : ""}. Réessaie dans quelques minutes.`],
+  [/^ROTK could not verify your game files: (.+) Check your connection and try again\.$/, (match) => `ROTK n’a pas pu vérifier tes fichiers de jeu : ${match[1]} Vérifie ta connexion puis réessaie.`],
+  [/^This ROTK account is suspended until (.+?)\.(?: Reason: (.+))?$/, (match) => `Ce compte ROTK est suspendu jusqu’au ${match[1]}.${match[2] ? ` Raison : ${match[2]}` : ""}`],
+  [/^This ROTK account is permanently banned\.(?: Reason: (.+))?$/, (match) => `Ce compte ROTK est banni définitivement.${match[1] ? ` Raison : ${match[1]}` : ""}`],
+];
 
 const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
   [/^H1Z1 s’est fermé pendant son initialisation \(code Windows (.+)\)\.$/, (match) => `H1Z1 closed during initialization (Windows code ${match[1]}).`],
@@ -178,7 +196,15 @@ const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string
 ];
 
 export function localizeServiceError(message: string, locale: AppLocale): string {
-  if (locale === "fr") return FRENCH_ERRORS.get(message) ?? message;
+  if (locale === "fr") {
+    const exact = FRENCH_ERRORS.get(message);
+    if (exact) return exact;
+    for (const [pattern, translate] of DYNAMIC_FRENCH_ERRORS) {
+      const match = message.match(pattern);
+      if (match) return translate(match);
+    }
+    return message;
+  }
   const exact = ENGLISH_ERRORS.get(message);
   if (exact) return exact;
   for (const [pattern, translate] of DYNAMIC_ENGLISH_ERRORS) {

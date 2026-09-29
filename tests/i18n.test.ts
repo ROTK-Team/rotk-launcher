@@ -63,4 +63,11 @@ describe("launcher locales", () => {
       "L’identité de session ROTK est invalide.",
     );
   });
+
+  it("localizes account service errors for French players", () => {
+    expect(localizeServiceError("Unable to reach the ROTK account service (timeout)", "fr"))
+      .toBe("Impossible de joindre le service de compte ROTK (timeout). Vérifie ta connexion, ton pare-feu ou ton antivirus.");
+    expect(localizeServiceError("This ROTK account is permanently banned. Reason: cheating", "fr"))
+      .toBe("Ce compte ROTK est banni définitivement. Raison : cheating");
+  });
 });
