@@ -20,6 +20,8 @@ export const CRITICAL_CLIENT_FILES = [
 export const ROTK_INSTALL_DIRECTORY_NAME = "ROTK";
 export const RECOMMENDED_INSTALL_PARENT_NAME = "Games";
 export const INSTALL_MARKER_NAME = ".rotk-installation.json";
+/** Written first by a copy install, removed once INSTALL_MARKER_NAME exists: the folder is ours and resumable. */
+export const INSTALL_PENDING_MARKER_NAME = ".rotk-install-pending.json";
 
 export function resolveBundledDiagnosticsPath(): string {
   return app.isPackaged

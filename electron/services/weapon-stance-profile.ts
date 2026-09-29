@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { join } from "node:path";
 import { elements, attribute, replaceBody } from "./interface-input-profile.js";
 
@@ -83,7 +84,7 @@ export async function prepareWeaponStanceProfile(root: string, stateRoot: string
   const writes = [[stateFile, JSON.stringify(result.state)], [profile, result.text]];
   for (const [path, text] of enabled ? writes : writes.reverse()) {
     const temporary = `${path}.stance-${process.pid}.tmp`;
-    try { await writeFile(temporary, text!, "utf8"); await rename(temporary, path!); }
+    try { await writeFile(temporary, text!, "utf8"); await retryFs(() => rename(temporary, path!)); }
     finally { await rm(temporary, { force: true }); }
   }
 }

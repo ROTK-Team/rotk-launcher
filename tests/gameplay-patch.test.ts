@@ -176,7 +176,7 @@ describe("shotgun sprint patch deployment", () => {
         value.bundledPath,
         value.policy,
       ),
-    ).rejects.toThrow(/embarqué est invalide/i);
+    ).rejects.toThrow(/embarqué est absent ou modifié/i);
     await expect(readFile(value.activePath, "utf8")).resolves.toBe(value.retiredOld);
   });
 
@@ -222,7 +222,7 @@ describe("shotgun sprint patch deployment", () => {
       ),
     ).rejects.toThrow(/marqueur/i);
     await expect(stat(value.activePath)).rejects.toMatchObject({ code: "ENOENT" });
-  });
+  }, 20_000); // the EPERM on the directory goes through the lock retries first
 
   it("leaves links and directories untouched and blocks deployment", async () => {
     const directoryValue = await fixture();

@@ -11,6 +11,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { constants as fsConstants } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -711,7 +712,7 @@ export class AssetSyncService {
       if (receivedBytes !== asset.size || hash.digest("hex") !== asset.sha256) {
         throw new Error(`L’asset ${asset.name} est corrompu (empreinte SHA-256 inattendue).`);
       }
-      await rename(temporaryPath, cachePath);
+      await retryFs(() => rename(temporaryPath, cachePath));
       return cachePath;
     } catch (error) {
       await rm(temporaryPath, { force: true });
@@ -767,7 +768,7 @@ export class AssetSyncService {
       try {
         const stagedHash = await extractZipEntry(cachePath, entry, staging);
         await this.backupOriginal(root, relativePath, target, ownedFiles);
-        await rename(staging, target);
+        await retryFs(() => rename(staging, target));
         installedFiles.push({ path: relativePath, sha256: stagedHash, size: entry.uncompressedSize });
         ownedFiles.add(relativePath.toLocaleLowerCase("en-US"));
       } catch (error) {
@@ -791,7 +792,7 @@ export class AssetSyncService {
       await mkdir(dirname(target), { recursive: true });
       await copyFile(sourcePath, staging, fsConstants.COPYFILE_EXCL);
       await this.backupOriginal(root, relativePath, target, ownedFiles);
-      await rename(staging, target);
+      await retryFs(() => rename(staging, target));
       ownedFiles.add(relativePath.toLocaleLowerCase("en-US"));
     } catch (error) {
       await rm(staging, { force: true });
@@ -827,7 +828,7 @@ export class AssetSyncService {
       assertSafeGeneratedStagingPath(staging, target);
       try {
         await copyFile(backupPath, staging, fsConstants.COPYFILE_EXCL);
-        await rename(staging, target);
+        await retryFs(() => rename(staging, target));
       } catch (error) {
         await rm(staging, { force: true });
         throw error;
@@ -845,7 +846,7 @@ export class AssetSyncService {
       encoding: "utf8",
       flag: "wx",
     });
-    await rename(temporaryPath, this.statePath);
+    await retryFs(() => rename(temporaryPath, this.statePath));
   }
 
   private async pruneCache(manifest: AssetManifest): Promise<void> {

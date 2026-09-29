@@ -162,7 +162,7 @@ describe("launcher self-update service", () => {
     expect(service.state).toMatchObject({ status: "update-available", progressPercent: null });
   });
 
-  it("keeps a known mandatory update across timer checks and download failures", async () => {
+  it("keeps a known update across timer checks but not across a failed download", async () => {
     const { updater, service } = createService();
     await service.check();
     updater.emit("update-available", { version: "2.0.24" });
@@ -174,8 +174,13 @@ describe("launcher self-update service", () => {
     service.download();
     expect(hasLauncherUpdate(service.state)).toBe(true);
     updater.emit("error", new Error("offline"));
-    await service.check();
     expect(service.state).toMatchObject({ status: "error", availableVersion: "2.0.24" });
+    // A failed download must not lock Play; the next check asks again.
+    expect(hasLauncherUpdate(service.state)).toBe(false);
+    updater.checkForUpdates.mockResolvedValue(null);
+    await service.check();
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(2);
+    updater.emit("update-available", { version: "2.0.24" });
     expect(hasLauncherUpdate(service.state)).toBe(true);
     service.download();
     updater.emit("update-downloaded");

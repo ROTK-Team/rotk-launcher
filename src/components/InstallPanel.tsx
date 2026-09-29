@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Copy, FolderOpen, HardDrive, PackageCheck, ShieldCheck, X } from "lucide-react";
-import type { LauncherSnapshot } from "../../shared/contracts";
+import { useEffect, useState } from "react";
+import type { InstallDrive, LauncherSnapshot } from "../../shared/contracts";
 import { useI18n } from "../i18n";
 import { LanguagePicker } from "./WindowChrome";
 
@@ -11,6 +12,7 @@ interface InstallPanelProps {
   onClose(): void;
   onSelectSource(): void;
   onSelectDestination(): void;
+  onChooseDrive(root: string): void;
   onInstall(): void;
   onCancel(): void;
   onVerifyAssets(): void;
@@ -40,6 +42,7 @@ export function InstallPanel({
   onClose,
   onSelectSource,
   onSelectDestination,
+  onChooseDrive,
   onInstall,
   onCancel,
   onVerifyAssets,
@@ -75,6 +78,15 @@ export function InstallPanel({
       : debugSession?.status && debugSession.status !== "idle" ? debugCopy[debugSession.status]
         : debugSession?.enabled ? debugCopy.enabled : null;
   const debugError = !debugSessionBusy && (debugSessionFailed || debugSession?.status === "error");
+  const [drives, setDrives] = useState<InstallDrive[]>([]);
+  const destinationDrive = snapshot.selection.destinationRoot?.slice(0, 3).toUpperCase() ?? null;
+
+  useEffect(() => {
+    if (!open || !requiresCopy) return;
+    let current = true;
+    void window.rotk.listInstallDrives().then((value) => { if (current) setDrives(value); });
+    return () => { current = false; };
+  }, [open, requiresCopy, snapshot.selection.destinationRoot]);
 
   return (
     <AnimatePresence>
@@ -177,8 +189,33 @@ export function InstallPanel({
               </AnimatePresence>
             </div>
 
+            {requiresCopy && drives.length > 0 && (
+              <div className="install-drives" role="radiogroup" aria-label={copy.install.driveLabel}>
+                <span className="install-drives__label">{copy.install.driveLabel}</span>
+                {drives.map((drive) => (
+                  <button
+                    key={drive.root}
+                    type="button"
+                    role="radio"
+                    aria-checked={destinationDrive === drive.root}
+                    className={destinationDrive === drive.root ? "install-drive is-selected" : "install-drive"}
+                    disabled={installing || busy}
+                    onClick={() => onChooseDrive(drive.root)}
+                  >
+                    <HardDrive size={15} />
+                    <strong>{drive.root.slice(0, 2)}</strong>
+                    <small>{copy.install.driveFree(Math.floor(drive.freeBytes / 1024 ** 3))}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {requiresCopy && (
-              <p className="install-panel__hint">{copy.install.subfolderHint}</p>
+              <p className="install-panel__hint">{installing ? copy.install.resumeHint : copy.install.subfolderHint}</p>
+            )}
+
+            {snapshot.error && !installing && (
+              <p className="install-panel__error" role="alert">{snapshot.error}</p>
             )}
 
             {installing && snapshot.progress ? (

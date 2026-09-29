@@ -72,13 +72,18 @@ export default function App() {
     void window.rotk.detectSource();
   }, [setupOpen, detectAttempted, snapshot]);
 
+  const operationInFlight = useRef(false);
   const perform = useCallback(async (operation: () => Promise<OperationResult<unknown>>) => {
+    // A second click while an operation runs must not release `busy` early.
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setBusy(true);
     setTransientError(null);
     try {
       const result = await operation();
       if (!result.ok && !result.cancelled) setTransientError(result.error ?? copy.app.operationFailed);
     } finally {
+      operationInFlight.current = false;
       setBusy(false);
     }
   }, [copy.app.operationFailed]);
@@ -134,7 +139,10 @@ export default function App() {
         <div className="error-toast" role="alert">
           <strong>{copy.app.operationInterrupted}</strong>
           <span>{snapshot.error ?? transientError}</span>
-          <button type="button" aria-label={copy.app.closeError} onClick={() => setTransientError(null)}>×</button>
+          <button type="button" aria-label={copy.app.closeError} onClick={() => {
+            setTransientError(null);
+            void window.rotk.dismissError();
+          }}>×</button>
         </div>
       )}
       <UpdateBanner
@@ -179,6 +187,7 @@ export default function App() {
         onClose={() => setSetupOpen(false)}
         onSelectSource={() => void selectSource()}
         onSelectDestination={() => void selectDestination()}
+        onChooseDrive={(root) => void perform(() => window.rotk.chooseInstallDrive(root))}
         onInstall={() => void install()}
         onCancel={() => void window.rotk.cancelInstall()}
         onVerifyAssets={() => void perform(() => window.rotk.verifyAssets())}

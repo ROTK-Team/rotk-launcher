@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isValidPlayerKey, normalizePlayerKey } from "../../shared/player-key.js";
@@ -128,11 +129,13 @@ export class PlayerKeyStore {
 
   private async readStored(): Promise<StoredPlayerKeys | null> {
     try {
-      const parsed: unknown = JSON.parse(await readFile(this.path, "utf8"));
+      const parsed: unknown = JSON.parse(await retryFs(() => readFile(this.path, "utf8")));
       if (!isStoredPlayerKeys(parsed)) throw new Error("Invalid encrypted player key record");
       return { schemaVersion: 2, keys: { ...parsed.keys } };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      // A locked file (antivirus, sync client) is not a corrupt one: keep the key.
+      if ((error as NodeJS.ErrnoException).code) throw error;
       // Unreadable credential state is replaced, never retained under a
       // forensic filename: it may hold a durable bearer.
       await rm(this.path, { force: true });
@@ -169,6 +172,6 @@ export class PlayerKeyStore {
       flag: "wx",
       mode: 0o600,
     });
-    await rename(temporaryPath, this.path);
+    await retryFs(() => rename(temporaryPath, this.path));
   }
 }

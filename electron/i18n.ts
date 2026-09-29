@@ -10,6 +10,7 @@ export const MAIN_COPY = {
     destinationNotNeeded: "This standalone client can be used directly.",
     clientInUse: "Close H1Z1 before changing its installation.",
     installationInProgress: "An installation is already in progress.",
+    driveUnavailable: "This drive is not available.",
     clientNotReady: "The ROTK client is not ready.",
     identityLocked: "Close H1Z1 before changing the ROTK account key.",
     serverLocked: "Close H1Z1 before changing the ROTK server.",
@@ -54,6 +55,7 @@ export const MAIN_COPY = {
     destinationNotNeeded: "Ce client isolé peut être utilisé directement.",
     clientInUse: "Ferme H1Z1 avant de modifier son installation.",
     installationInProgress: "Une installation est déjà en cours.",
+    driveUnavailable: "Ce disque n’est pas disponible.",
     clientNotReady: "Le client ROTK n’est pas prêt.",
     identityLocked: "Ferme H1Z1 avant de modifier la clé de compte ROTK.",
     serverLocked: "Ferme H1Z1 avant de changer de serveur ROTK.",
@@ -105,7 +107,7 @@ const ENGLISH_ERRORS = new Map<string, string>([
   ["La source Steam et l’installation ROTK doivent être dans deux arbres distincts.", "The Steam source and ROTK installation must be in separate directory trees."],
   ["Le dossier temporaire de copie n’est pas sûr.", "The temporary copy directory is not safe."],
   ["Le dossier source contient un nombre anormal de fichiers.", "The source folder contains an unusually large number of files."],
-  ["Le dossier ROTK existe déjà. Choisis un nouvel emplacement vide.", "The ROTK folder already exists. Choose a new empty location."],
+  ["Le dossier ROTK choisi contient déjà d’autres fichiers. Choisis un dossier vide.", "The chosen ROTK folder already contains other files. Choose an empty folder."],
   ["H1Z1.exe a disparu pendant l’analyse du client.", "H1Z1.exe disappeared while the client was being scanned."],
   ["L’installation ROTK est incomplète : son marqueur est introuvable.", "The ROTK installation is incomplete: its marker is missing."],
   ["L’installation ROTK ne correspond plus à celle enregistrée par le launcher.", "The ROTK installation no longer matches the one saved by the launcher."],
@@ -117,13 +119,13 @@ const ENGLISH_ERRORS = new Map<string, string>([
   ["Cette version de H1Z1 n’est pas encore prise en charge par ROTK. Vérifie les fichiers du jeu dans Steam puis réessaie.", "This H1Z1 version is not supported by ROTK yet. Verify the game files in Steam and try again."],
   ["Cette version de H1Z1 n’est pas compatible avec le patch crouch ROTK obligatoire. Vérifie les fichiers du jeu dans Steam puis réessaie.", "This H1Z1 version is not compatible with the mandatory ROTK crouch patch. Verify the game files in Steam and try again."],
   ["Cette version de H1Z1 n’est pas compatible avec le patch sprint ROTK. Vérifie les fichiers du jeu dans Steam puis réessaie.", "This H1Z1 version is not compatible with the ROTK sprint patch. Verify the game files in Steam and try again."],
-  ["Le patch sprint ROTK embarqué est invalide.", "The bundled ROTK sprint patch is invalid."],
+  ["Le patch sprint ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.", "The bundled ROTK sprint patch is missing or modified. Your antivirus may have quarantined it: restore it from Windows Security or reinstall the launcher."],
   ["Le patch sprint ROTK n’a pas pu être installé. Ferme H1Z1 puis réessaie.", "The ROTK sprint patch could not be installed. Close H1Z1 and try again."],
   ["Le patch sprint ROTK n’a pas pu être supprimé. Ferme H1Z1 puis réessaie.", "The ROTK sprint patch could not be removed. Close H1Z1 and try again."],
   ["Le marqueur du patch sprint ROTK n’a pas pu être écrit. Ferme H1Z1 puis réessaie.", "The ROTK sprint patch marker could not be written. Close H1Z1 and try again."],
   ["Un dinput8.dll inconnu est présent dans le client ROTK. Supprime-le ou réimporte un client propre.", "An unknown dinput8.dll is present in the ROTK client. Remove it or import a clean client again."],
-  ["Le proxy vocal ROTK embarqué est invalide.", "The bundled ROTK voice proxy is invalid."],
-  ["Le runtime Vivox 5 embarqué est invalide.", "The bundled Vivox 5 runtime is invalid."],
+  ["Le proxy vocal ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.", "The bundled ROTK voice proxy is missing or modified. Your antivirus may have quarantined it: restore it from Windows Security or reinstall the launcher."],
+  ["Le runtime Vivox 5 embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.", "The bundled Vivox 5 runtime is missing or modified. Your antivirus may have quarantined it: restore it from Windows Security or reinstall the launcher."],
   ["Le SDK Vivox historique est introuvable.", "The legacy Vivox SDK could not be found."],
   ["La version Vivox 5 attendue est absente du client H1Z1.", "The required Vivox 5 version is missing from the H1Z1 client."],
   ["Le SDK Vivox actif est inconnu; vérifie les fichiers H1Z1.", "The active Vivox SDK is unknown. Verify the H1Z1 files."],
@@ -163,7 +165,12 @@ const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string
   [/^L’asset (.+) dépasse la taille annoncée\.$/, (match) => `The ${match[1]} asset exceeds its declared size.`],
   [/^Hôte de téléchargement d’assets non autorisé : (.+)\.$/, (match) => `Asset download host not allowed: ${match[1]}.`],
   [/^Téléchargement d’assets refusé \(HTTP (\d+)\)\.$/, (match) => `Asset download refused (HTTP ${match[1]}).`],
-  [/^Erreur système \(([A-Z0-9_]+)\)\.$/, (match) => `System error (${match[1]}).`],
+  [/^Erreur système \(([^)]+)\)\.$/, (match) => `System error (${match[1]}).`],
+  [/^Erreur système \(([^)]+)\) : (.+)\.$/, (match) => `System error (${match[1]}): ${match[2]}.`],
+  [/^Un fichier du launcher a disparu : (.+)\. Ton antivirus l’a probablement mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher\.$/, (match) => `A launcher file is missing: ${match[1]}. Your antivirus probably quarantined it: restore it from Windows Security or reinstall the launcher.`],
+  [/^Accès refusé au fichier (.+) \(([^)]+)\)\. Un antivirus, H1Z1 ou un autre programme l’utilise : réessaie, ou ajoute le dossier ROTK aux exclusions de l’antivirus\.$/, (match) => `Access denied to ${match[1]} (${match[2]}). An antivirus, H1Z1 or another program is using it: try again, or add the ROTK folder to your antivirus exclusions.`],
+  [/^Disque plein pendant l’écriture de (.+)\. Libère de l’espace puis réessaie\.$/, (match) => `Disk full while writing ${match[1]}. Free some space and try again.`],
+  [/^Fichier introuvable : (.+)\.$/, (match) => `File not found: ${match[1]}.`],
 ];
 
 export function localizeServiceError(message: string, locale: AppLocale): string {
@@ -173,6 +180,12 @@ export function localizeServiceError(message: string, locale: AppLocale): string
   for (const [pattern, translate] of DYNAMIC_ENGLISH_ERRORS) {
     const match = message.match(pattern);
     if (match) return translate(match);
+  }
+  // "<known message> <system cause>", built by rawErrorMessage for wrapped errors.
+  for (const [french, english] of ENGLISH_ERRORS) {
+    if (message.startsWith(`${french} `)) {
+      return `${english} ${localizeServiceError(message.slice(french.length + 1), locale)}`;
+    }
   }
   return message;
 }

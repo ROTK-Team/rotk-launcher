@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, stat } from "node:fs/promises";
-import { join, basename, dirname, resolve, sep } from "node:path";
+import { mkdir, stat, statfs } from "node:fs/promises";
+import { join, basename, dirname, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -21,6 +21,7 @@ import {
   type AssetSyncSummary,
   type AssetSyncWarning,
   type ClientSourceKind,
+  type InstallDrive,
   type LauncherPhase,
   type LauncherSnapshot,
   type OperationResult,
@@ -51,7 +52,7 @@ import {
   resolveBundledDeathcommPath,
 } from "./constants.js";
 import { ConfigStore } from "./services/config-store.js";
-import { adoptExistingClient, installClient } from "./services/installer.js";
+import { adoptExistingClient, inspectDestination, installClient } from "./services/installer.js";
 import {
   GameLauncher,
   validateInstalledClient,
@@ -61,7 +62,7 @@ import { HWID_CORE_SLOTS, collectHwid } from "./services/machine-identity.js";
 import { collectTpmProof } from "./services/tpm-identity.js";
 import { collectTpmAnchor, enrolTpmAnchor } from "./services/tpm-anchor.js";
 import { tpmBindingMessage } from "../shared/attestation.js";
-import { classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
+import { PathPolicyError, classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
 import { locateSteamClient } from "./services/steam-locator.js";
 import {
   runtimeConfigFor,
@@ -98,6 +99,7 @@ import {
 } from "./services/integrity-attestation.js";
 import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { StartupLog } from "./services/startup-log.js";
+import { describeSystemError, isSystemError } from "./services/fs-safe.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
@@ -233,14 +235,31 @@ function diagnosticWorkInProgress(): boolean {
   return debugSettingWrite || crashReportRequests > 0 || Boolean(diagnostics?.isBusy());
 }
 
+function bundledResourcesRoot(): string {
+  return app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
+}
+
 function rawErrorMessage(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") return "Installation annulée.";
-  if (error instanceof Error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (typeof code === "string" && /^[A-Z0-9_]+$/.test(code)) return `Erreur système (${code}).`;
-    return error.message;
+  // Wrapped errors ("... could not be installed") keep the system cause.
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (isSystemError(error)) return describeSystemError(error, bundledResourcesRoot());
+  if (error instanceof Error && isSystemError(cause)) {
+    return `${error.message} ${describeSystemError(cause, bundledResourcesRoot())}`;
   }
+  if (error instanceof Error) return error.message;
   return "Une erreur inattendue est survenue.";
+}
+
+function logOperationError(error: unknown): void {
+  const details = error as NodeJS.ErrnoException | null;
+  const cause = (error instanceof Error ? error.cause : undefined) as NodeJS.ErrnoException | undefined;
+  startupLog.mark(
+    "operation-failed",
+    [details?.code, details?.syscall, details?.path, details?.message, cause?.code, cause?.path]
+      .filter(Boolean).join(" | "),
+  );
+  void diagnostics?.recordLauncherError("launcher_operation_failed", error).catch(() => undefined);
 }
 
 function errorMessage(error: unknown): string {
@@ -287,30 +306,65 @@ async function refreshServerStatus(): Promise<void> {
   await broadcastSnapshot();
 }
 
-function recommendedDestinationPath(): string {
-  const systemDrive = process.env.SystemDrive ?? "C:";
-  return join(`${systemDrive}${sep}`, RECOMMENDED_INSTALL_PARENT_NAME, ROTK_INSTALL_DIRECTORY_NAME);
+// Free space wanted before a drive is suggested: the client plus the assets.
+const RECOMMENDED_FREE_BYTES = 25 * 1024 ** 3;
+
+function destinationOnDrive(driveRoot: string): string {
+  return join(driveRoot, RECOMMENDED_INSTALL_PARENT_NAME, ROTK_INSTALL_DIRECTORY_NAME);
+}
+
+// A sleeping or disconnected network drive can take a long time to answer.
+async function statDrive(root: string): Promise<InstallDrive | null> {
+  const disk = await Promise.race([
+    statfs(root).catch(() => null),
+    new Promise<null>((resolveTimeout) => setTimeout(() => resolveTimeout(null), 2_000)),
+  ]);
+  if (!disk || Number(disk.blocks) === 0) return null;
+  return {
+    root,
+    freeBytes: Number(disk.bavail) * Number(disk.bsize),
+    totalBytes: Number(disk.blocks) * Number(disk.bsize),
+  };
+}
+
+async function listInstallDrives(): Promise<InstallDrive[]> {
+  const drives = await Promise.all([..."CDEFGHIJKLMNOPQRSTUVWXYZ"].map((letter) => statDrive(`${letter}:\\`)));
+  return drives.filter((drive): drive is InstallDrive => drive !== null);
+}
+
+/** Validates a destination and refuses folders holding someone else's files. */
+async function acceptDestination(candidate: string): Promise<string> {
+  const destination = await validateInstallDestination(candidate, sourceRoot ?? undefined);
+  if (await inspectDestination(destination) === "foreign") {
+    throw new PathPolicyError(
+      "Le dossier ROTK choisi contient déjà d’autres fichiers. Choisis un dossier vide.",
+    );
+  }
+  return destination;
 }
 
 /**
- * Pre-fill the ROTK destination with the recommended default so a detected or
- * freshly selected Steam client only needs one Install click. Best-effort: an
- * already existing folder (the installer requires an empty target) or a
- * failing path policy leaves the destination for manual selection.
+ * Pre-fill the destination so a detected Steam client only needs one click.
+ * Prefers the Steam drive, then the system drive. A half-finished or finished
+ * ROTK folder is fine: installing resumes or repairs it.
  */
 async function applyRecommendedDestination(): Promise<void> {
   if (sourceKind !== "copy-required" || !sourceRoot) return;
-  try {
-    const candidate = recommendedDestinationPath();
-    const existing = await stat(candidate).catch(() => null);
-    if (existing) return;
-    destinationRoot = await validateInstallDestination(candidate, sourceRoot);
-    destinationRecommended = true;
-    phase = "destination-selected";
-  } catch {
-    destinationRoot = null;
-    destinationRecommended = false;
+  const drives = [parse(sourceRoot).root, `${process.env.SystemDrive ?? "C:"}\\`];
+  for (const drive of [...new Set(drives.map((value) => value.toUpperCase()))]) {
+    try {
+      const details = await statDrive(drive);
+      if (!details || details.freeBytes < RECOMMENDED_FREE_BYTES) continue;
+      destinationRoot = await acceptDestination(destinationOnDrive(drive));
+      destinationRecommended = true;
+      phase = "destination-selected";
+      return;
+    } catch {
+      // Try the next drive; the player can still pick one.
+    }
   }
+  destinationRoot = null;
+  destinationRecommended = false;
 }
 
 function assetSyncSummary(): AssetSyncSummary {
@@ -649,6 +703,7 @@ function trustedHandler<T extends unknown[], R>(
 }
 
 function operationError<T = undefined>(error: unknown): OperationResult<T> {
+  logOperationError(error);
   lastErrorRaw = rawErrorMessage(error);
   return { ok: false, error: localizeServiceError(lastErrorRaw, currentLocale) };
 }
@@ -908,7 +963,7 @@ function registerIpc(): void {
         const candidate = basename(parent).toLocaleLowerCase("en-US") === ROTK_INSTALL_DIRECTORY_NAME.toLocaleLowerCase("en-US")
           ? parent
           : join(parent, ROTK_INSTALL_DIRECTORY_NAME);
-        destinationRoot = await validateInstallDestination(candidate, sourceRoot);
+        destinationRoot = await acceptDestination(candidate);
         destinationRecommended = false;
         phase = "destination-selected";
         lastErrorRaw = null;
@@ -920,6 +975,42 @@ function registerIpc(): void {
         await broadcastSnapshot();
         return result;
       }
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.listInstallDrives,
+    trustedHandler(async () => listInstallDrives()),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.chooseInstallDrive,
+    trustedHandler(async (_event, root: unknown): Promise<OperationResult<{ destinationRoot: string }>> => {
+      const copy = MAIN_COPY[currentLocale];
+      if (!sourceRoot) return { ok: false, error: copy.selectSourceFirst };
+      if (sourceKind !== "copy-required") return { ok: false, error: copy.destinationNotNeeded };
+      if (installAbortController) return { ok: false, error: copy.installationInProgress };
+      if (typeof root !== "string" || !/^[C-Z]:\\$/.test(root) || !(await statDrive(root))) {
+        return { ok: false, error: copy.driveUnavailable };
+      }
+      try {
+        destinationRoot = await acceptDestination(destinationOnDrive(root));
+        destinationRecommended = false;
+        phase = "destination-selected";
+        lastErrorRaw = null;
+        await broadcastSnapshot();
+        return { ok: true, value: { destinationRoot } };
+      } catch (error) {
+        return operationError<{ destinationRoot: string }>(error);
+      }
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.dismissError,
+    trustedHandler(async () => {
+      lastErrorRaw = null;
+      await broadcastSnapshot();
     }),
   );
 
@@ -982,9 +1073,18 @@ function registerIpc(): void {
         return { ok: true, value: { installationRoot } };
       } catch (error) {
         const cancelled = installAbortController.signal.aborted;
-        const result = operationError<{ installationRoot: string }>(error);
-        result.cancelled = cancelled;
-        phase = "error";
+        let result: OperationResult<{ installationRoot: string }>;
+        if (cancelled) {
+          lastErrorRaw = null;
+          result = { ok: false, cancelled: true };
+        } else {
+          result = operationError<{ installationRoot: string }>(error);
+        }
+        // The copy resumes on the next attempt, so the selection stays. A client
+        // that was already installed before this attempt stays playable.
+        phase = await installationRoot()
+          ? "ready"
+          : sourceKind === "copy-required" ? "destination-selected" : "source-selected";
         progress = null;
         await broadcastSnapshot();
         return result;
@@ -1128,6 +1228,7 @@ function registerIpc(): void {
       if (gameLauncher.isRunning() || phase === "launching" || phase === "running") {
         return { ok: false, error: MAIN_COPY[currentLocale].update.gameRunning };
       }
+      if (installAbortController) return { ok: false, error: MAIN_COPY[currentLocale].installationInProgress };
       const failure = launcherUpdate.install();
       if (!failure) return { ok: true };
       return { ok: false, error: MAIN_COPY[currentLocale].update[failure] };
@@ -1321,11 +1422,13 @@ async function initialize(): Promise<void> {
   assetSyncPackVersion = assetState?.packVersion ?? null;
   assetSyncLastAt = assetState?.syncedAt ?? null;
   if (config.installation) {
+    // Play validates again, so a drive that was asleep or not mounted yet only
+    // needs a click on Play instead of a launcher restart.
+    phase = "ready";
     try {
       await validateInstalledClient(config.installation);
-      phase = "ready";
     } catch (error) {
-      phase = "error";
+      logOperationError(error);
       lastErrorRaw = rawErrorMessage(error);
     }
   }
@@ -1334,7 +1437,12 @@ async function initialize(): Promise<void> {
     // In development there is no installed package to update against;
     // the updater stays inert and the snapshot reports "idle".
     updater: app.isPackaged ? electronUpdater.autoUpdater : null,
-    onChange: () => void broadcastSnapshot(),
+    onChange: () => {
+      if (launcherUpdate?.state.status === "error") {
+        startupLog.mark("launcher-update-failed", launcherUpdate.state.error ?? "");
+      }
+      void broadcastSnapshot();
+    },
   });
   diagnostics = new DiagnosticController({ directory: join(app.getPath("userData"), "diagnostics"),
     helperPath: resolveBundledDiagnosticsPath(), knownSecrets: () => Object.values(playerKeys).filter((key): key is string => typeof key === "string"),
@@ -1418,7 +1526,6 @@ process.on("uncaughtException", (error) => {
   startupLog.mark("uncaught-exception", error.message);
   void diagnostics?.recordLauncherError("launcher_uncaught_exception", error).catch(() => undefined);
   lastErrorRaw = `Erreur launcher ${randomUUID().slice(0, 8)} : ${error.message}`;
-  phase = "error";
   void broadcastSnapshot();
 });
 
