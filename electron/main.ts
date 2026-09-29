@@ -1334,7 +1334,12 @@ async function initialize(): Promise<void> {
     // In development there is no installed package to update against;
     // the updater stays inert and the snapshot reports "idle".
     updater: app.isPackaged ? electronUpdater.autoUpdater : null,
-    onChange: () => void broadcastSnapshot(),
+    onChange: () => {
+      if (launcherUpdate?.state.status === "error") {
+        startupLog.mark("launcher-update-failed", launcherUpdate.state.error ?? "");
+      }
+      void broadcastSnapshot();
+    },
   });
   diagnostics = new DiagnosticController({ directory: join(app.getPath("userData"), "diagnostics"),
     helperPath: resolveBundledDiagnosticsPath(), knownSecrets: () => Object.values(playerKeys).filter((key): key is string => typeof key === "string"),
