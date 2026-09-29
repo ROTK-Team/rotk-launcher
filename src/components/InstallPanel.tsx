@@ -13,6 +13,7 @@ interface InstallPanelProps {
   onSelectSource(): void;
   onSelectDestination(): void;
   onChooseDrive(root: string): void;
+  onInstallWithSteam(): void;
   onInstall(): void;
   onCancel(): void;
   onVerifyAssets(): void;
@@ -43,6 +44,7 @@ export function InstallPanel({
   onSelectSource,
   onSelectDestination,
   onChooseDrive,
+  onInstallWithSteam,
   onInstall,
   onCancel,
   onVerifyAssets,
@@ -190,6 +192,15 @@ export function InstallPanel({
                 )}
               </AnimatePresence>
             </div>
+
+            {!hasSource && !installing && !snapshot.installationRoot && (
+              <div className="install-steam">
+                <p className="install-panel__hint">{copy.install.noClientFound}</p>
+                <button type="button" className="text-button" onClick={onInstallWithSteam} disabled={busy}>
+                  {copy.install.installWithSteam}
+                </button>
+              </div>
+            )}
 
             {requiresCopy && drives.length > 0 && (
               <div className="install-drives" role="radiogroup" aria-label={copy.install.driveLabel}>

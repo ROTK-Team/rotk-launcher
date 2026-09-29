@@ -147,6 +147,8 @@ export interface Copy {
     driveLabel: string;
     driveFree: (gigabytes: number) => string;
     resumeHint: string;
+    noClientFound: string;
+    installWithSteam: string;
     choose: string;
     cancelCopy: string;
     createInstall: string;
@@ -336,6 +338,8 @@ const COPY: Record<AppLocale, Copy> = {
       driveLabel: "INSTALL DRIVE",
       driveFree: (gigabytes) => `${gigabytes} GB free`,
       resumeHint: "You can cancel or close the launcher: the copy picks up where it stopped.",
+      noClientFound: "No H1Z1 client was found. Install it with Steam (listed as Z1 Battle Royale), then come back here.",
+      installWithSteam: "INSTALL H1Z1 WITH STEAM",
       choose: "CHOOSE",
       cancelCopy: "CANCEL",
       createInstall: "CREATE SEPARATE COPY",
@@ -546,6 +550,8 @@ const COPY: Record<AppLocale, Copy> = {
       driveLabel: "DISQUE D’INSTALLATION",
       driveFree: (gigabytes) => `${gigabytes} Go libres`,
       resumeHint: "Tu peux annuler ou fermer le launcher : la copie reprendra là où elle s’est arrêtée.",
+      noClientFound: "Aucun client H1Z1 trouvé. Installe-le avec Steam (sous le nom Z1 Battle Royale), puis reviens ici.",
+      installWithSteam: "INSTALLER H1Z1 AVEC STEAM",
       choose: "CHOISIR",
       cancelCopy: "ANNULER",
       createInstall: "CRÉER UNE COPIE SÉPARÉE",
