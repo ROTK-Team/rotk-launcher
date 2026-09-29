@@ -338,6 +338,14 @@ export async function adoptExistingClient(
 }
 
 // Leftovers from launchers <= 2.0.23, which copied into a staging folder.
+// Leftovers younger than this may still be in use by another run.
+const LEFTOVER_MIN_AGE_MS = 60 * 60 * 1000;
+
+async function isOldEnough(path: string): Promise<boolean> {
+  const details = await lstat(path).catch(() => null);
+  return Boolean(details && !details.isSymbolicLink() && Date.now() - details.mtimeMs > LEFTOVER_MIN_AGE_MS);
+}
+
 async function removeLegacyStagingDirectories(destinationRoot: string): Promise<void> {
   const parent = dirname(destinationRoot);
   const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
@@ -345,6 +353,7 @@ async function removeLegacyStagingDirectories(destinationRoot: string): Promise<
     if (!entry.isDirectory() || !entry.name.startsWith(".rotk-staging-")) continue;
     const staging = join(parent, entry.name);
     assertSafeGeneratedStagingPath(staging, destinationRoot);
+    if (!await isOldEnough(staging)) continue;
     await retryFs(() => rm(staging, { recursive: true, force: true })).catch(() => undefined);
   }
 }
@@ -524,8 +533,9 @@ export async function cleanupInstallLeftovers(root: string): Promise<void> {
   for (const directory of [root, join(root, "Resources", "Assets")]) {
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
-      if (entry.isFile() && LEFTOVER_FILE.test(entry.name)) {
-        await rm(join(directory, entry.name), { force: true }).catch(() => undefined);
+      const path = join(directory, entry.name);
+      if (entry.isFile() && LEFTOVER_FILE.test(entry.name) && await isOldEnough(path)) {
+        await rm(path, { force: true }).catch(() => undefined);
       }
     }
   }

@@ -26,8 +26,7 @@ longer stuck, antivirus and network robustness, Simplified Chinese.
   When no client is found, a button opens `steam://install/433850` and the
   launcher looks again when the window gets focus back.
 - Startup removes leftovers around the configured install: old staging
-  folders and temporary files.
-- A copy abandoned on one drive is removed when the player installs elsewhere.
+  folders and temporary files, only when older than one hour.
 - Backups (`*.original.*`) are written atomically.
 
 ## Files, locks and antivirus
@@ -75,8 +74,9 @@ longer stuck, antivirus and network robustness, Simplified Chinese.
   source (discovered packs were missing from the attestation payloads, and the
   anonymous API allows 60 requests/hour per IP).
 - Asset cache and backups moved from `%APPDATA%` (always C:) to the game drive,
-  `<parent>\.<install>-assets`. Old backups are still restored, still-current
-  packs are moved from the old cache, the rest of it is removed.
+  `<parent>\.<install>-assets`. Old backups are still restored. Still-current
+  packs are moved from the old cache (copied and checked when the drive
+  differs, then deleted); only obsolete entries are removed otherwise.
 - Free space is checked before downloading (about 3x the download size).
 - `scripts/package-asset-packs.ps1` now writes `.payload` files. Launchers up
   to 2.0.23 install any `.zip` of the latest release on their own.

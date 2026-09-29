@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, stat, statfs, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, statfs } from "node:fs/promises";
 import { join, basename, dirname, parse, resolve } from "node:path";
 import tls from "node:tls";
 import { fileURLToPath } from "node:url";
@@ -100,7 +100,7 @@ import {
 } from "./services/integrity-attestation.js";
 import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { StartupLog } from "./services/startup-log.js";
-import { describeSystemError, isSystemError, retryFs, sha256File } from "./services/fs-safe.js";
+import { describeSystemError, isSystemError, sha256File } from "./services/fs-safe.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
@@ -411,24 +411,6 @@ async function applyRecommendedDestination(): Promise<void> {
   }
   destinationRoot = null;
   destinationRecommended = false;
-}
-
-// Where the last unfinished copy was going. A copy left half-way on one drive
-// is dropped when the player installs somewhere else instead.
-function pendingCopyRecordPath(): string {
-  return join(app.getPath("userData"), "pending-install.json");
-}
-
-async function dropAbandonedCopy(nextRoot: string): Promise<void> {
-  const previous = await readFile(pendingCopyRecordPath(), "utf8")
-    .then((text) => (JSON.parse(text) as { root?: unknown }).root)
-    .catch(() => null);
-  if (typeof previous !== "string" || resolve(previous).toLowerCase() === resolve(nextRoot).toLowerCase()) return;
-  // Only a folder we own and never finished: pending marker, no install marker.
-  const root = await validateInstallDestination(previous).catch(() => null);
-  if (!root || await inspectDestination(root) !== "pending") return;
-  await retryFs(() => rm(root, { recursive: true, force: true }));
-  startupLog.mark("abandoned-copy-removed", root);
 }
 
 function assetSyncSummary(): AssetSyncSummary {
@@ -1148,8 +1130,6 @@ function registerIpc(): void {
             onProgress,
           });
         } else {
-          await dropAbandonedCopy(installationRoot).catch(() => undefined);
-          await writeFile(pendingCopyRecordPath(), JSON.stringify({ root: installationRoot }));
           marker = await installClient({
             sourceRoot,
             destinationRoot: installationRoot,
@@ -1161,7 +1141,6 @@ function registerIpc(): void {
             onProgress,
           });
         }
-        await rm(pendingCopyRecordPath(), { force: true }).catch(() => undefined);
         await configStore.setInstallation({
           installId: marker.installId,
           clientBuildId: marker.clientBuildId,

@@ -75,6 +75,8 @@ describe("installer destination handling", () => {
     const destination = join(root, "ROTK");
     await mkdir(join(root, ".rotk-staging-1234", "Resources"), { recursive: true });
     await mkdir(join(root, "Other"));
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await utimes(join(root, ".rotk-staging-1234"), old, old);
 
     await installerInternals.removeLegacyStagingDirectories(destination);
     expect((await readdir(root)).sort()).toEqual(["Other"]);
@@ -91,10 +93,20 @@ describe("installer destination handling", () => {
     await writeFile(join(install, "steam_api64.dll.rotk-0f8fad5b-d9cb-469f-a165-70867728950e.tmp"), "tmp");
     await writeFile(join(assets, "assets_x64_0.pack2"), "pack");
     await writeFile(join(install, ".rotk-installation.json"), "{}");
+    await mkdir(join(root, ".rotk-staging-fresh"));
+    await writeFile(join(assets, ".rotk-staging-fresh"), "extraction in progress");
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    for (const path of [
+      join(root, ".rotk-staging-old"),
+      join(assets, ".rotk-staging-1a2b"),
+      join(assets, "assets_x64_0.pack2.rotk-part"),
+      join(install, "steam_api64.dll.rotk-0f8fad5b-d9cb-469f-a165-70867728950e.tmp"),
+    ]) await utimes(path, old, old);
 
     await cleanupInstallLeftovers(install);
-    expect(await readdir(root)).toEqual(["ROTK"]);
-    expect(await readdir(assets)).toEqual(["assets_x64_0.pack2"]);
+    // Recent ones may belong to a run in progress: kept.
+    expect((await readdir(root)).sort()).toEqual([".rotk-staging-fresh", "ROTK"]);
+    expect((await readdir(assets)).sort()).toEqual([".rotk-staging-fresh", "assets_x64_0.pack2"]);
     expect((await readdir(install)).sort()).toEqual([".rotk-installation.json", "Resources"]);
   });
 

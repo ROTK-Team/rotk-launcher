@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -399,6 +400,27 @@ describe("ROTK asset sync", () => {
     expect(calls).toEqual([FEED_URL]);
     await expect(readFile(join(root, "sounds.pack"), "utf8")).resolves.toBe("cached sounds");
     await expect(stat(join(assetStorage(root), "asset-cache", `${entry.sha256}.pack`))).resolves.toBeTruthy();
+    await expect(stat(join(userData, "asset-cache"))).rejects.toThrow();
+  });
+
+  // The old cache sits in %APPDATA% (C:); the game is often on another drive.
+  const otherDrive = ["D:\\", "E:\\"].find((drive) =>
+    drive[0].toLowerCase() !== tmpdir()[0].toLowerCase() && existsSync(drive));
+  it.skipIf(!otherDrive)("moves the old cache to another drive and only then deletes it", async () => {
+    const userData = await mkdtemp(join(tmpdir(), "rotk-asset-userdata-"));
+    const root = await mkdtemp(join(otherDrive!, "rotk-asset-client-"));
+    temporaryDirectories.push(userData, root, assetStorage(root));
+    await writeFile(join(root, INSTALL_MARKER_NAME), "{}\n");
+    const payload = Buffer.from("cached sounds");
+    const entry = assetEntry("sounds.pack", payload);
+    await mkdir(join(userData, "asset-cache"), { recursive: true });
+    await writeFile(join(userData, "asset-cache", `${entry.sha256}.pack`), payload);
+    await writeFile(join(userData, "asset-cache", "obsolete.pack"), "old");
+
+    const calls: string[] = [];
+    await service(userData, { [FEED_URL]: () => new Response(JSON.stringify(manifest([entry]))) }, calls).sync(root);
+    expect(calls).toEqual([FEED_URL]);
+    expect(await readFile(join(assetStorage(root), "asset-cache", `${entry.sha256}.pack`), "utf8")).toBe("cached sounds");
     await expect(stat(join(userData, "asset-cache"))).rejects.toThrow();
   });
 

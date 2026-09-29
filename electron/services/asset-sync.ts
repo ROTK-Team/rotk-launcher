@@ -8,6 +8,7 @@ import {
   readdir,
   rename,
   rm,
+  rmdir,
   stat,
   statfs,
   writeFile,
@@ -1006,10 +1007,22 @@ export class AssetSyncService {
     const keep = new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`));
     await mkdir(this.cacheDirectory, { recursive: true });
     for (const entry of entries) {
-      if (!keep.has(entry) || await exists(join(this.cacheDirectory, entry))) continue;
-      // Instant on the same drive; across drives (EXDEV) it is left to be
-      // removed and downloaded again when needed.
-      await rename(join(this.legacyCacheDirectory, entry), join(this.cacheDirectory, entry)).catch(() => undefined);
+      const from = join(this.legacyCacheDirectory, entry);
+      const to = join(this.cacheDirectory, entry);
+      if (!keep.has(entry) || await exists(to)) continue;
+      try {
+        await retryFs(() => rename(from, to)); // instant on the same drive
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EXDEV") continue;
+        // Other drive: copy, check the digest, and only then drop the old file.
+        try {
+          await atomicCopyFile(from, to);
+          if (await sha256File(to) === entry.slice(0, 64)) await rm(from, { force: true });
+          else await rm(to, { force: true });
+        } catch {
+          await rm(to, { force: true }).catch(() => undefined);
+        }
+      }
     }
   }
 
@@ -1022,8 +1035,14 @@ export class AssetSyncService {
     } catch {
       // Cache pruning is best-effort housekeeping.
     }
+    // Old cache: only drop what no current pack uses. Anything that could not
+    // be moved yet stays for the next sync.
     if (this.legacyCacheDirectory !== this.cacheDirectory) {
-      await rm(this.legacyCacheDirectory, { recursive: true, force: true }).catch(() => undefined);
+      const legacy = await readdir(this.legacyCacheDirectory).catch(() => [] as string[]);
+      for (const entry of legacy) {
+        if (!keep.has(entry)) await rm(join(this.legacyCacheDirectory, entry), { force: true }).catch(() => undefined);
+      }
+      await rmdir(this.legacyCacheDirectory).catch(() => undefined); // only when empty
     }
   }
 }
