@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { copyFile, rename, rm, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 
@@ -28,6 +29,12 @@ export async function retryFs<T>(
         setTimeout(resolveDelay, Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs)));
     }
   }
+}
+
+export async function sha256File(filePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
 }
 
 export async function atomicCopyFile(source: string, target: string): Promise<void> {

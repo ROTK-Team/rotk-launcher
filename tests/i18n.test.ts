@@ -40,10 +40,10 @@ describe("launcher locales", () => {
     ).toBe("This H1Z1 version is not compatible with the ROTK sprint patch. Verify the game files in Steam and try again.");
     expect(
       localizeServiceError(
-        "Le patch sprint ROTK embarqué est invalide.",
+        "Le patch sprint ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.",
         "en",
       ),
-    ).toBe("The bundled ROTK sprint patch is invalid.");
+    ).toBe("The bundled ROTK sprint patch is missing or modified. Your antivirus may have quarantined it: restore it from Windows Security or reinstall the launcher.");
     expect(
       localizeServiceError(
         "Le marqueur du patch sprint ROTK n’a pas pu être écrit. Ferme H1Z1 puis réessaie.",

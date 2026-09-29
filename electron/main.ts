@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { join, basename, dirname, resolve, sep } from "node:path";
 import tls from "node:tls";
 import { fileURLToPath } from "node:url";
@@ -99,7 +99,7 @@ import {
 } from "./services/integrity-attestation.js";
 import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { StartupLog } from "./services/startup-log.js";
-import { describeSystemError, isSystemError } from "./services/fs-safe.js";
+import { describeSystemError, isSystemError, sha256File } from "./services/fs-safe.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
@@ -274,6 +274,26 @@ function logOperationError(error: unknown): void {
 
 function errorMessage(error: unknown): string {
   return localizeServiceError(rawErrorMessage(error), currentLocale);
+}
+
+/**
+ * Antivirus products quarantine our unsigned DLL proxies. Checking them at
+ * startup tells the player what happened before they click Play.
+ */
+async function findQuarantinedPatches(): Promise<string[]> {
+  const bundled = [
+    resolveBundledShimPath(),
+    resolveBundledVivoxProxyPath(),
+    resolveBundledVivoxRuntimePath(),
+    resolveBundledGameplayPatchPath(),
+  ];
+  const damaged: string[] = [];
+  for (const path of bundled) {
+    const expected = (await readFile(`${path}.sha256`, "utf8").catch(() => "")).trim().split(/\s+/)[0]?.toLowerCase();
+    const actual = await sha256File(path).catch(() => null);
+    if (!expected || actual !== expected) damaged.push(path);
+  }
+  return damaged;
 }
 
 async function installationRoot(): Promise<string | null> {
@@ -1368,6 +1388,11 @@ async function initialize(): Promise<void> {
     }
   }
   startupLog.mark("installation-checked", `phase=${phase}`);
+  const quarantined = await findQuarantinedPatches();
+  if (quarantined.length > 0) {
+    startupLog.mark("bundled-patches-damaged", quarantined.join(" | "));
+    lastErrorRaw = `Un fichier du launcher a disparu : ${quarantined[0]}. Ton antivirus l’a probablement mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.`;
+  }
   launcherUpdate = new LauncherUpdateService({
     // In development there is no installed package to update against;
     // the updater stays inert and the snapshot reports "idle".
