@@ -20,16 +20,20 @@ requiring a launcher release. The pipeline is implemented by
    an asset is (re)installed when it is new, its `version`/`sha256` changed, or one of
    its installed files is missing (the **Verify files** action additionally re-hashes
    every installed file).
-3. Download into `userData/asset-cache/` (a cached pack with the right SHA-256 is
+3. Download into `<install parent>/.<install>-assets/asset-cache/`, on the game
+   drive (a cached pack with the right SHA-256 is
    reused without any network call). Downloads go to a `.part` file and resume with
    a `Range` request after a network drop or a restart. The SHA-256 is checked
    against the manifest, then the files are installed atomically (staging file +
    `rename`) into the ROTK installation.
 4. Client files overwritten for the first time are backed up under
-   `userData/asset-backups/` — **Restore vanilla client** puts them back and deletes
+   `.<install>-assets/asset-backups/` — **Restore vanilla client** puts them back and deletes
    everything the catalog added.
 5. Assets removed from the catalog are uninstalled on the next sync (backup restored
    or file deleted).
+6. Launchers up to 2.0.23 kept the cache and backups in `userData` (always C:).
+   Old backups are still restored; current packs are moved out of the old cache
+   (copied and checked when the drive differs) and the rest of it is removed.
 
 Metadata that cannot be fetched **never blocks the game** once a first sync completed:
 the launcher shows a warning and starts with the assets already on disk. Only a first
