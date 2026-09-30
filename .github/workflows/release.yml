@@ -143,6 +143,9 @@ jobs:
           }
           npm run build
 
+      - name: Verify administrator startup with a sandboxed renderer
+        run: node scripts/test-elevated-startup.mjs --require-administrator
+
       - name: Package NSIS installer
         run: npx electron-builder --win nsis --publish never --config.forceCodeSigning=${{ steps.signing.outputs.signed }}
         env:

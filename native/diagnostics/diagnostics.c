@@ -1,5 +1,7 @@
 /* ROTK external crash collector. GPL-3.0-or-later.
- * No injected code, privilege elevation, registry changes or network operations.
+ * Capture does not inject code, elevate, change registry or use the network.
+ * Separate startup commands check the inherited token or request normal UAC
+ * consent to relaunch the installed launcher.
  * Only the explicit, validated target PID is opened. All DbgHelp calls are made
  * serially on the debug loop thread. See README.md for privacy and limitations.
  */
@@ -15,6 +17,7 @@
 #include <wchar.h>
 
 #define PATH_CAP 32768
+#include "startup_elevation.h"
 #define LOG_LIMIT (4ULL * 1024 * 1024)
 #define SAMPLE_INTERVAL 5000
 #define EXCEPTION_BINS 64
@@ -506,6 +509,8 @@ static int watch(void) {
 }
 
 int wmain(int argc, wchar_t **argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--admin-status") == 0) return administrator_status();
+    if (argc == 2 && wcscmp(argv[1], L"--elevate-launcher") == 0) return elevate_installed_launcher();
     BOOL watch_mode = FALSE, snapshot_mode = FALSE, full = FALSE;
     const wchar_t *output = NULL;
     for (int i = 1; i < argc; ++i) {
