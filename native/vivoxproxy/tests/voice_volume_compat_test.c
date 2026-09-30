@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "../voice_volume_compat.h"
+#include "proxy_test_isolation.h"
 
 typedef int (__cdecl *create_fn)(void **);
 typedef int (__cdecl *config_fn)(void *, size_t);
@@ -102,6 +103,7 @@ static void *wait_response(create_fn get, destroy_fn event_destroy, void *reques
 }
 
 int main(int argc, char **argv) {
+    if (!isolate_proxy_test()) return 1;
     setvbuf(stdout, NULL, _IONBF, 0);
     AddVectoredExceptionHandler(1, trace_exception);
     puts("Testing volume request tracking");

@@ -11,6 +11,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <wchar.h>
+#include "proxy_test_isolation.h"
 
 static const wchar_t *g_dll;
 static HMODULE g_module;
@@ -27,6 +28,8 @@ int wmain(int argc, wchar_t **argv) {
     HANDLE file;
     HANDLE thread;
     DWORD exit_code = 1U;
+
+    if (!isolate_proxy_test()) return 1;
 
     if (argc != 2 || wcslen(argv[1]) >= MAX_PATH) {
         fwprintf(stderr, L"usage: %ls <vivoxsdk_x64.dll>\n", argv[0]);
