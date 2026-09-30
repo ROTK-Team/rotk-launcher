@@ -15,8 +15,11 @@ and are never automatically elevated.
 
 The UAC request starts only the installed executable, with a fixed retry
 argument and its own directory as the working directory. Caller arguments are
-not forwarded, and paths are encoded as data rather than interpolated as script
-syntax. Neither UAC settings nor Windows security policies are modified.
+not forwarded. The bundled native helper queries its inherited Windows token
+with `GetTokenInformation` and uses `ShellExecuteExW` for consent. It derives the
+fixed target from its own installed location; neither PATH nor environment
+variables select a system tool or elevation target. Its SHA-256 sidecar is
+verified before execution. Neither UAC settings nor security policies change.
 
 The bundled client files are byte-identical to 2.0.24. Register the new launcher
 version with those same clean and patched file roots before publication.

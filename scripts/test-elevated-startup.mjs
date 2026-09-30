@@ -26,7 +26,7 @@ const receipt = { platform: process.platform, windows: 0, uacRequests: 0, status
 const errors = [];
 app.on('child-process-gone', (_event, detail) => { if (detail.reason !== 'clean-exit') errors.push(detail.reason); });
 app.whenReady().then(async () => {
-  const transport = windowsElevation();
+  const transport = windowsElevation(${JSON.stringify(path.join(root, "resources/diagnostics/ROTK.Diagnostics.exe"))});
   await startWithRequiredElevation({ platform: process.platform, isPackaged: true,
     executablePath: process.execPath, argv: [ELEVATION_RELAUNCH_ARGUMENT] }, {
     ...transport,

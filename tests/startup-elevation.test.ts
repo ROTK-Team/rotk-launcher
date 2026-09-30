@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { resolve, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   ELEVATION_RELAUNCH_ARGUMENT,
@@ -118,38 +120,49 @@ describe("mandatory administrator startup", () => {
   });
 });
 
+const helper = "C:\\Program Files\\ROTK Launcher\\resources\\diagnostics\\ROTK.Diagnostics.exe";
+
 describe("Windows elevation transport", () => {
   it.each([["elevated", true], ["standard", false]] as const)("parses %s from the actual-token query", async (output, expected) => {
-    const run = vi.fn(async (_script: string, _timeout: number) => output);
-    expect(await windowsElevation(run).isAdministrator()).toBe(expected);
-    expect(run.mock.calls[0][1]).toBe(15_000);
+    const run = vi.fn(async () => output);
+    expect(await windowsElevation(helper, run).isAdministrator()).toBe(expected);
+    expect(run).toHaveBeenCalledExactlyOnceWith(helper, "--admin-status", 15_000);
   });
 
   it.each(["", "True", "elevated\nstandard", "Administrator"])("rejects ambiguous token output %j", async (output) => {
-    await expect(windowsElevation(async () => output).isAdministrator()).rejects.toThrow("valid administrator status");
+    await expect(windowsElevation(helper, async () => output).isAdministrator()).rejects.toThrow("valid administrator status");
   });
 
-  it("carries paths with quotes, shell syntax and Unicode only as encoded data", async () => {
-    const executable = "D:\\Jeux d'Ã‰tÃ©\\ROTK $($x);' launcher.exe";
-    const run = vi.fn(async (_script: string, _timeout: number) => "started");
-    expect(await windowsElevation(run).requestElevation(executable)).toBe("started");
-    const script = run.mock.calls[0][0];
-    expect(script).not.toContain(executable);
-    const encoded = /FromBase64String\('([^']+)'\)/u.exec(script)?.[1];
-    expect(Buffer.from(encoded!, "base64").toString("utf8")).toBe(executable);
-    expect(script).toContain("$info.Verb = 'runas'");
-    expect(script).toContain(`$info.Arguments = '${ELEVATION_RELAUNCH_ARGUMENT}'`);
-    expect(run.mock.calls[0][1]).toBe(120_000);
-  });
-
-  it.each(["launcher.exe", "C:\\Tools\\script.ps1", "C:\\bad\0.exe"])("rejects an invalid executable path %j", async (path) => {
+  it("uses a fixed native command with no forwarded path or shell syntax", async () => {
+    const directory = "D:\\Jeux d'Été $($x);'";
+    const native = `${directory}\\resources\\diagnostics\\ROTK.Diagnostics.exe`;
     const run = vi.fn(async () => "started");
-    await expect(windowsElevation(run).requestElevation(path)).rejects.toThrow("path is invalid");
+    expect(await windowsElevation(native, run).requestElevation(`${directory}\\ROTK Launcher.exe`)).toBe("started");
+    expect(run).toHaveBeenCalledExactlyOnceWith(native, "--elevate-launcher", 120_000);
+  });
+
+  it.each(["ROTK Launcher.exe", "C:\\Tools\\script.ps1", "C:\\bad\0.exe", "C:\\Other\\ROTK Launcher.exe"])("rejects an invalid or unrelated executable path %j", async (path) => {
+    const run = vi.fn(async () => "started");
+    await expect(windowsElevation(helper, run).requestElevation(path)).rejects.toThrow("path is invalid");
     expect(run).not.toHaveBeenCalled();
   });
 
   it("recognizes cancellation and rejects unconfirmed starts", async () => {
-    expect(await windowsElevation(async () => "cancelled").requestElevation(options.executablePath)).toBe("cancelled");
-    await expect(windowsElevation(async () => "").requestElevation(options.executablePath)).rejects.toThrow("confirm");
+    expect(await windowsElevation(helper, async () => "cancelled").requestElevation(options.executablePath)).toBe("cancelled");
+    await expect(windowsElevation(helper, async () => "").requestElevation(options.executablePath)).rejects.toThrow("confirm");
+  });
+
+  it("refuses damaged native resources before executing them", async () => {
+    const output = resolve("release");
+    await mkdir(output, { recursive: true });
+    const directory = await mkdtemp(join(output, "integrity-proof-"));
+    try {
+      const native = join(directory, "ROTK.Diagnostics.exe");
+      await writeFile(native, "not executable");
+      await writeFile(`${native}.sha256`, `${"0".repeat(64)}  ROTK.Diagnostics.exe\n`);
+      await expect(windowsElevation(native).isAdministrator()).rejects.toThrow("integrity check failed");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

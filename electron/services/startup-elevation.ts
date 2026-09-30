@@ -1,73 +1,51 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { lstat, readFile } from "node:fs/promises";
 import { win32 } from "node:path";
 import { promisify } from "node:util";
-import { windowsSystemToolPath } from "./windows-tools.js";
 
 const execFileAsync = promisify(execFile);
 export const ELEVATION_RELAUNCH_ARGUMENT = "--rotk-elevation-relaunch";
-type ScriptRunner = (script: string, timeoutMs: number) => Promise<string>;
+type NativeCommand = "--admin-status" | "--elevate-launcher";
+type NativeRunner = (helperPath: string, command: NativeCommand, timeoutMs: number) => Promise<string>;
 
-const CHECK_ADMINISTRATOR = `
-$ErrorActionPreference = 'Stop'
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-try {
-  $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-  if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    [Console]::Out.Write('elevated')
-  } else {
-    [Console]::Out.Write('standard')
+async function runNativeHelper(helperPath: string, command: NativeCommand, timeoutMs: number): Promise<string> {
+  // Match the bundled helper's signing-aware sidecar; refuse missing, linked,
+  // oversized or damaged resources before running any native code.
+  const [binaryInfo, sidecarInfo] = await Promise.all([lstat(helperPath), lstat(`${helperPath}.sha256`)]);
+  if (!binaryInfo.isFile() || !sidecarInfo.isFile() || binaryInfo.size > 16 * 1024 * 1024 || sidecarInfo.size > 1024) {
+    throw new Error("Invalid startup helper resources.");
   }
-} finally { $identity.Dispose() }
-`;
-
-async function runPowerShell(script: string, timeoutMs: number): Promise<string> {
-  const { stdout } = await execFileAsync(windowsSystemToolPath("powershell"), [
-    "-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
-    "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64"),
-  ], { windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 });
+  const [binary, sidecar] = await Promise.all([readFile(helperPath), readFile(`${helperPath}.sha256`, "utf8")]);
+  const expected = sidecar.trim().split(/\s+/)[0]?.toLowerCase();
+  if (!expected || !/^[a-f0-9]{64}$/.test(expected) || createHash("sha256").update(binary).digest("hex") !== expected) {
+    throw new Error("Startup helper integrity check failed.");
+  }
+  const { stdout } = await execFileAsync(helperPath, [command], {
+    windowsHide: true, shell: false, timeout: timeoutMs, maxBuffer: 64 * 1024,
+  });
   return stdout.trim();
 }
 
-/** Uses Windows' current token and normal UAC consent, without changing policy. */
-export function windowsElevation(run: ScriptRunner = runPowerShell) {
+/** Uses the inherited Windows token and normal UAC consent, without changing policy. */
+export function windowsElevation(helperPath: string, run: NativeRunner = runNativeHelper) {
   return {
     async isAdministrator(): Promise<boolean> {
-      const result = (await run(CHECK_ADMINISTRATOR, 15_000)).trim();
+      const result = (await run(helperPath, "--admin-status", 15_000)).trim();
       if (result === "elevated") return true;
       if (result === "standard") return false;
       throw new Error("Windows did not return a valid administrator status.");
     },
     async requestElevation(executablePath: string): Promise<"started" | "cancelled"> {
-      if (!win32.isAbsolute(executablePath) || win32.extname(executablePath).toLowerCase() !== ".exe"
-        || executablePath.includes("\0")) {
+      const expectedHelper = win32.join(win32.dirname(executablePath), "resources", "diagnostics", "ROTK.Diagnostics.exe");
+      if (!win32.isAbsolute(executablePath) || executablePath.includes("\0")
+        || win32.basename(executablePath).toLowerCase() !== "rotk launcher.exe"
+        || win32.normalize(helperPath).toLowerCase() !== expectedHelper.toLowerCase()) {
         throw new Error("The installed launcher executable path is invalid.");
       }
-      // The executable path is data, never PowerShell syntax. Do not forward
-      // arbitrary command-line switches or a caller-controlled working directory.
-      const encodedPath = Buffer.from(executablePath, "utf8").toString("base64");
-      const result = (await run(`
-$ErrorActionPreference = 'Stop'
-$executable = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'))
-$info = [Diagnostics.ProcessStartInfo]::new()
-$info.FileName = $executable
-$info.WorkingDirectory = [IO.Path]::GetDirectoryName($executable)
-$info.Arguments = '${ELEVATION_RELAUNCH_ARGUMENT}'
-$info.UseShellExecute = $true
-$info.Verb = 'runas'
-$info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Normal
-try {
-  $child = [Diagnostics.Process]::Start($info)
-  if ($null -eq $child) { throw 'Windows did not start the launcher.' }
-  $child.Dispose()
-  [Console]::Out.Write('started')
-} catch {
-  $failure = $_.Exception
-  while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }
-  if ($failure -is [ComponentModel.Win32Exception] -and $failure.NativeErrorCode -eq 1223) {
-    [Console]::Out.Write('cancelled')
-  } else { throw }
-}
-`, 120_000)).trim();
+      // The native helper derives the target from its own module path. No path
+      // or caller-controlled command-line arguments cross the UAC boundary.
+      const result = (await run(helperPath, "--elevate-launcher", 120_000)).trim();
       if (result === "started" || result === "cancelled") return result;
       throw new Error("Windows did not confirm the launcher elevation request.");
     },

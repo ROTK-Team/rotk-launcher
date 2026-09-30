@@ -1398,7 +1398,7 @@ if (singleInstanceLock) {
         executablePath: process.execPath,
         argv: process.argv,
       }, {
-        ...windowsElevation(),
+        ...windowsElevation(resolveBundledDiagnosticsPath()),
         releaseSingleInstanceLock: () => app.releaseSingleInstanceLock(),
         initialize: async () => {
           session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
