@@ -204,8 +204,8 @@ jobs:
         run: |
           npm run build:vivox
           if ($LASTEXITCODE -ne 0) { throw "Vivox release input validation failed." }
-          # Since 2.0.19 the shipped proxy is this source build: both builds
-          # must reproduce the pinned release input byte for byte.
+          # The supplied 2.0.24 release input is independent of these sources.
+          # Both reference builds must still reproduce the prior reference hash.
           npm run build:vivox:source
           if ($LASTEXITCODE -ne 0) { throw "Reference Vivox build failed." }
           $reference = Join-Path $env:GITHUB_WORKSPACE "native\vivoxproxy\dist\vivoxsdk_x64.dll"
