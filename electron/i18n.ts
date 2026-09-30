@@ -30,6 +30,12 @@ export const MAIN_COPY = {
     },
     startupTitle: "ROTK Launcher could not start",
     startupSafety: "No H1Z1 files were modified.",
+    elevation: {
+      "check-failed": "Windows administrator rights could not be verified. The launcher will close. Try Run as administrator.",
+      required: "ROTK Launcher requires Windows administrator rights and will close. Use Run as administrator to start it.",
+      development: "ROTK Launcher requires administrator rights. Start the development terminal as administrator, then run the launcher again.",
+      "relaunch-failed": "Windows could not restart ROTK Launcher as administrator. The launcher will close. Try Run as administrator.",
+    },
     rendererGone: (reason: string) =>
       `The launcher window's process stopped (${reason}). Restart the launcher; if this happens again, send %APPDATA%\\ROTK Launcher\\startup.log to the ROTK team.`,
     launcherError: (id: string, message: string) => `Launcher error ${id}: ${message}`,
@@ -74,6 +80,12 @@ export const MAIN_COPY = {
     },
     startupTitle: "ROTK Launcher ne peut pas démarrer",
     startupSafety: "Aucun fichier H1Z1 n’a été modifié.",
+    elevation: {
+      "check-failed": "Les droits administrateur Windows n’ont pas pu être vérifiés. Le launcher va se fermer. Essaie Exécuter en tant qu’administrateur.",
+      required: "ROTK Launcher exige les droits administrateur Windows et va se fermer. Utilise Exécuter en tant qu’administrateur pour le démarrer.",
+      development: "ROTK Launcher exige les droits administrateur. Démarre le terminal de développement en tant qu’administrateur, puis relance le launcher.",
+      "relaunch-failed": "Windows n’a pas pu relancer ROTK Launcher en tant qu’administrateur. Le launcher va se fermer. Essaie Exécuter en tant qu’administrateur.",
+    },
     rendererGone: (reason: string) =>
       `Le processus de la fenêtre du launcher s’est arrêté (${reason}). Relance le launcher ; si cela se reproduit, envoie %APPDATA%\\ROTK Launcher\\startup.log à l’équipe ROTK.`,
     launcherError: (id: string, message: string) => `Erreur launcher ${id} : ${message}`,

@@ -96,12 +96,21 @@ de sa taille et de son SHA-256. Un fichier inconnu, un lien ou un répertoire
 portant ce nom n’est jamais supprimé automatiquement et bloque le lancement
 avec une erreur explicite.
 
-## Droits d'exécution et ancre TPM (2.0.12 → 2.0.15)
+## Droits d'exécution Windows
 
-Le launcher s'exécute avec les droits de l'utilisateur qui le lance
-(`requestedExecutionLevel: asInvoker`) et l'installeur s'installe pour la
-machine (`perMachine`, sous `Program Files` ; la mise à jour passe par
-l'installeur assisté, qui demande lui-même l'élévation).
+Depuis la 2.0.25, le launcher vérifie ses droits administrateur Windows avant
+d'ouvrir une fenêtre, de charger les comptes ou de préparer le jeu. Si les
+droits manquent, la version installée se relance par la demande UAC normale.
+Un refus ferme le launcher ; une erreur de vérification bloque le démarrage.
+La nouvelle instance vérifie à nouveau ses droits, même si elle porte
+l'argument interne de relance. Un terminal de développement Windows doit
+être lancé explicitement en administrateur.
+
+Le manifeste partagé reste `asInvoker` pour les enfants Chromium ; le contrôle
+obligatoire se trouve dans le processus principal. Le sandbox renderer reste
+actif. L'installation reste par machine (`perMachine`, sous `Program Files`).
+
+### Historique 2.0.12 à 2.0.15
 
 La 2.0.12 — publiée sous le numéro 2.0.14 — demandait les droits
 administrateur au démarrage (`requireAdministrator`) pour l'**ancre TPM**
@@ -123,14 +132,14 @@ celles par défaut). La 2.0.11, `asInvoker`, tournait sur ces mêmes sessions et
 fonctionnait ; rien dans l'application n'intercepte cet abandon, la 2.0.15 y
 revient.
 
-L'ancre reste telle que le code la prévoit sans élévation : en plus de la clé
+Dans ces anciennes versions sans élévation, en plus de la clé
 TPM de niveau 1, le launcher crée une clé d'identité dans le TPM
 (`rotk-tpm-aik-v1`, Platform Crypto Provider) et signe le même message ; la
 partie publique de l'EK est lue (`PCP_EKPUB`, accessible sans élévation), le
 certificat EK n'est pas envoyé et l'activation échoue, ce que le serveur
-journalise (`electron/services/tpm-anchor.ts`). L'activation et la lecture du
-certificat relèveront d'un assistant élevé ponctuel, lancé une fois à
-l'enrôlement, jamais du processus entier.
+journalise (`electron/services/tpm-anchor.ts`). À partir de la 2.0.25, ces
+opérations disposent des droits du processus principal élevé ; leurs règles
+de vérification côté serveur restent indépendantes du contrôle de démarrage.
 
 Tout est en observation : sans TPM ou sans certificat, le lancement se déroule
 exactement comme avant et le serveur ne fait que journaliser. Le launcher
