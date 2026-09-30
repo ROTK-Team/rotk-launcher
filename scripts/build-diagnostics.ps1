@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0 -or $version -ne "0.15.2") { throw "Expected Zig 0.15.2,
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output) | Out-Null
 $compilerArgs = @("cc", "-target", "x86_64-windows-gnu", "-std=c11", "-O2", "-s", "-fno-ident", "-Wall", "-Wextra", "-Werror", "-municode", "-Wl,--dynamicbase", "-Wl,--nxcompat", "-Wl,--high-entropy-va")
 if ($TestBuild) { $compilerArgs += "-DROTK_DIAGNOSTICS_TEST=1" }
-$compilerArgs += @("-o", $output, $source, "-ldbghelp", "-lpsapi", "-lversion", "-ladvapi32", "-lshell32")
+$compilerArgs += @("-o", $output, $source, "-ldbghelp", "-lpsapi", "-lversion")
 & $zig.Source @compilerArgs
 if ($LASTEXITCODE -ne 0) { throw "Diagnostics helper build failed with exit code $LASTEXITCODE." }
 $hasher = [Security.Cryptography.SHA256]::Create()

@@ -12,7 +12,6 @@ const helperPath = path.join(runRoot, 'ROTK.Diagnostics.Test.exe');
 const fixturePath = path.join(runRoot, 'ROTK.Diagnostics.Fixture.exe');
 const boundedHelperPath = path.join(runRoot, 'ROTK.Diagnostics.Bounded.Test.exe');
 const productionHelper = path.join(root, 'resources', 'diagnostics', 'ROTK.Diagnostics.exe');
-const startupPaths = path.join(runRoot, 'startup-paths.exe');
 await mkdir(runRoot, { recursive: true });
 
 function build(command, args) {
@@ -21,31 +20,7 @@ function build(command, args) {
 }
 build('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/build-diagnostics.ps1', '-TestBuild', '-OutputPath', helperPath]);
 build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O0', '-g', '-Wall', '-Wextra', '-Werror', '-Wl,--stack,1048576', '-o', fixturePath, 'native/diagnostics/tests/fixture.c']);
-build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-s', '-Wall', '-Wextra', '-Werror', '-municode', '-DROTK_DIAGNOSTICS_TEST=1', '-DPERF_LOG_LIMIT=4096ULL', '-DPERF_MAX_DURATION=2500ULL', '-o', boundedHelperPath, 'native/diagnostics/diagnostics.c', '-ldbghelp', '-lpsapi', '-lversion', '-ladvapi32', '-lshell32']);
-
-build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-Wall', '-Wextra', '-Werror', '-o', startupPaths, 'native/diagnostics/tests/startup_paths.c', '-ladvapi32', '-lshell32']);
-test('startup derives only the fixed installed launcher path', () => { build(startupPaths, []); });
-
-test('startup status reads the actual inherited token without UAC', () => {
-  const result = spawnSync(productionHelper, ['--admin-status'], { encoding: 'utf8', windowsHide: true });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout.trim(), /^(elevated|standard)$/);
-  const principal = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    '[Console]::Write(([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))'],
-    { encoding: 'utf8', windowsHide: true });
-  assert.equal(principal.status, 0, principal.stderr);
-  assert.equal(result.stdout.trim(), principal.stdout.trim() === 'True' ? 'elevated' : 'standard');
-});
-
-test('startup commands reject extra arguments and uninstalled targets without UAC', () => {
-  for (const args of [['--admin-status', '--watch'], ['--elevate-launcher', '--target', 'calc.exe']]) {
-    const result = spawnSync(productionHelper, args, { windowsHide: true, timeout: 5000 });
-    assert.equal(result.status, 2);
-  }
-  // The test binary is deliberately outside the installed resources layout.
-  const result = spawnSync(helperPath, ['--elevate-launcher'], { windowsHide: true, timeout: 5000 });
-  assert.equal(result.status, 2);
-});
+build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-s', '-Wall', '-Wextra', '-Werror', '-municode', '-DROTK_DIAGNOSTICS_TEST=1', '-DPERF_LOG_LIMIT=4096ULL', '-DPERF_MAX_DURATION=2500ULL', '-o', boundedHelperPath, 'native/diagnostics/diagnostics.c', '-ldbghelp', '-lpsapi', '-lversion']);
 
 function processWithLines(executable, args = []) {
   const child = spawn(executable, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });

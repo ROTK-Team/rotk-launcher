@@ -17,11 +17,12 @@ interface PackageManifest {
  * built-in Administrator account, common on preinstalled or ghosted Windows —
  * Windows refuses to create them ("GPU process launch failed: error_code=18",
  * "Renderer process launch-failed") and Chromium aborts the process. Nothing
- * in-app can catch that abort. The main-process startup gate now enforces
- * administrator rights via UAC before initialization, while this shared
- * executable keeps asInvoker so restricted Chromium children can still start.
+ * in-app can catch that abort, so the launcher runs as the invoking user; the
+ * TPM steps that need elevation are the job of a one-shot helper, not of the
+ * whole process. Flipping this back is a release decision, and this test makes
+ * it a visible one.
  */
-it("keeps the shared executable compatible with restricted Chromium children", async () => {
+it("runs the launcher as the invoking user, never elevated as a whole", async () => {
   const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")) as PackageManifest;
   expect(manifest.build.win.requestedExecutionLevel).toBe("asInvoker");
   // The per-machine install stays: one copy under Program Files, updated by
