@@ -43,6 +43,8 @@ const EXCLUDED_PATHS = new Set([
   // Daybreak updates this unused bootstrap independently. ROTK starts
   // H1Z1.exe directly; the game executable remains attested.
   "launchpad.exe",
+  // Independently updated client module: exact root path, any hash, optional.
+  "rotkc.dll",
   // Rewritten by the launcher before every launch.
   "clientconfig.ini",
   "battleye/beclient_x64.cfg",

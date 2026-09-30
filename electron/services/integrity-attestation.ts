@@ -378,7 +378,9 @@ async function findUnexpectedFiles(
     for (const entry of entries) {
       const absolute = join(directory, entry.name);
       const relative = installationRelativePath(installationRoot, absolute);
-      if (isAttestationExcluded(relative)) continue;
+      // File exemptions must not hide a directory with the same name. The
+      // trailing slash still lets directory-prefix exclusions skip their tree.
+      if (isAttestationExcluded(entry.isDirectory() ? `${relative}/` : relative)) continue;
       if (entry.isDirectory()) {
         await walk(absolute);
         continue;
@@ -453,7 +455,7 @@ export async function measureInstallation(options: MeasureOptions): Promise<Meas
     ? await findUnexpectedFiles(installationRoot, new Set(expected.map((entry) => manifestPathKey(entry.path))))
     : (options.unexpectedPaths ?? []);
   for (const path of unexpected) {
-    if (!isManifestPath(path)) continue;
+    if (!isManifestPath(path) || isAttestationExcluded(path)) continue;
     const absolute = join(installationRoot, ...path.split("/"));
     const digest = await sha256File(absolute).catch(() => null);
     deviations.push({ path, kind: "unexpected", observedSha256: digest });
