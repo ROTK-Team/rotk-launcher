@@ -103,13 +103,34 @@ export function synchronizeClientConfig(
  */
 export const GAME_LOCALE: Record<AppLocale, string> = { en: "en_us", fr: "fr_fr", zh: "zh_cn" };
 
-/** The ROTK social menu only speaks en/fr; other launcher locales fall back to en. */
+/**
+ * Per-launch fixes to the player's `UserOptions.ini`.
+ *
+ * `[UI] ROTKSocialLanguage`: the ROTK social menu only speaks en/fr; other
+ * launcher locales fall back to en.
+ *
+ * `[Rendering] OverallQuality=-1` ("Custom"): makes hand-edited graphics keys
+ * stick. At start-up the client's InitDevice() re-reads OverallQuality and,
+ * unless it is -1, re-applies that preset over every sub-option (Effects,
+ * Texture, Shadow, MaxLocalShadows, Lighting, FogShadows, Flora, Model,
+ * ParticleLOD...). The in-game menu already switches OverallQuality to -1 as
+ * soon as one sub-option changes, so menu changes survive; a player editing
+ * the file leaves OverallQuality at its default (3 = High) and sees every
+ * edit reverted on the next launch, which reads as "the ini is ignored".
+ * Example: FloraQuality=1 written by hand next to OverallQuality=3 is back to
+ * FloraQuality=3 after one launch; with OverallQuality=-1 it stays at 1.
+ * Forcing -1 has no rendering effect: a preset chosen in the menu is applied
+ * immediately and every key it sets is already in the file. The only visible
+ * change is that the Overall Quality combobox reads "Custom" after a restart.
+ */
 export function synchronizeUserOptions(config: string, locale: AppLocale): string {
-  return upsertIniDirective(config, {
-    section: "UI",
-    key: "ROTKSocialLanguage",
-    value: locale === "fr" ? "fr" : "en",
-  });
+  const directives: IniDirective[] = [
+    { section: "UI", key: "ROTKSocialLanguage", value: locale === "fr" ? "fr" : "en" },
+    { section: "Rendering", key: "OverallQuality", value: "-1" },
+  ];
+  let synchronized = config;
+  for (const directive of directives) synchronized = upsertIniDirective(synchronized, directive);
+  return synchronized;
 }
 
 export function validateLocalCreateSessionUrl(value: string): string {

@@ -25,13 +25,22 @@ const localCreateSessionUrl = "http://127.0.0.1:49152/rest/auth/session/create";
 
 describe("UserOptions synchronization", () => {
   it("makes the social menu language follow the launcher locale", () => {
-    const original = "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=en\n";
+    const original = "[Display]\nWidth=1920\n\n[Rendering]\nOverallQuality=-1\n\n[UI]\nHideNames=0\nROTKSocialLanguage=en\n";
     expect(synchronizeUserOptions(original, "fr")).toBe(
-      "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=fr\n",
+      "[Display]\nWidth=1920\n\n[Rendering]\nOverallQuality=-1\n\n[UI]\nHideNames=0\nROTKSocialLanguage=fr\n",
     );
     expect(synchronizeUserOptions("[Display]\nWidth=1920\n", "zh")).toBe(
-      "[Display]\nWidth=1920\n\n[UI]\nROTKSocialLanguage=en\n",
+      "[Display]\nWidth=1920\n\n[UI]\nROTKSocialLanguage=en\n\n[Rendering]\nOverallQuality=-1\n",
     );
+  });
+
+  it("forces OverallQuality to Custom so hand-edited graphics keys survive InitDevice()", () => {
+    // A player edited FloraQuality by hand but left the default preset: the
+    // client would re-apply preset 3 over FloraQuality at the next launch.
+    const original = "[Rendering]\nOverallQuality=3\nFloraQuality=1\n\n[UI]\nROTKSocialLanguage=fr\n";
+    const once = synchronizeUserOptions(original, "fr");
+    expect(once).toBe("[Rendering]\nOverallQuality=-1\nFloraQuality=1\n\n[UI]\nROTKSocialLanguage=fr\n");
+    expect(synchronizeUserOptions(once, "fr")).toBe(once);
   });
 });
 
