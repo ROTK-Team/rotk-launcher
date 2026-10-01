@@ -19,6 +19,7 @@ vi.mock('../electron/services/gameplay-patch.js', () => ({
   applyGameplayPatchMode: async () => "up-to-date",
 }));
 vi.mock('../electron/services/client-config.js', () => ({ synchronizeClientConfig: (current: string) => current,
+  synchronizeUserOptions: (current: string) => current, GAME_LOCALE: { en: 'en_us', fr: 'fr_fr', zh: 'zh_cn' },
   validateLocalCreateSessionUrl: (url: string) => url }));
 vi.mock('../electron/services/launch-ticket.js', () => ({ assertLaunchTicketFresh: () => undefined,
   createLaunchTicket: async () => ({ ticket: 'test-only-ticket', displayName: 'FixturePlayer', steamId: '76561190000000000' }) }));
@@ -62,7 +63,7 @@ async function fixture() {
     config: { schemaVersion: 1, installation: { installId: 'fixture', root, sourceRoot: root,
       clientBuildId: 'fixture', installedAt: new Date().toISOString(), criticalHashes: {} } },
     identity: { playerKey: 'test-only-player-key' } as LaunchRequest['identity'],
-    runtime: RUNTIME_CONFIGS.test, logsRoot: join(root, 'logs'), bundledShimPath: join(root, 'bundled-shim.dll'),
+    runtime: RUNTIME_CONFIGS.test, locale: 'en', logsRoot: join(root, 'logs'), bundledShimPath: join(root, 'bundled-shim.dll'),
     bundledVivoxProxyPath: join(root, 'unused-proxy.dll'), bundledVivoxRuntimePath: join(root, 'unused-runtime.dll'),
     bundledGameplayPatchPath: join(root, 'unused-dinput8.dll'), clientPatchModeFallback: 'clean',
     diagnostics, onExit: vi.fn(),

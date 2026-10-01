@@ -67,8 +67,10 @@ describe("public ROTK runtime", () => {
       "C:\\ROTK\\logs",
       "install-1",
       "http://127.0.0.1:49152/rest/auth/session/create",
+      "en",
     );
 
+    expect(args).toContain("Internationalization:Locale=en_us");
     expect(args).toContain(
       "server=148.113.198.176:20042;148.113.198.176:20043;148.113.198.176:20044;148.113.198.176:20045",
     );
@@ -85,8 +87,10 @@ describe("public ROTK runtime", () => {
       "C:\\ROTK\\logs",
       "install-1",
       "http://127.0.0.1:49152/rest/auth/session/create",
+      "fr",
     );
 
+    expect(args).toContain("Internationalization:Locale=fr_fr");
     expect(args).toContain(`sessionid=${launchTicket}`);
     expect(args.join(" ")).not.toContain(durableKey);
     expect(args).toContain(

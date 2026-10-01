@@ -6,7 +6,8 @@ import { join } from "node:path";
 import type { InstalledClientConfig, LauncherConfig } from "./config-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { serverList } from "./runtime-config.js";
-import { synchronizeClientConfig, validateLocalCreateSessionUrl } from "./client-config.js";
+import { GAME_LOCALE, synchronizeClientConfig, synchronizeUserOptions, validateLocalCreateSessionUrl } from "./client-config.js";
+import type { AppLocale } from "../../shared/locale.js";
 import { validateInstallDestination } from "./path-policy.js";
 import type { PlayerIdentity } from "./player-identity.js";
 import { startLocalSessionGateway } from "./session-gateway.js";
@@ -62,6 +63,8 @@ export interface LaunchRequest {
   config: LauncherConfig;
   identity: PlayerIdentity;
   runtime: RuntimeConfig;
+  /** Launcher UI language; the game and the ROTK social menu follow it. */
+  locale: AppLocale;
   logsRoot: string;
   bundledShimPath: string;
   bundledVivoxProxyPath: string;
@@ -208,6 +211,13 @@ async function prepareClient(
   if (synchronized !== currentConfig) await atomicWriteFile(configPath, synchronized);
   await atomicWriteFile(join(root, "steam_persona_name.txt"), `${launchIdentity.displayName}\n`);
 
+  const userOptionsPath = join(root, "UserOptions.ini");
+  if (existsSync(userOptionsPath)) {
+    const currentOptions = await readFile(userOptionsPath, "utf8");
+    const synchronizedOptions = synchronizeUserOptions(currentOptions, request.locale);
+    if (synchronizedOptions !== currentOptions) await atomicWriteFile(userOptionsPath, synchronizedOptions);
+  }
+
   const battleyePath = join(root, "BattlEye", "BEClient_x64.cfg");
   if (existsSync(battleyePath)) {
     const current = await readFile(battleyePath, "utf8");
@@ -223,6 +233,7 @@ function buildLaunchArguments(
   logsRoot: string,
   installId: string,
   localCreateSessionUrl: string,
+  locale: AppLocale,
 ): string[] {
   const gatewayCreateSession = validateLocalCreateSessionUrl(localCreateSessionUrl);
   const voiceGrantOrigin = validateVoiceGrantOrigin(runtime.voiceGrantOrigin);
@@ -240,6 +251,7 @@ function buildLaunchArguments(
     `CommandQueue:cb_uri=${runtime.gatewayOrigin}/`,
     `CommandQueue:eula_uri=${runtime.gatewayOrigin}/`,
     `LaunchTelemetry:Url=${runtime.gatewayOrigin}/h1z1xx/live/`,
+    `Internationalization:Locale=${GAME_LOCALE[locale]}`,
     "Logging:ConsoleLogLevel=999",
     "Logging:FileLogLevel=999",
     "Logging:LocalLogLevel=999",
@@ -402,6 +414,7 @@ export class GameLauncher {
         request.logsRoot,
         installation.installId,
         sessionGateway.createSessionUrl,
+        request.locale,
       );
 
       const executable = join(installationRoot, "H1Z1.exe");
