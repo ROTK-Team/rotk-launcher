@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { InstalledClientConfig, LauncherConfig } from "./config-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { serverList } from "./runtime-config.js";
-import { synchronizeClientConfig, validateLocalCreateSessionUrl } from "./client-config.js";
+import { synchronizeClientConfig, synchronizeGraphicsOptions, validateLocalCreateSessionUrl } from "./client-config.js";
 import { validateInstallDestination } from "./path-policy.js";
 import type { PlayerIdentity } from "./player-identity.js";
 import { startLocalSessionGateway } from "./session-gateway.js";
@@ -210,7 +211,28 @@ async function prepareClient(
     const patched = current.replace(/MasterPort\s+\d+/i, "MasterPort 20099");
     if (patched !== current) await writeFile(battleyePath, patched, "ascii");
   }
+
+  await updateUserOptions(root, synchronizeGraphicsOptions);
   return root;
+}
+
+// Best effort and atomic: a locked or read-only UserOptions.ini must never
+// block Play, and an interrupted write must not truncate the player's settings.
+async function updateUserOptions(root: string, update: (options: string) => string): Promise<void> {
+  const path = join(root, "UserOptions.ini");
+  if (!existsSync(path)) return;
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  try {
+    const current = await readFile(path, "utf8");
+    const next = update(current);
+    if (next === current) return;
+    await writeFile(temporaryPath, next, "utf8");
+    await rename(temporaryPath, path);
+  } catch (error) {
+    console.warn("UserOptions.ini was not updated; launching anyway.", error);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
 }
 
 function buildLaunchArguments(
