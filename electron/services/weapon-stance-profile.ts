@@ -4,48 +4,46 @@ import { join } from "node:path";
 import { elements, attribute, replaceBody } from "./interface-input-profile.js";
 
 export interface StanceProfileState { added: string[]; removedNetworkN: boolean; }
-const defaults = { ToggleWeaponStance: "V", ROTKConsole: "N" };
+const defaults = { ToggleWeaponStance: "V" };
+/** Older launchers bound this console action to N and took N from ToggleNetworkStats.
+ * The default profile now ships it on F13, so players pick their own key. */
+const LEGACY_CONSOLE = "ROTKConsole";
 /** Pinned per release; the prepared rollback build sets this to false. */
 export const WEAPON_STANCE_ENABLED = true;
 
-/** Preserve every existing binding and leave ToggleDebugConsole unmodified. */
+/** Keep player bindings, undo only our legacy console N and leave ToggleDebugConsole unmodified. */
 export function migrateStanceProfile(source: string, enabled: boolean,
   previous: StanceProfileState = { added: [], removedNetworkN: false },
 ): { text: string; state: StanceProfileState } {
   const generic = elements(source, "ActionSet").find(e => attribute(e.opening, "name") === "Generic");
   if (!generic) throw new Error("Profil de touches invalide : Generic absent.");
   let body = generic.body;
-  const state = { added: [...previous.added], removedNetworkN: previous.removedNetworkN };
+  const state = { added: previous.added.filter(name => name !== LEGACY_CONSOLE), removedNetworkN: false };
   const find = (name: string) => elements(body, "Action").find(e => attribute(e.opening, "name") === name);
+  // Drop only our N binding; the default profile supplies the unbound action and a
+  // key the player chose stays.
+  const legacy = find(LEGACY_CONSOLE);
+  if (legacy && previous.added.includes(LEGACY_CONSOLE)
+    && elements(legacy.body, "Trigger").map(t => t.body.trim()).join() === "N")
+    body = body.slice(0, legacy.start) + body.slice(legacy.end);
+  const network = find("ToggleNetworkStats");
+  // Give back only the N we removed; a later rebind of the action stays.
+  if (previous.removedNetworkN && network && elements(network.body, "Trigger").length === 0) {
+    const replacement = network.opening.replace(/\/\s*>$/, ">") + "<Trigger>N</Trigger></Action>";
+    body = body.slice(0, network.start) + replacement + body.slice(network.end);
+  }
   if (enabled) {
     for (const [name, key] of Object.entries(defaults)) {
       if (find(name)) continue;
       body += `\n    <Action name="${name}" version="1"><Trigger>${key}</Trigger></Action>\n`;
       if (!state.added.includes(name)) state.added.push(name);
     }
-    const console = find("ROTKConsole")!;
-    const network = find("ToggleNetworkStats");
-    if (network && elements(console.body, "Trigger").some(t => t.body.trim() === "N")) {
-      let replacement = network.text;
-      for (const trigger of elements(network.text, "Trigger").reverse()) {
-        if (trigger.body.trim() !== "N") continue;
-        replacement = replacement.slice(0, trigger.start) + replacement.slice(trigger.end);
-        state.removedNetworkN = true;
-      }
-      body = body.slice(0, network.start) + replacement + body.slice(network.end);
-    }
   } else {
     for (const action of elements(body, "Action").reverse()) {
       if (state.added.includes(attribute(action.opening, "name") ?? ""))
         body = body.slice(0, action.start) + body.slice(action.end);
     }
-    const network = find("ToggleNetworkStats");
-    // Restore only our removed shortcut and do not disturb a subsequent rebind.
-    if (state.removedNetworkN && network && elements(network.body, "Trigger").length === 0) {
-      const replacement = network.opening.replace(/\/\s*>$/, ">") + "<Trigger>N</Trigger></Action>";
-      body = body.slice(0, network.start) + replacement + body.slice(network.end);
-    }
-    state.added = []; state.removedNetworkN = false;
+    state.added = [];
   }
   return { text: source.slice(0, generic.start) + replaceBody(generic, body) + source.slice(generic.end), state };
 }
@@ -70,7 +68,7 @@ export async function prepareWeaponStanceProfile(root: string, stateRoot: string
   let previous: StanceProfileState | undefined;
   try {
     const value = JSON.parse(await readFile(stateFile, "utf8")) as StanceProfileState;
-    if (!Array.isArray(value.added) || !value.added.every(v => Object.hasOwn(defaults, v)) || typeof value.removedNetworkN !== "boolean")
+    if (!Array.isArray(value.added) || !value.added.every(v => Object.hasOwn(defaults, v) || v === LEGACY_CONSOLE) || typeof value.removedNetworkN !== "boolean")
       throw new Error("Sauvegarde des touches Weapon Stance invalide.");
     previous = value;
   } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
