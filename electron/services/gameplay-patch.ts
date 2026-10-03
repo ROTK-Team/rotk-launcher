@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
@@ -223,7 +224,7 @@ async function writeMarker(
   const temporaryPath = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporaryPath, policy.marker.contents, { encoding: "utf8", mode: 0o600 });
-    await rename(temporaryPath, path);
+    await retryFs(() => rename(temporaryPath, path));
   } catch (error) {
     throw new Error(MARKER_ERROR, { cause: error });
   } finally {
@@ -244,7 +245,7 @@ async function removeMarker(
   if (!entry) return;
   if (entry.isSymbolicLink() || !entry.isFile()) throw new Error(MARKER_ERROR);
   try {
-    await unlink(path);
+    await retryFs(() => unlink(path));
   } catch (error) {
     throw new Error(MARKER_ERROR, { cause: error });
   }
@@ -321,7 +322,7 @@ async function deployGameplayPatchWithPolicy(
     // The marker is written after the DLL so an interrupted upgrade leaves an
     // inert DLL rather than an old proxy that would ignore its own opt-in.
     try {
-      await rename(temporaryPath, activePath);
+      await retryFs(() => rename(temporaryPath, activePath));
     } catch (error) {
       throw new Error(INSTALL_PATCH_ERROR, { cause: error });
     }
@@ -337,7 +338,7 @@ async function deployGameplayPatchWithPolicy(
     await writeMarker(root, policy);
   } catch (error) {
     // Fail closed: an unwritable marker must not leave a loaded-looking patch.
-    await unlink(activePath).catch(() => undefined);
+    await retryFs(() => unlink(activePath)).catch(() => undefined);
     throw error;
   }
   return initial.state === "absent" ? "installed" : "replaced";
@@ -362,7 +363,7 @@ async function depatchGameplayPatchWithPolicy(
   if (!sameManagedEntry(initial, current)) throw new Error(UNKNOWN_DINPUT_ERROR);
 
   try {
-    await unlink(activePath);
+    await retryFs(() => unlink(activePath));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
     throw new Error(REMOVE_PATCH_ERROR, { cause: error });
@@ -479,7 +480,7 @@ export async function recordGameplayPatchState(
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = `${path}.${randomUUID()}.tmp`;
   await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
-  await rename(temporaryPath, path);
+  await retryFs(() => rename(temporaryPath, path));
 }
 
 export const gameplayPatchInternals = {
