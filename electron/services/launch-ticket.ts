@@ -165,18 +165,37 @@ function parseTicketResponse(
   assertLaunchTicketFresh(identity, MINIMUM_TICKET_LIFETIME_MS, timing.receivedAtMonotonicMs);
   return identity;
 }
+/** The server keeps an exact list of accepted launcher versions and names the latest. */
+export function launcherUpdateRequiredError(payload: unknown): Error {
+  const required = payload && typeof payload === "object"
+    ? (payload as Record<string, unknown>).requiredVersion
+    : null;
+  const version = typeof required === "string" && /^[0-9A-Za-z.+-]{1,32}$/.test(required) ? required : null;
+  const error = new Error(
+    "This launcher version is too old to verify the game files. Update the launcher."
+      + (version ? ` Required version: ${version}.` : ""),
+  );
+  // Tagged so the launch flow can make the update mandatory (block Play,
+  // trigger the updater) rather than only showing the message.
+  (error as { code?: string }).code = "launcher_update_required";
+  return error;
+}
+
 function serviceError(status: number, value: unknown, attestationUnavailableReason?: string): Error {
   const payload = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   const errorCode = payload?.error ?? null;
+  // The server also answers a missing attestation with launcher_update_required
+  // (failureCode missing_attestation). Only a real version refusal is an update.
+  const missingAttestation = payload?.failureCode === "missing_attestation";
+  if (errorCode === "launcher_update_required" && !(missingAttestation && attestationUnavailableReason)) {
+    return launcherUpdateRequiredError(payload);
+  }
   // Enforcement refuses either an installation that failed verification, or one
   // that submitted no attestation at all. When we already know the launcher
   // could not run attestation, that second case is not a tamper and not an old
   // launcher: say so, so the player checks their connection instead of chasing
   // a phantom update or a "verify files" that will not help.
-  if (
-    (errorCode === "attestation_failed" || errorCode === "launcher_update_required")
-    && attestationUnavailableReason
-  ) {
+  if ((errorCode === "attestation_failed" || errorCode === "launcher_update_required") && attestationUnavailableReason) {
     return new Error(
       `ROTK could not verify your game files: ${attestationUnavailableReason} `
       + "Check your connection and try again.",
@@ -186,15 +205,6 @@ function serviceError(status: number, value: unknown, attestationUnavailableReas
     return new Error(
       "The game files do not match the official ROTK installation. Use Verify files, then try again.",
     );
-  }
-  if (errorCode === "launcher_update_required") {
-    const error = new Error(
-      "This launcher version is too old to verify the game files. Update the launcher.",
-    );
-    // Tagged so the launch flow can make the update mandatory (block Play,
-    // trigger the updater) rather than only showing the message.
-    (error as { code?: string }).code = "launcher_update_required";
-    return error;
   }
   if (errorCode === "account_banned") {
     const expiresAt = typeof payload?.expiresAt === "string" ? payload.expiresAt : null;
@@ -235,7 +245,11 @@ export async function createLaunchTicket(
   const fetchImpl = options.fetchImpl ?? fetch;
   const requestStartedAtMonotonicMs = performance.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   try {
     let response: Response;
@@ -256,15 +270,23 @@ export async function createLaunchTicket(
         redirect: "error",
         signal: controller.signal,
       });
-    } catch {
-      throw new Error("Unable to reach the ROTK account service");
+    } catch (error) {
+      // Keep the network cause (timeout, DNS, TLS...) visible for support, as a
+      // code: the raw message is English and may be anything.
+      const code = (error as { cause?: { code?: unknown } })?.cause?.code;
+      const cause = timedOut
+        ? "timeout"
+        : (error as Error)?.name === "AbortError"
+          ? "cancelled"
+          : typeof code === "string" && /^[A-Z0-9_]{1,64}$/.test(code) ? code : "";
+      throw new Error(`Unable to reach the ROTK account service${cause ? ` (${cause})` : ""}`);
     }
 
     let payload: unknown;
     try {
       payload = await response.json();
     } catch {
-      throw new Error("Invalid response from the ROTK account service");
+      throw new Error(`Invalid response from the ROTK account service (HTTP ${response.status})`);
     }
     if (!response.ok) throw serviceError(response.status, payload, options.attestationUnavailableReason);
     return parseTicketResponse(payload, {
