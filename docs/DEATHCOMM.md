@@ -46,7 +46,7 @@ to install .NET. The normal build/release workflow rebuilds and packages it.
 - `npm run test:deathcomm`: real WebSocket frames with fake audio devices;
   disabled mic, reception with native chat/proximity off or volumes at zero,
   preference changes during playback, authorized capture, live microphone mute,
-  deadlines, invalid/late audio and playback cleanup. It never opens a physical mic.
+  deadlines, invalid/late audio, malformed text frames and playback cleanup. It never opens a physical mic.
 - `npm exec -- vitest run tests/deathcomm-client.test.ts
   tests/diagnostic-game-lifecycle.test.ts tests/runtime-config.test.ts
   tests/vivox-client.test.ts`: endpoint policy, stdin credential handling,

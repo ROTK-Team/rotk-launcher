@@ -44,6 +44,12 @@ const string id = "0123456789abcdef0123456789abcdef";
 async Task Send(string text) => await server.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, CancellationToken.None);
 byte[] audio = new byte[656]; Convert.FromHexString(id).CopyTo(audio, 0); audio[16] = 42;
 await server.SendAsync(audio, WebSocketMessageType.Binary, true, CancellationToken.None);
+// Malformed or hostile text frames are skipped: one bad frame must never end
+// the session, because the launcher starts this helper only once per game.
+await Send("");
+await Send("not json");
+await Send("[1]");
+await Send($$"""{"id":"{{id}}"}""");
 await Send($$"""{"type":"capture","id":"{{id}}","remainingMs":4000}""");
 await Send($$"""{"type":"listen","id":"{{id}}","remainingMs":300}""");
 await server.SendAsync(audio.AsMemory(0, 100), WebSocketMessageType.Binary, false, CancellationToken.None);
@@ -113,7 +119,7 @@ Check(microphone.Closed, "changing microphone permission closes capture during t
 Check(indicator.Openings == 1, "automatic microphone is indicated");
 cancellation.Cancel();
 try { await running; } catch (Exception e) when (e is OperationCanceledException or WebSocketException) { }
-Console.WriteLine("PASS: microphone authorization, independent deathcomm reception with native chat/proximity disabled or muted, untouched preferences, unsolicited/late audio rejection, stop and deadline cleanup (no physical audio devices used).");
+Console.WriteLine("PASS: microphone authorization, independent deathcomm reception with native chat/proximity disabled or muted, untouched preferences, unsolicited/late audio rejection, malformed text frame skipping, stop and deadline cleanup (no physical audio devices used).");
 
 sealed class FakePlayback(long until) : IPlayback
 {

@@ -157,32 +157,37 @@ internal sealed class DeathcommSession : IDisposable
                         player.Append(buffer, 16, 640);
                 continue;
             }
-            using var doc = JsonDocument.Parse(buffer.AsMemory(0, count));
-            var root = doc.RootElement;
-            string? type = root.GetProperty("type").GetString(), grantId = root.GetProperty("id").GetString();
-            if (grantId == null || grantId.Length != 32 || !grantId.All(Uri.IsHexDigit)) continue;
-            if (type == "stop")
+            try
             {
-                bool stop; lock (gate) { stop = captureId == grantId; if (listeners.Remove(grantId, out var old)) old.Dispose(); }
-                if (stop) StopCapture();
-                continue;
-            }
-            if (!root.TryGetProperty("remainingMs", out var duration) || !duration.TryGetInt32(out int ms) || ms <= 0 || ms > 4000) continue;
-            long until = Environment.TickCount64 + ms;
-            if (type == "capture") StartCapture(grantId, until);
-            else if (type == "listen")
-            {
-                lock (gate)
+                using var doc = JsonDocument.Parse(buffer.AsMemory(0, count));
+                var root = doc.RootElement;
+                string? type = root.GetProperty("type").GetString(), grantId = root.GetProperty("id").GetString();
+                if (grantId == null || grantId.Length != 32 || !grantId.All(Uri.IsHexDigit)) continue;
+                if (type == "stop")
                 {
-                    if (listeners.ContainsKey(grantId) || listeners.Count >= 4) continue;
-                    // A private server-granted reaction is independent of the
-                    // killer's native chat switches and receive-volume sliders.
-                    // This never opens their microphone or changes preferences.
-                    IPlayback? player = null;
-                    try { player = createPlayback(until); listeners.Add(grantId, player); }
-                    catch { player?.Dispose(); /* No output device. */ }
+                    bool stop; lock (gate) { stop = captureId == grantId; if (listeners.Remove(grantId, out var old)) old.Dispose(); }
+                    if (stop) StopCapture();
+                    continue;
+                }
+                if (!root.TryGetProperty("remainingMs", out var duration) || !duration.TryGetInt32(out int ms) || ms <= 0 || ms > 4000) continue;
+                long until = Environment.TickCount64 + ms;
+                if (type == "capture") StartCapture(grantId, until);
+                else if (type == "listen")
+                {
+                    lock (gate)
+                    {
+                        if (listeners.ContainsKey(grantId) || listeners.Count >= 4) continue;
+                        // A private server-granted reaction is independent of the
+                        // killer's native chat switches and receive-volume sliders.
+                        // This never opens their microphone or changes preferences.
+                        IPlayback? player = null;
+                        try { player = createPlayback(until); listeners.Add(grantId, player); }
+                        catch { player?.Dispose(); /* No output device. */ }
+                    }
                 }
             }
+            catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException)
+            { /* Malformed or unexpected text frame: skip it, the session outlives a bad gateway message. */ }
         }
     }
     private void StartCapture(string id, long until)
