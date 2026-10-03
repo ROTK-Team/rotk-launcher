@@ -1,5 +1,5 @@
 import { CircleAlert, Download, KeyRound, Play, RotateCcw, Settings2 } from "lucide-react";
-import { hasLauncherUpdate } from "../../shared/launcher-update";
+import { launcherUpdateBlocksPlay } from "../../shared/launcher-update";
 import type { LauncherSnapshot } from "../../shared/contracts";
 import type { PlayerRole, ServerId } from "../../shared/launch-profile";
 import { useI18n, type Copy } from "../i18n";
@@ -76,7 +76,7 @@ export function LauncherFooter({
   const ready = snapshot.canPlay;
   const running = snapshot.phase === "running" || snapshot.phase === "launching";
   const installing = snapshot.phase === "installing";
-  const updatePending = snapshot.updateRequired || hasLauncherUpdate(snapshot.launcherUpdate);
+  const updatePending = snapshot.updateRequired || launcherUpdateBlocksPlay(snapshot.launcherUpdate);
   const needsAccountKey = snapshot.phase === "ready" && !snapshot.playerIdentity.configured;
   const primaryLabel = updatePending && !running && !installing
     ? copy.update.download
