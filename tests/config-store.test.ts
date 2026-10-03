@@ -132,6 +132,16 @@ describe("ConfigStore", () => {
     expect(persisted).toEqual({ schemaVersion: 1 });
   });
 
+  it("remembers an unfinished install across restarts until it completes", async () => {
+    const directory = await temporaryDirectory();
+    await new ConfigStore(directory).setPendingInstallRoot("D:\\Games\\ROTK");
+    const store = new ConfigStore(directory);
+    expect(await store.load()).toEqual({ schemaVersion: 1, pendingInstallRoot: "D:\\Games\\ROTK" });
+
+    await store.setInstallation(installation);
+    expect(await new ConfigStore(directory).load()).toEqual({ schemaVersion: 1, installation });
+  });
+
   it("remembers the selected server and role across restarts", async () => {
     const directory = await temporaryDirectory();
     await new ConfigStore(directory).setLaunchProfile("test", "admin");

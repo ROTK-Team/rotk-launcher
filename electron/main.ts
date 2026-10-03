@@ -50,7 +50,7 @@ import {
   resolveBundledDiagnosticsPath,
 } from "./constants.js";
 import { ConfigStore } from "./services/config-store.js";
-import { adoptExistingClient, installClient } from "./services/installer.js";
+import { adoptExistingClient, cleanupInstallLeftovers, inspectDestination, installClient } from "./services/installer.js";
 import {
   GameLauncher,
   validateInstalledClient,
@@ -60,7 +60,7 @@ import { HWID_CORE_SLOTS, collectHwid } from "./services/machine-identity.js";
 import { collectTpmProof } from "./services/tpm-identity.js";
 import { collectTpmAnchor, enrolTpmAnchor } from "./services/tpm-anchor.js";
 import { tpmBindingMessage } from "../shared/attestation.js";
-import { classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
+import { PathPolicyError, classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
 import { locateSteamClient } from "./services/steam-locator.js";
 import {
   runtimeConfigFor,
@@ -291,25 +291,38 @@ function recommendedDestinationPath(): string {
   return join(`${systemDrive}${sep}`, RECOMMENDED_INSTALL_PARENT_NAME, ROTK_INSTALL_DIRECTORY_NAME);
 }
 
+/** Validates a destination and refuses folders holding someone else's files. */
+async function acceptDestination(candidate: string): Promise<string> {
+  const destination = await validateInstallDestination(candidate, sourceRoot ?? undefined);
+  if (await inspectDestination(destination) === "foreign") {
+    throw new PathPolicyError(
+      "Le dossier ROTK choisi contient déjà d’autres fichiers. Choisis un dossier vide.",
+    );
+  }
+  return destination;
+}
+
 /**
- * Pre-fill the ROTK destination with the recommended default so a detected or
- * freshly selected Steam client only needs one Install click. Best-effort: an
- * already existing folder (the installer requires an empty target) or a
- * failing path policy leaves the destination for manual selection.
+ * Pre-fill the ROTK destination so a detected or freshly selected Steam client
+ * only needs one Install click: the folder of an unfinished copy first (even
+ * from before a restart), then the recommended default. A half-finished or
+ * finished ROTK folder is fine: installing resumes or repairs it.
  */
 async function applyRecommendedDestination(): Promise<void> {
   if (sourceKind !== "copy-required" || !sourceRoot) return;
-  try {
-    const candidate = recommendedDestinationPath();
-    const existing = await stat(candidate).catch(() => null);
-    if (existing) return;
-    destinationRoot = await validateInstallDestination(candidate, sourceRoot);
-    destinationRecommended = true;
-    phase = "destination-selected";
-  } catch {
-    destinationRoot = null;
-    destinationRecommended = false;
+  const { pendingInstallRoot } = await configStore.load();
+  for (const candidate of [...(pendingInstallRoot ? [pendingInstallRoot] : []), recommendedDestinationPath()]) {
+    try {
+      destinationRoot = await acceptDestination(candidate);
+      destinationRecommended = true;
+      phase = "destination-selected";
+      return;
+    } catch {
+      // Try the next one; the player can still pick a folder.
+    }
   }
+  destinationRoot = null;
+  destinationRecommended = false;
 }
 
 function assetSyncSummary(): AssetSyncSummary {
@@ -907,7 +920,7 @@ function registerIpc(): void {
         const candidate = basename(parent).toLocaleLowerCase("en-US") === ROTK_INSTALL_DIRECTORY_NAME.toLocaleLowerCase("en-US")
           ? parent
           : join(parent, ROTK_INSTALL_DIRECTORY_NAME);
-        destinationRoot = await validateInstallDestination(candidate, sourceRoot);
+        destinationRoot = await acceptDestination(candidate);
         destinationRecommended = false;
         phase = "destination-selected";
         lastErrorRaw = null;
@@ -945,25 +958,30 @@ function registerIpc(): void {
         const installationRoot = sourceKind === "direct"
           ? sourceRoot
           : destinationRoot as string;
-        const marker = sourceKind === "direct"
-          ? await adoptExistingClient({
-              root: sourceRoot,
-              shimPath: resolveBundledShimPath(),
-              vivoxProxyPath: resolveBundledVivoxProxyPath(),
-              vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
-              launcherVersion: app.getVersion(),
-              onProgress,
-            })
-          : await installClient({
-              sourceRoot,
-              destinationRoot: installationRoot,
-              shimPath: resolveBundledShimPath(),
-              vivoxProxyPath: resolveBundledVivoxProxyPath(),
-              vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
-              launcherVersion: app.getVersion(),
-              signal: installAbortController.signal,
-              onProgress,
-            });
+        let marker: Awaited<ReturnType<typeof installClient>>;
+        if (sourceKind === "direct") {
+          marker = await adoptExistingClient({
+            root: sourceRoot,
+            shimPath: resolveBundledShimPath(),
+            vivoxProxyPath: resolveBundledVivoxProxyPath(),
+            vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
+            launcherVersion: app.getVersion(),
+            onProgress,
+          });
+        } else {
+          // Best-effort: only lets the copy resume after a restart.
+          await configStore.setPendingInstallRoot(installationRoot).catch(() => undefined);
+          marker = await installClient({
+            sourceRoot,
+            destinationRoot: installationRoot,
+            shimPath: resolveBundledShimPath(),
+            vivoxProxyPath: resolveBundledVivoxProxyPath(),
+            vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
+            launcherVersion: app.getVersion(),
+            signal: installAbortController.signal,
+            onProgress,
+          });
+        }
         await configStore.setInstallation({
           installId: marker.installId,
           clientBuildId: marker.clientBuildId,
@@ -981,9 +999,18 @@ function registerIpc(): void {
         return { ok: true, value: { installationRoot } };
       } catch (error) {
         const cancelled = installAbortController.signal.aborted;
-        const result = operationError<{ installationRoot: string }>(error);
-        result.cancelled = cancelled;
-        phase = "error";
+        let result: OperationResult<{ installationRoot: string }>;
+        if (cancelled) {
+          lastErrorRaw = null;
+          result = { ok: false, cancelled: true };
+        } else {
+          result = operationError<{ installationRoot: string }>(error);
+        }
+        // The copy resumes on the next attempt, so the selection stays. A client
+        // that was already installed before this attempt stays playable.
+        phase = await installationRoot().catch(() => null)
+          ? "ready"
+          : sourceKind === "copy-required" ? "destination-selected" : "source-selected";
         progress = null;
         await broadcastSnapshot();
         return result;
@@ -1328,6 +1355,9 @@ async function initialize(): Promise<void> {
     }
   }
   startupLog.mark("installation-checked", `phase=${phase}`);
+  if (config.installation && phase === "ready") {
+    void cleanupInstallLeftovers(config.installation.root).catch(() => undefined);
+  }
   launcherUpdate = new LauncherUpdateService({
     // In development there is no installed package to update against;
     // the updater stays inert and the snapshot reports "idle".

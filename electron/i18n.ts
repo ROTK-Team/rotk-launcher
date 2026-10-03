@@ -105,7 +105,7 @@ const ENGLISH_ERRORS = new Map<string, string>([
   ["La source Steam et l’installation ROTK doivent être dans deux arbres distincts.", "The Steam source and ROTK installation must be in separate directory trees."],
   ["Le dossier temporaire de copie n’est pas sûr.", "The temporary copy directory is not safe."],
   ["Le dossier source contient un nombre anormal de fichiers.", "The source folder contains an unusually large number of files."],
-  ["Le dossier ROTK existe déjà. Choisis un nouvel emplacement vide.", "The ROTK folder already exists. Choose a new empty location."],
+  ["Le dossier ROTK choisi contient déjà d’autres fichiers. Choisis un dossier vide.", "The chosen ROTK folder already contains other files. Choose an empty folder."],
   ["H1Z1.exe a disparu pendant l’analyse du client.", "H1Z1.exe disappeared while the client was being scanned."],
   ["L’installation ROTK est incomplète : son marqueur est introuvable.", "The ROTK installation is incomplete: its marker is missing."],
   ["L’installation ROTK ne correspond plus à celle enregistrée par le launcher.", "The ROTK installation no longer matches the one saved by the launcher."],
