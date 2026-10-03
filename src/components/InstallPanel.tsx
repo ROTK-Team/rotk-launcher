@@ -181,6 +181,10 @@ export function InstallPanel({
               <p className="install-panel__hint">{copy.install.subfolderHint}</p>
             )}
 
+            {snapshot.error && !installing && (
+              <p className="install-panel__error" role="alert">{snapshot.error}</p>
+            )}
+
             {installing && snapshot.progress ? (
               <div className="copy-progress">
                 <div className="copy-progress__heading">

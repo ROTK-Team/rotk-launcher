@@ -97,6 +97,8 @@ import {
 } from "./services/integrity-attestation.js";
 import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { StartupLog } from "./services/startup-log.js";
+import { describeSystemError, isSystemError } from "./services/system-error.js";
+import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
@@ -232,14 +234,31 @@ function diagnosticWorkInProgress(): boolean {
   return debugSettingWrite || crashReportRequests > 0 || Boolean(diagnostics?.isBusy());
 }
 
+function bundledResourcesRoot(): string {
+  return app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
+}
+
 function rawErrorMessage(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") return "Installation annulée.";
-  if (error instanceof Error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (typeof code === "string" && /^[A-Z0-9_]+$/.test(code)) return `Erreur système (${code}).`;
-    return error.message;
+  // Wrapped errors ("... could not be installed") keep the system cause.
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (isSystemError(error)) return describeSystemError(error, bundledResourcesRoot());
+  if (error instanceof Error && isSystemError(cause)) {
+    return `${error.message} ${describeSystemError(cause, bundledResourcesRoot())}`;
   }
+  if (error instanceof Error) return error.message;
   return "Une erreur inattendue est survenue.";
+}
+
+function logOperationError(error: unknown): void {
+  const details = error as NodeJS.ErrnoException | null;
+  const cause = (error instanceof Error ? error.cause : undefined) as NodeJS.ErrnoException | undefined;
+  startupLog.mark(
+    "operation-failed",
+    redactDiagnosticText([details?.code, details?.syscall, details?.path, details?.message, cause?.code, cause?.path]
+      .filter(Boolean).join(" | ")),
+  );
+  void diagnostics?.recordLauncherError("launcher_operation_failed", error).catch(() => undefined);
 }
 
 function errorMessage(error: unknown): string {
@@ -648,6 +667,7 @@ function trustedHandler<T extends unknown[], R>(
 }
 
 function operationError<T = undefined>(error: unknown): OperationResult<T> {
+  logOperationError(error);
   lastErrorRaw = rawErrorMessage(error);
   return { ok: false, error: localizeServiceError(lastErrorRaw, currentLocale) };
 }
@@ -919,6 +939,14 @@ function registerIpc(): void {
         await broadcastSnapshot();
         return result;
       }
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.dismissError,
+    trustedHandler(async () => {
+      lastErrorRaw = null;
+      await broadcastSnapshot();
     }),
   );
 
