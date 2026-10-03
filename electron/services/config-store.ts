@@ -20,6 +20,8 @@ export interface InstalledClientConfig {
 export interface LauncherConfig {
   schemaVersion: 1;
   installation?: InstalledClientConfig;
+  /** Destination of a copy install that has not finished yet, so it resumes after a restart. */
+  pendingInstallRoot?: string;
   /** Custom asset synchronization before launch. Defaults to enabled. */
   assetSyncEnabled?: boolean;
   /** Native diagnostic observer for the next launched game; defaults to enabled. */
@@ -66,6 +68,7 @@ function isValidConfig(value: unknown): value is LauncherConfig {
   return (
     candidate.schemaVersion === 1 &&
     installationIsValid &&
+    (candidate.pendingInstallRoot === undefined || typeof candidate.pendingInstallRoot === "string") &&
     (candidate.assetSyncEnabled === undefined || typeof candidate.assetSyncEnabled === "boolean") &&
     (candidate.diagnosticCaptureEnabled === undefined || typeof candidate.diagnosticCaptureEnabled === "boolean") &&
     (candidate.debugSessionEnabled === undefined || typeof candidate.debugSessionEnabled === "boolean") &&
@@ -78,6 +81,7 @@ function isValidConfig(value: unknown): value is LauncherConfig {
 function withoutLegacyIdentity(value: LauncherConfig): LauncherConfig {
   const next: LauncherConfig = { schemaVersion: 1 };
   if (value.installation) next.installation = value.installation;
+  if (value.pendingInstallRoot !== undefined) next.pendingInstallRoot = value.pendingInstallRoot;
   if (value.assetSyncEnabled !== undefined) next.assetSyncEnabled = value.assetSyncEnabled;
   if (value.diagnosticCaptureEnabled !== undefined) next.diagnosticCaptureEnabled = value.diagnosticCaptureEnabled;
   if (value.debugSessionEnabled !== undefined) next.debugSessionEnabled = value.debugSessionEnabled;
@@ -169,9 +173,17 @@ export class ConfigStore {
     return this.config;
   }
 
+  /** Also clears the pending install: it just finished. */
   async setInstallation(installation: InstalledClientConfig): Promise<LauncherConfig> {
-    const current = await this.load();
+    const { pendingInstallRoot: _finished, ...current } = await this.load();
     const next: LauncherConfig = { ...current, installation };
+    await this.save(next);
+    return next;
+  }
+
+  async setPendingInstallRoot(pendingInstallRoot: string): Promise<LauncherConfig> {
+    const current = await this.load();
+    const next: LauncherConfig = { ...current, pendingInstallRoot };
     await this.save(next);
     return next;
   }

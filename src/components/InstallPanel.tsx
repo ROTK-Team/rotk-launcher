@@ -178,7 +178,7 @@ export function InstallPanel({
             </div>
 
             {requiresCopy && (
-              <p className="install-panel__hint">{copy.install.subfolderHint}</p>
+              <p className="install-panel__hint">{installing ? copy.install.resumeHint : copy.install.subfolderHint}</p>
             )}
 
             {installing && snapshot.progress ? (
