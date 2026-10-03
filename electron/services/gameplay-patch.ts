@@ -57,7 +57,7 @@ const STATE_FILE_NAME = "gameplay-patch-state.v1.json";
 const UNKNOWN_DINPUT_ERROR =
   "Un dinput8.dll inconnu est présent dans le client ROTK. Supprime-le ou réimporte un client propre.";
 const INVALID_BUNDLED_PATCH_ERROR =
-  "Le patch sprint ROTK embarqué est invalide.";
+  "Le patch sprint ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.";
 const UNSUPPORTED_CLIENT_ERROR =
   "Cette version de H1Z1 n’est pas compatible avec le patch sprint ROTK. Vérifie les fichiers du jeu dans Steam puis réessaie.";
 const INSTALL_PATCH_ERROR =

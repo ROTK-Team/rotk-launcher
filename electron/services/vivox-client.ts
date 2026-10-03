@@ -112,7 +112,7 @@ async function assertBundledFiles(
     proxy.size > policy.proxyMaxBytes ||
     await fileHash(bundledProxyPath) !== policy.proxySha256
   ) {
-    throw new Error("Le proxy vocal ROTK embarqu\u00e9 est invalide.");
+    throw new Error("Le proxy vocal ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.");
   }
 
   const runtime = await stat(bundledRuntimePath).catch(() => null);
@@ -120,7 +120,7 @@ async function assertBundledFiles(
     !runtime?.isFile() ||
     await fileHash(bundledRuntimePath) !== policy.stockV5Sha256
   ) {
-    throw new Error("Le runtime Vivox 5 embarqu\u00e9 est invalide.");
+    throw new Error("Le runtime Vivox 5 embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.");
   }
 }
 

@@ -246,6 +246,25 @@ function errorMessage(error: unknown): string {
   return localizeServiceError(rawErrorMessage(error), currentLocale);
 }
 
+/**
+ * Antivirus products quarantine our unsigned DLL proxies. Checking them at
+ * startup tells the player what happened before they click Play. Only presence
+ * is checked here: the services validate the hashes when they deploy.
+ */
+async function findQuarantinedPatches(): Promise<string[]> {
+  const bundled = [
+    resolveBundledShimPath(),
+    resolveBundledVivoxProxyPath(),
+    resolveBundledVivoxRuntimePath(),
+    resolveBundledGameplayPatchPath(),
+  ];
+  const missing: string[] = [];
+  for (const path of bundled) {
+    if (!(await stat(path).catch(() => null))?.isFile()) missing.push(path);
+  }
+  return missing;
+}
+
 async function installationRoot(): Promise<string | null> {
   return (await configStore.load()).installation?.root ?? null;
 }
@@ -1328,6 +1347,12 @@ async function initialize(): Promise<void> {
     }
   }
   startupLog.mark("installation-checked", `phase=${phase}`);
+  const quarantined = await findQuarantinedPatches();
+  if (quarantined.length > 0) {
+    startupLog.mark("bundled-patches-missing", quarantined.join(" | "));
+    // Keep the installation error if there is one.
+    lastErrorRaw ??= `Un fichier du launcher est absent : ${quarantined[0]}. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.`;
+  }
   launcherUpdate = new LauncherUpdateService({
     // In development there is no installed package to update against;
     // the updater stays inert and the snapshot reports "idle".
