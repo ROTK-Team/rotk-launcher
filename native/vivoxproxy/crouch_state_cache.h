@@ -23,8 +23,6 @@ typedef struct crouch_transition_state {
     float start_output;
     float target;
     double duration_seconds;
-    double phase;
-    int64_t evaluated_counter;
     int64_t start_counter;
     int64_t transition_end_counter;
     int64_t last_move_counter;
