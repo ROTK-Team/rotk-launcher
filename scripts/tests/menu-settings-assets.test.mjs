@@ -199,8 +199,7 @@ test("real launcher installs generated .payload ZIP, repairs corruption and rest
   const bundle = path.join(dir, "asset-sync.cjs");
   buildSync({ entryPoints: [path.join(project, "electron/services/asset-sync.ts")], outfile: bundle,
     bundle: true, platform: "node", format: "cjs", alias: { electron: stub } });
-  const { AssetSyncService, ASSET_FEED_URL, ASSET_RELEASE_API_URL, parseAssetManifest,
-    mergeGitHubReleaseAssets } = createRequire(import.meta.url)(bundle);
+  const { AssetSyncService, ASSET_FEED_URL } = createRequire(import.meta.url)(bundle);
   const fixture = fixturePack();
   const pack = replacePanels(fixture.bytes, fixture.pairs).bytes;
   const staged = path.join(dir, "ui_x64_2.pack2");
@@ -211,11 +210,6 @@ test("real launcher installs generated .payload ZIP, repairs corruption and rest
   const base = manifests();
   const candidate = updateManifests(base.feed, base.payloads, "1.6.2", metadata(archive), metadata(pack));
   const entry = candidate.feed.assets.at(-1);
-  const release = { tag_name: "assets-v1.6.2", draft: false, prerelease: false,
-    assets: [{ name: "ui_x64_2.payload", size: archive.length, digest: `sha256:${digest(archive)}`, browser_download_url: entry.url }] };
-  assert.deepEqual(mergeGitHubReleaseAssets(parseAssetManifest(base.feed), release).assets, parseAssetManifest(base.feed).assets,
-    "publishing the archive alone must not activate the new pack");
-  assert.deepEqual(mergeGitHubReleaseAssets(parseAssetManifest(candidate.feed), release), parseAssetManifest(candidate.feed));
   const root = path.join(dir, "client");
   const installed = path.join(root, "Resources/Assets/ui_x64_2.pack2");
   fs.mkdirSync(path.dirname(installed), { recursive: true });
@@ -224,9 +218,7 @@ test("real launcher installs generated .payload ZIP, repairs corruption and rest
   let downloads = 0;
   const sync = new AssetSyncService({ userDataDirectory: path.join(dir, "userdata"), fetchImpl: async (input) => {
     const url = String(input);
-    // Exercise the changed pack. Full existing-catalog preservation is checked above.
     if (url === ASSET_FEED_URL) return Response.json({ ...candidate.feed, assets: [entry] });
-    if (url === ASSET_RELEASE_API_URL) return Response.json(release);
     assert.equal(url, entry.url, "unexpected network request");
     downloads++;
     return new Response(archive);

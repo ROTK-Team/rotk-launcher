@@ -32,7 +32,6 @@ import { extractZipEntry, readZipDirectory } from "./zip-archive.js";
  */
 
 export const ASSET_FEED_URL = "https://raw.githubusercontent.com/h1z1rotk/assets/main/feed.json";
-export const ASSET_RELEASE_API_URL = "https://api.github.com/repos/h1z1rotk/assets/releases/latest";
 
 /** Hosts an asset URL may declare in the manifest. */
 const ASSET_URL_HOSTS = new Set(["github.com", "raw.githubusercontent.com"]);
@@ -42,10 +41,8 @@ const ASSET_REDIRECT_HOSTS = new Set([
   "objects.githubusercontent.com",
   "release-assets.githubusercontent.com",
 ]);
-const RELEASE_API_HOSTS = new Set(["api.github.com"]);
 
 const MAX_FEED_BYTES = 1_000_000;
-const MAX_RELEASE_METADATA_BYTES = 1_000_000;
 const MAX_ASSETS = 64;
 /**
  * Also bounds a single extracted zip entry: the main game pack
@@ -86,8 +83,6 @@ export interface AssetManifestEntry {
   size: number;
   installPath: string;
   type: "zip" | "file";
-  /** Exact root entry required for a pack auto-discovered from GitHub Releases. */
-  releasePackEntry?: string;
 }
 
 export interface AssetManifest {
@@ -125,24 +120,8 @@ export interface AssetSyncOutcome {
 export interface AssetSyncServiceOptions {
   userDataDirectory: string;
   feedUrl?: string;
-  releaseApiUrl?: string;
-  discoverReleaseAssets?: boolean;
   fetchImpl?: typeof fetch;
   onProgress?(progress: AssetSyncProgress): void;
-}
-
-interface GitHubReleaseAsset {
-  name?: unknown;
-  size?: unknown;
-  digest?: unknown;
-  browser_download_url?: unknown;
-}
-
-interface GitHubRelease {
-  tag_name?: unknown;
-  draft?: unknown;
-  prerelease?: unknown;
-  assets?: unknown;
 }
 
 function manifestError(reason: string): Error {
@@ -295,93 +274,6 @@ export function parseAssetManifest(value: unknown): AssetManifest {
   return { manifestVersion: 1, packVersion: manifest.packVersion, assets };
 }
 
-/**
- * Make the published GitHub release authoritative for conventional one-pack
- * ZIP payloads. A newly uploaded foo.zip is interpreted strictly as a ZIP
- * containing exactly foo.pack2 at its root and installed in Resources/Assets.
- * GitHub's size and SHA-256 digest become the download contract.
- */
-export function mergeGitHubReleaseAssets(
-  manifest: AssetManifest,
-  value: unknown,
-): AssetManifest {
-  if (!value || typeof value !== "object") throw manifestError("release GitHub inattendue");
-  const release = value as GitHubRelease;
-  if (release.draft === true || release.prerelease === true) {
-    throw manifestError("release GitHub non stable");
-  }
-  if (
-    typeof release.tag_name !== "string"
-    || !/^assets-v[0-9]+\.[0-9]+\.[0-9]+$/.test(release.tag_name)
-  ) {
-    throw manifestError("tag de release GitHub invalide");
-  }
-  if (!Array.isArray(release.assets)) {
-    throw manifestError("liste de release GitHub manquante");
-  }
-  if (release.assets.length > MAX_ASSETS) {
-    throw manifestError("trop d'assets dans la release GitHub");
-  }
-
-  const releaseVersion = release.tag_name.slice("assets-v".length);
-  const byName = new Map(
-    manifest.assets.map((asset) => [
-      asset.name.toLocaleLowerCase("en-US"),
-      asset,
-    ] as const),
-  );
-  const releasePackEntries = new Map<string, string>();
-
-  for (const raw of release.assets as GitHubReleaseAsset[]) {
-    if (!raw || typeof raw !== "object" || typeof raw.name !== "string") continue;
-    if (!/^[a-z0-9][a-z0-9._-]{0,63}\.zip$/i.test(raw.name)) continue;
-
-    const stem = raw.name.slice(0, -".zip".length);
-    const name = stem.toLocaleLowerCase("en-US");
-    const digest = typeof raw.digest === "string" && raw.digest.startsWith("sha256:")
-      ? raw.digest.slice("sha256:".length).toLocaleLowerCase("en-US")
-      : "";
-    if (!isHex64(digest)) {
-      throw manifestError("empreinte GitHub absente (" + raw.name + ")");
-    }
-    if (!Number.isSafeInteger(raw.size) || (raw.size as number) <= 0) {
-      throw manifestError("taille GitHub invalide (" + raw.name + ")");
-    }
-
-    const expectedUrl = "https://github.com/h1z1rotk/assets/releases/download/"
-      + release.tag_name + "/" + raw.name;
-    if (raw.browser_download_url !== expectedUrl) {
-      throw manifestError("URL GitHub inattendue (" + raw.name + ")");
-    }
-
-    byName.set(name, {
-      name,
-      version: releaseVersion,
-      url: expectedUrl,
-      sha256: digest,
-      size: raw.size as number,
-      installPath: "Resources/Assets",
-      type: "zip",
-    });
-    releasePackEntries.set(name, stem + ".pack2");
-  }
-
-  const merged = parseAssetManifest({
-    manifestVersion: 1,
-    packVersion: releaseVersion,
-    assets: [...byName.values()],
-  });
-  return {
-    ...merged,
-    assets: merged.assets.map((asset) => {
-      const releasePackEntry = releasePackEntries.get(
-        asset.name.toLocaleLowerCase("en-US"),
-      );
-      return releasePackEntry ? { ...asset, releasePackEntry } : asset;
-    }),
-  };
-}
-
 function isInstalledFileRecord(value: unknown): value is InstalledFileRecord {
   if (!value || typeof value !== "object") return false;
   const record = value as Partial<InstalledFileRecord>;
@@ -432,8 +324,6 @@ export class AssetSyncService {
   private readonly cacheDirectory: string;
   private readonly backupDirectory: string;
   private readonly feedUrl: string;
-  private readonly releaseApiUrl: string;
-  private readonly discoverReleaseAssets: boolean;
   private readonly fetchImpl: typeof fetch;
   private readonly onProgress: (progress: AssetSyncProgress) => void;
   private lastProgressAt = 0;
@@ -443,8 +333,6 @@ export class AssetSyncService {
     this.cacheDirectory = join(options.userDataDirectory, CACHE_DIRECTORY_NAME);
     this.backupDirectory = join(options.userDataDirectory, BACKUP_DIRECTORY_NAME);
     this.feedUrl = options.feedUrl ?? ASSET_FEED_URL;
-    this.releaseApiUrl = options.releaseApiUrl ?? ASSET_RELEASE_API_URL;
-    this.discoverReleaseAssets = options.discoverReleaseAssets ?? true;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.onProgress = options.onProgress ?? (() => undefined);
   }
@@ -612,25 +500,11 @@ export class AssetSyncService {
     signal?.addEventListener("abort", abortUpstream, { once: true });
     if (signal?.aborted) abortUpstream();
     try {
-      // Independent URLs; both requests share the same launch budget. Attach
-      // handlers to both immediately, including when one fails before the other.
-      const [manifest, release] = await Promise.all([
-        (async () => {
-          const response = await this.fetchFollowingRedirects(this.feedUrl, controller.signal);
-          const body = await response.text();
-          if (Buffer.byteLength(body, "utf8") > MAX_FEED_BYTES) throw new Error("Feed too large");
-          return parseAssetManifest(JSON.parse(stripByteOrderMark(body)));
-        })(),
-        this.discoverReleaseAssets ? (async (): Promise<unknown> => {
-          const response = await this.fetchFollowingRedirects(this.releaseApiUrl, controller.signal, RELEASE_API_HOSTS);
-          const body = await response.text();
-          if (Buffer.byteLength(body, "utf8") > MAX_RELEASE_METADATA_BYTES) {
-            throw manifestError("metadonnees de release GitHub trop volumineuses");
-          }
-          return JSON.parse(stripByteOrderMark(body)) as unknown;
-        })() : Promise.resolve(null),
-      ]);
-      return this.discoverReleaseAssets ? mergeGitHubReleaseAssets(manifest, release) : manifest;
+      // feed.json is the only catalog: the GitHub releases API is never read.
+      const response = await this.fetchFollowingRedirects(this.feedUrl, controller.signal);
+      const body = await response.text();
+      if (Buffer.byteLength(body, "utf8") > MAX_FEED_BYTES) throw new Error("Feed too large");
+      return parseAssetManifest(JSON.parse(stripByteOrderMark(body)));
     } catch (error) {
       controller.abort();
       throw error;
@@ -643,11 +517,10 @@ export class AssetSyncService {
   private async fetchFollowingRedirects(
     rawUrl: string,
     signal?: AbortSignal,
-    firstHopHosts: ReadonlySet<string> = ASSET_URL_HOSTS,
   ): Promise<Response> {
     let url = new URL(rawUrl);
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-      const allowedHosts = hop === 0 ? firstHopHosts : ASSET_REDIRECT_HOSTS;
+      const allowedHosts = hop === 0 ? ASSET_URL_HOSTS : ASSET_REDIRECT_HOSTS;
       if (url.protocol !== "https:" || !allowedHosts.has(url.hostname)) {
         throw new Error(`Hôte de téléchargement d’assets non autorisé : ${url.hostname}.`);
       }
@@ -746,19 +619,6 @@ export class AssetSyncService {
         entry,
         relativePath: validateInstallRelativePath(joinRelativePaths(packRoot, entry.name), "file"),
       }));
-
-    if (asset.releasePackEntry) {
-      const expected = asset.releasePackEntry.toLocaleLowerCase("en-US");
-      if (
-        files.length !== 1
-        || files[0].entry.name.toLocaleLowerCase("en-US") !== expected
-      ) {
-        throw new Error(
-          "Archive d'assets auto-decouverte invalide (" + asset.name + ") : "
-          + "elle doit contenir uniquement " + asset.releasePackEntry + ".",
-        );
-      }
-    }
 
     for (const { entry, relativePath } of files) {
       const target = this.resolveTarget(root, relativePath);
