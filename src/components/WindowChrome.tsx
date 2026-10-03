@@ -12,9 +12,22 @@ interface WindowChromeProps {
 const LANGUAGE_OPTIONS: Array<{ locale: AppLocale }> = [
   { locale: "en" },
   { locale: "fr" },
+  { locale: "zh" },
 ];
 
+function languageName(locale: AppLocale, copy: ReturnType<typeof useI18n>["copy"]): string {
+  return locale === "fr" ? copy.language.french : locale === "zh" ? copy.language.chinese : copy.language.english;
+}
+
 function FlagIcon({ locale }: { locale: AppLocale }) {
+  if (locale === "zh") {
+    return (
+      <svg className="language-picker__flag" viewBox="0 0 24 16" aria-hidden="true">
+        <rect width="24" height="16" fill="#de2910" />
+        <path d="M5 2.2 5.9 4.9H8.7L6.4 6.5 7.3 9.2 5 7.6 2.7 9.2 3.6 6.5 1.3 4.9H4.1Z" fill="#ffde00" />
+      </svg>
+    );
+  }
   if (locale === "fr") {
     return (
       <svg className="language-picker__flag" viewBox="0 0 24 16" aria-hidden="true">
@@ -69,7 +82,7 @@ export function LanguagePicker({ placement = "chrome" }: { placement?: "chrome" 
       <button
         type="button"
         className="language-picker__trigger"
-        aria-label={copy.language.change(locale === "en" ? copy.language.english : copy.language.french)}
+        aria-label={copy.language.change(languageName(locale, copy))}
         aria-expanded={open}
         aria-controls={`language-options-${placement}`}
         onClick={() => setOpen((value) => !value)}
@@ -92,7 +105,7 @@ export function LanguagePicker({ placement = "chrome" }: { placement?: "chrome" 
           >
             {LANGUAGE_OPTIONS.map((option) => {
               const active = option.locale === locale;
-              const label = option.locale === "en" ? copy.language.english : copy.language.french;
+              const label = languageName(option.locale, copy);
               return (
                 <button
                   key={option.locale}

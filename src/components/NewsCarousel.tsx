@@ -24,7 +24,7 @@ const FALLBACK_UPDATE: PublishedUpdate = {
 function formattedDate(value: string, locale: AppLocale, fallbackLabel: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime()) || date.getTime() === 0) return `ROTK / ${fallbackLabel}`;
-  const dateLocale = locale === "fr" ? "fr-FR" : "en-US";
+  const dateLocale = locale === "fr" ? "fr-FR" : locale === "zh" ? "zh-CN" : "en-US";
   return new Intl.DateTimeFormat(dateLocale, {
     day: "2-digit",
     month: "long",
