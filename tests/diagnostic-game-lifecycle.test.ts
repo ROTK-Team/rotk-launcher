@@ -97,6 +97,20 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(mocks.checkVoice).toHaveBeenCalledOnce();
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
+  it('deploys the bundled Steam shim before attestation and refuses drift before spawn', async () => {
+    const f = await fixture();
+    const shim = join(f.request.config.installation!.root, 'steam_api64.dll');
+    await writeFile(shim, 'previous release shim');
+    f.request.attest = vi.fn(async () => {
+      expect(await readFile(shim, 'utf8')).toBe('fixture bytes');
+      await writeFile(shim, 'changed after attestation');
+      return { status: 'not-applicable', clientPatchMode: 'clean' } as const;
+    });
+    await expect(f.launcher.launch(f.request)).rejects.toThrow(/shim Steam ROTK/);
+    expect(f.request.attest).toHaveBeenCalledOnce();
+    expect(await readFile(shim, 'utf8')).toBe('changed after attestation');
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
   it('awaits prepared session evidence before creating the game process', async () => {
     const f = await fixture(), prepared = deferred();
     const clientRoot = f.request.config.installation!.root;
