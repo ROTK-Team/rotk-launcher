@@ -55,9 +55,9 @@ If a command fails, the directory is incomplete and must not be published.
 ## Publish through the existing asset channel
 
 1. Recheck the live feed and latest stable release before publishing. If another
-   pack update has landed, prepare again from its matching manifests. The launcher
-   overlays conventional ZIPs from `releases/latest` on top of the feed, so a
-   stale release asset can override a manifest entry.
+   pack update has landed, prepare again from its matching manifests. Launchers up
+   to 2.0.23 overlay conventional ZIPs from `releases/latest` on top of the feed,
+   so a stale release asset can override a manifest entry for them.
 2. Have the server operator prepare and verify the integrity policy for the
    **new payload hash**, using the complete generated payload manifest and the
    intended launcher patches. Agree the policy/asset rollout before publishing;

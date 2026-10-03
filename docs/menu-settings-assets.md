@@ -42,11 +42,12 @@ The output directory must not exist. It contains:
   installed-file sizes/hashes separately.
 - `verification.json`: source hash, output hashes and count of preserved entries.
 
-The `.payload` suffix is deliberate: `releases/latest` discovers conventional
-`foo.zip` assets automatically, whereas this archive is installed only through
-its explicit `type: "zip"` feed entry. Do not rename it to `.zip`. Publishing a
-stable release can still change the launcher's effective `packVersion`, so
-coordinate that publication with the policy as well as the feed update.
+The `.payload` suffix is deliberate: launchers up to 2.0.23 discover conventional
+`foo.zip` assets of `releases/latest` automatically, whereas this archive is
+installed only through its explicit `type: "zip"` feed entry. Do not rename it to
+`.zip`. On those launchers, publishing a stable release can still change the
+effective `packVersion`, so coordinate that publication with the policy as well
+as the feed update.
 
 All existing catalog rows are preserved, including unrelated pending fixes
 already present in the input. If another update lands first, regenerate from

@@ -4,9 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  ASSET_RELEASE_API_URL,
   AssetSyncService,
-  mergeGitHubReleaseAssets,
   parseAssetManifest,
   stripByteOrderMark,
   type AssetManifest,
@@ -40,25 +38,6 @@ function assetEntry(
 
 function manifest(assets: AssetManifestEntry[], packVersion = "1.0.0"): AssetManifest {
   return { manifestVersion: 1, packVersion, assets };
-}
-
-function releaseAsset(name: string, payload: Buffer) {
-  return {
-    name,
-    size: payload.length,
-    digest: "sha256:" + sha256(payload),
-    browser_download_url:
-      "https://github.com/h1z1rotk/assets/releases/download/assets-v1.1.0/" + name,
-  };
-}
-
-function release(assets: ReturnType<typeof releaseAsset>[]) {
-  return {
-    tag_name: "assets-v1.1.0",
-    draft: false,
-    prerelease: false,
-    assets,
-  };
 }
 
 type RouteHandler = () => Response;
@@ -99,39 +78,10 @@ describe("ROTK asset sync", () => {
       userDataDirectory: userData,
       feedUrl: FEED_URL,
       fetchImpl: makeFetch(routes, calls),
-      discoverReleaseAssets: false,
     });
   }
 
-  it("starts both metadata requests before either responds and waits for both before installing", async () => {
-    const { userData, root } = await setup();
-    const requests = new Map<string, (response: Response) => void>();
-    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
-      fetchImpl: (async input => new Promise<Response>(resolve => requests.set(String(input), resolve))) as typeof fetch });
-    const pending = sync.sync(root);
-    await vi.waitFor(() => expect(requests.size).toBe(2));
-    requests.get(FEED_URL)!(new Response(JSON.stringify(manifest([]))));
-    expect(await sync.readState()).toBeNull();
-    requests.get(ASSET_RELEASE_API_URL)!(new Response(JSON.stringify(release([]))));
-    expect((await pending).status).toBe("updated");
-  });
-
-  it.each([FEED_URL, ASSET_RELEASE_API_URL])("aborts the other metadata read when %s is invalid", async failedUrl => {
-    const { userData, root } = await setup();
-    let cancelled = false;
-    const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
-      fetchImpl: (async (input, init) => {
-        if (String(input) === failedUrl) return new Response("invalid-json");
-        return new Promise<Response>((_resolve, reject) => {
-          init!.signal!.addEventListener("abort", () => { cancelled = true; reject(new Error("cancelled peer")); }, { once: true });
-        });
-      }) as typeof fetch });
-    await expect(sync.sync(root)).rejects.toThrow();
-    expect(cancelled).toBe(true);
-    expect(await sync.readState()).toBeNull();
-  });
-
-  it("propagates cancellation to both metadata reads", async () => {
+  it("propagates cancellation to the feed read", async () => {
     const { userData, root } = await setup();
     const controller = new AbortController();
     let started = 0, cancelled = 0;
@@ -141,10 +91,10 @@ describe("ROTK asset sync", () => {
         init!.signal!.addEventListener("abort", () => { cancelled++; reject(new Error("cancelled")); }, { once: true });
       })) as typeof fetch });
     const pending = expect(sync.sync(root, { signal: controller.signal })).rejects.toThrow();
-    await vi.waitFor(() => expect(started).toBe(2));
+    await vi.waitFor(() => expect(started).toBe(1));
     controller.abort();
     await pending;
-    expect(cancelled).toBe(2);
+    expect(cancelled).toBe(1);
   });
 
   it.each([false, true])("uses one timeout budget and respects an already-aborted signal (preaborted=%s)", async preaborted => {
@@ -153,24 +103,24 @@ describe("ROTK asset sync", () => {
     const controller = new AbortController();
     if (preaborted) controller.abort();
     let markStarted!: () => void;
-    const bothStarted = new Promise<void>(resolve => { markStarted = resolve; });
+    const feedStarted = new Promise<void>(resolve => { markStarted = resolve; });
     let started = 0, cancelled = 0;
     const sync = new AssetSyncService({ userDataDirectory: userData, feedUrl: FEED_URL,
       fetchImpl: (async (_input, init) => new Promise<Response>((_resolve, reject) => {
-        if (++started === 2) markStarted();
+        if (++started === 1) markStarted();
         const abort = () => { cancelled++; reject(new Error("cancelled")); };
         if (init!.signal!.aborted) abort();
         else init!.signal!.addEventListener("abort", abort, { once: true });
       })) as typeof fetch });
     const pending = expect(sync.sync(root, { signal: controller.signal })).rejects.toThrow();
-    await bothStarted;
+    await feedStarted;
     if (!preaborted) {
       await vi.advanceTimersByTimeAsync(9999);
       expect(cancelled).toBe(0);
       await vi.advanceTimersByTimeAsync(1);
     }
     await pending;
-    expect(cancelled).toBe(2);
+    expect(cancelled).toBe(1);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -235,100 +185,6 @@ describe("ROTK asset sync", () => {
       expect(() => parseAssetManifest(withEntry({ size: 4 * 1024 ** 4 }))).toThrow("taille invalide");
     });
 
-    it("discovers new pack ZIPs from the latest GitHub release", () => {
-      const oldPack = Buffer.from("old pack");
-      const updatedPackZip = Buffer.from("updated pack zip");
-      const movementPackZip = Buffer.from("movement pack zip");
-      const feed = manifest([
-        assetEntry("assets_x64_0", oldPack, {
-          type: "zip",
-          installPath: "Resources/Assets",
-        }),
-      ]);
-
-      const merged = mergeGitHubReleaseAssets(feed, release([
-        releaseAsset("assets_x64_0.zip", updatedPackZip),
-        releaseAsset("assets_x64_10.zip", movementPackZip),
-        releaseAsset("release-notes.txt", Buffer.from("ignored")),
-      ]));
-
-      expect(merged.packVersion).toBe("1.1.0");
-      expect(merged.assets.map((asset) => asset.name)).toEqual([
-        "assets_x64_0",
-        "assets_x64_10",
-      ]);
-      expect(merged.assets[0]).toMatchObject({
-        sha256: sha256(updatedPackZip),
-        releasePackEntry: "assets_x64_0.pack2",
-      });
-      expect(merged.assets[1]).toMatchObject({
-        url: "https://github.com/h1z1rotk/assets/releases/download/assets-v1.1.0/assets_x64_10.zip",
-        sha256: sha256(movementPackZip),
-        installPath: "Resources/Assets",
-        releasePackEntry: "assets_x64_10.pack2",
-      });
-    });
-
-    it("refuses an auto-discovered ZIP without GitHub SHA-256 metadata", () => {
-      const candidate = {
-        ...releaseAsset("assets_x64_10.zip", Buffer.from("pack")),
-        digest: null,
-      };
-      expect(() => mergeGitHubReleaseAssets(manifest([]), release([candidate as never])))
-        .toThrow("empreinte GitHub absente");
-    });
-  });
-
-  it("downloads a newly uploaded release pack before launch or Verify files", async () => {
-    const { userData, root } = await setup();
-    const packZip = buildZip([
-      { name: "assets_x64_10.pack2", data: "PS3 movement animations", method: 8 },
-    ]);
-    const metadata = release([releaseAsset("assets_x64_10.zip", packZip)]);
-    const downloadUrl = metadata.assets[0].browser_download_url;
-    const calls: string[] = [];
-    const sync = new AssetSyncService({
-      userDataDirectory: userData,
-      feedUrl: FEED_URL,
-      releaseApiUrl: ASSET_RELEASE_API_URL,
-      fetchImpl: makeFetch({
-        [FEED_URL]: () => new Response(JSON.stringify(manifest([]))),
-        [ASSET_RELEASE_API_URL]: () => new Response(JSON.stringify(metadata)),
-        [downloadUrl]: () => new Response(new Uint8Array(packZip)),
-      }, calls),
-    });
-
-    expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "1.1.0" });
-    expect(
-      await readFile(join(root, "Resources", "Assets", "assets_x64_10.pack2"), "utf8"),
-    ).toBe("PS3 movement animations");
-    expect(calls).toEqual([FEED_URL, ASSET_RELEASE_API_URL, downloadUrl]);
-    expect((await sync.readState())?.assets[0]).toMatchObject({
-      name: "assets_x64_10",
-      sha256: sha256(packZip),
-    });
-  });
-
-  it("rejects a release ZIP whose pack name does not match its asset name", async () => {
-    const { userData, root } = await setup();
-    const wrongZip = buildZip([{ name: "another.pack2", data: "wrong" }]);
-    const metadata = release([releaseAsset("assets_x64_10.zip", wrongZip)]);
-    const downloadUrl = metadata.assets[0].browser_download_url;
-    const sync = new AssetSyncService({
-      userDataDirectory: userData,
-      feedUrl: FEED_URL,
-      releaseApiUrl: ASSET_RELEASE_API_URL,
-      fetchImpl: makeFetch({
-        [FEED_URL]: () => new Response(JSON.stringify(manifest([]))),
-        [ASSET_RELEASE_API_URL]: () => new Response(JSON.stringify(metadata)),
-        [downloadUrl]: () => new Response(new Uint8Array(wrongZip)),
-      }, []),
-    });
-
-    await expect(sync.verify(root)).rejects.toThrow("doit contenir uniquement assets_x64_10.pack2");
-    await expect(
-      stat(join(root, "Resources", "Assets", "another.pack2")),
-    ).rejects.toThrow();
   });
 
   it("installs file and zip assets, backs up originals and keeps state", async () => {

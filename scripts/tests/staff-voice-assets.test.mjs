@@ -96,7 +96,7 @@ test("real launcher installs all three packs, skips repeat sync, repairs corrupt
   fs.writeFileSync(stub, "export const app = new Proxy({}, {get(){throw Error('Unexpected Electron UI access')}});");
   buildSync({ entryPoints: [path.join(project, "electron/services/asset-sync.ts")], outfile: bundle,
     bundle: true, platform: "node", format: "cjs", alias: { electron: stub } });
-  const { AssetSyncService, ASSET_FEED_URL, ASSET_RELEASE_API_URL, parseAssetManifest, mergeGitHubReleaseAssets } = createRequire(import.meta.url)(bundle);
+  const { AssetSyncService, ASSET_FEED_URL } = createRequire(import.meta.url)(bundle);
   const realRelease = process.env.ROTK_STAFF_VOICE_RELEASE_PROOF;
   let candidate, archiveDir;
   if (realRelease) {
@@ -116,11 +116,6 @@ test("real launcher installs all three packs, skips repeat sync, repairs corrupt
     candidate = update(baseline(), "1.9.0", a, p);
   }
   const changed = candidate.feed.assets.filter(a => Object.hasOwn(archives, a.name));
-  const release = { tag_name: `assets-v${candidate.feed.packVersion}`, draft: false, prerelease: false,
-    assets: changed.map(a => ({ name: `${a.name}.payload`, browser_download_url: a.url, size: a.size, digest: `sha256:${a.sha256}` })) };
-  assert.deepEqual(mergeGitHubReleaseAssets(parseAssetManifest(baseline().feed), release).assets, parseAssetManifest(baseline().feed).assets,
-    "publishing archives first must leave the old catalog active");
-  assert.deepEqual(mergeGitHubReleaseAssets(parseAssetManifest(candidate.feed), release), parseAssetManifest(candidate.feed));
   const client = path.join(dir, "client"), assets = path.join(client, "Resources/Assets");
   fs.mkdirSync(assets, { recursive: true }); fs.writeFileSync(path.join(client, ".rotk-installation.json"), "{}");
   const originals = Object.fromEntries(names.map(name => [name, Buffer.from(`synthetic original ${name}`)]));
@@ -129,7 +124,6 @@ test("real launcher installs all three packs, skips repeat sync, repairs corrupt
   const sync = new AssetSyncService({ userDataDirectory: path.join(dir, "userdata"), fetchImpl: async input => {
     const url = String(input);
     if (url === ASSET_FEED_URL) return Response.json({ ...candidate.feed, assets: changed });
-    if (url === ASSET_RELEASE_API_URL) return Response.json(release);
     const asset = changed.find(a => a.url === url);
     assert(asset, "unexpected network request"); downloads++;
     return new Response(Readable.toWeb(fs.createReadStream(path.join(archiveDir, `${asset.name}.payload`))));

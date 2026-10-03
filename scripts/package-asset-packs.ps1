@@ -14,8 +14,8 @@ zip format for entries below 4 GiB - the launcher zip reader rejects Zip64.
   -SourceDirectory ../assets/assets `
   -OutputDirectory ./out/asset-release `
   -PackVersion 1.1.0
-Then create the GitHub release (tag printed at the end), upload the zips and
-commit the generated feed.json to h1z1rotk/assets main.
+Then create the GitHub release (tag printed at the end), upload the .payload
+files and commit feed.json and asset-payloads.v1.json to h1z1rotk/assets main.
 #>
 [CmdletBinding()]
 param(
@@ -74,7 +74,9 @@ $payloads = @()
 $totalUncompressed = 0
 foreach ($file in $files) {
   $baseName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
-  $zipName = "$baseName.zip"
+  # .payload, not .zip: launchers up to 2.0.23 install any .zip of the latest
+  # release on their own, before feed.json and the attestation policy agree.
+  $zipName = "$baseName.payload"
   $zipPath = Join-Path $output $zipName
   if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
 
