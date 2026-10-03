@@ -471,7 +471,9 @@ async function attestInstallation(
     // and the server is told which endorsement key it lives under — a
     // credential activation the first time, one confirming request after.
     // Observe only: a machine without it launches exactly as before.
-    const anchor = await collectTpmAnchor(bindingMessage).catch(() => null);
+    const anchor = await collectTpmAnchor(bindingMessage, {
+      endorsementCachePath: join(userDataDirectory, "tpm-endorsement.v1.json"),
+    }).catch(() => null);
     if (anchor !== null) {
       const enrolment = await enrolTpmAnchor(
         { beginUrl: runtime.tpmEnrolBeginUrl, completeUrl: runtime.tpmEnrolCompleteUrl },
