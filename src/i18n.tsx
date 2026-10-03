@@ -144,6 +144,8 @@ export interface Copy {
     detectedBadge: string;
     recommendedBadge: string;
     subfolderHint: string;
+    noClientFound: string;
+    installWithSteam: string;
     choose: string;
     cancelCopy: string;
     createInstall: string;
@@ -330,6 +332,8 @@ const COPY: Record<AppLocale, Copy> = {
       detectedBadge: "AUTO-DETECTED",
       recommendedBadge: "RECOMMENDED",
       subfolderHint: "A ROTK subfolder is created automatically in the chosen location — no need to create it yourself.",
+      noClientFound: "No H1Z1 client was found. Install it with Steam (listed as Z1 Battle Royale), then come back here.",
+      installWithSteam: "INSTALL H1Z1 WITH STEAM",
       choose: "CHOOSE",
       cancelCopy: "CANCEL",
       createInstall: "CREATE SEPARATE COPY",
@@ -537,6 +541,8 @@ const COPY: Record<AppLocale, Copy> = {
       detectedBadge: "DÉTECTÉ AUTO",
       recommendedBadge: "RECOMMANDÉ",
       subfolderHint: "Un sous-dossier ROTK est créé automatiquement dans l’emplacement choisi — inutile de le créer toi-même.",
+      noClientFound: "Aucun client H1Z1 trouvé. Installe-le avec Steam (sous le nom Z1 Battle Royale), puis reviens ici.",
+      installWithSteam: "INSTALLER H1Z1 AVEC STEAM",
       choose: "CHOISIR",
       cancelCopy: "ANNULER",
       createInstall: "CRÉER UNE COPIE SÉPARÉE",

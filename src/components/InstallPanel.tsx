@@ -11,6 +11,7 @@ interface InstallPanelProps {
   onClose(): void;
   onSelectSource(): void;
   onSelectDestination(): void;
+  onInstallWithSteam(): void;
   onInstall(): void;
   onCancel(): void;
   onVerifyAssets(): void;
@@ -40,6 +41,7 @@ export function InstallPanel({
   onClose,
   onSelectSource,
   onSelectDestination,
+  onInstallWithSteam,
   onInstall,
   onCancel,
   onVerifyAssets,
@@ -176,6 +178,15 @@ export function InstallPanel({
                 )}
               </AnimatePresence>
             </div>
+
+            {!hasSource && !installing && !snapshot.installationRoot && (
+              <div className="install-steam">
+                <p className="install-panel__hint">{copy.install.noClientFound}</p>
+                <button type="button" className="text-button" onClick={onInstallWithSteam} disabled={busy}>
+                  {copy.install.installWithSteam}
+                </button>
+              </div>
+            )}
 
             {requiresCopy && (
               <p className="install-panel__hint">{copy.install.subfolderHint}</p>
