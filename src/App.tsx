@@ -179,6 +179,7 @@ export default function App() {
         onClose={() => setSetupOpen(false)}
         onSelectSource={() => void selectSource()}
         onSelectDestination={() => void selectDestination()}
+        onChooseDrive={(root) => void perform(() => window.rotk.chooseInstallDrive(root))}
         onInstall={() => void install()}
         onCancel={() => void window.rotk.cancelInstall()}
         onVerifyAssets={() => void perform(() => window.rotk.verifyAssets())}
