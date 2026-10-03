@@ -8,11 +8,13 @@ import {
   readdir,
   rename,
   rm,
+  rmdir,
   stat,
+  statfs,
   writeFile,
 } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { AssetSyncProgress } from "../../shared/contracts.js";
@@ -423,14 +425,58 @@ async function sha256File(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
+/**
+ * Move a file: an instant rename on the same drive, otherwise copied, checked
+ * with `verify`, and only then deleted. Returns false when it stayed in place.
+ */
+async function moveFile(from: string, to: string, verify: (copy: string) => Promise<boolean>): Promise<boolean> {
+  try {
+    await rename(from, to);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EXDEV") return false;
+  }
+  const temporary = `${to}.${randomUUID()}.tmp`;
+  try {
+    await copyFile(from, temporary);
+    if (!(await verify(temporary))) return false;
+    await rename(temporary, to);
+    await rm(from, { force: true });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
 function relativeToNative(relativePath: string): string {
   return relativePath.split("/").join(sep);
 }
 
+/**
+ * Each pending pack is downloaded, then extracted next to its target, with the
+ * replaced original backed up: plan for about three times the download size.
+ */
+async function ensureFreeSpace(directory: string, downloadBytes: number): Promise<void> {
+  if (downloadBytes === 0) return;
+  const disk = await statfs(directory).catch(() => null);
+  if (!disk) return;
+  const requiredBytes = downloadBytes * 3;
+  if (Number(disk.bavail) * Number(disk.bsize) < requiredBytes) {
+    throw new Error(`Espace disque insuffisant pour les assets : ${Math.ceil(requiredBytes / 1024 ** 3)} Go sont nécessaires.`);
+  }
+}
+
 export class AssetSyncService {
   private readonly statePath: string;
-  private readonly cacheDirectory: string;
-  private readonly backupDirectory: string;
+  // Up to 2.0.23 cache and backups lived in userData, on C:, whatever drive the
+  // game was on. Old backups are still honoured; current packs are moved out
+  // of the old cache.
+  private readonly legacyCacheDirectory: string;
+  private readonly legacyBackupDirectory: string;
+  private cacheDirectory: string;
+  private backupDirectory: string;
   private readonly feedUrl: string;
   private readonly releaseApiUrl: string;
   private readonly discoverReleaseAssets: boolean;
@@ -440,13 +486,25 @@ export class AssetSyncService {
 
   constructor(options: AssetSyncServiceOptions) {
     this.statePath = join(options.userDataDirectory, STATE_FILE_NAME);
-    this.cacheDirectory = join(options.userDataDirectory, CACHE_DIRECTORY_NAME);
-    this.backupDirectory = join(options.userDataDirectory, BACKUP_DIRECTORY_NAME);
+    this.legacyCacheDirectory = join(options.userDataDirectory, CACHE_DIRECTORY_NAME);
+    this.legacyBackupDirectory = join(options.userDataDirectory, BACKUP_DIRECTORY_NAME);
+    this.cacheDirectory = this.legacyCacheDirectory;
+    this.backupDirectory = this.legacyBackupDirectory;
     this.feedUrl = options.feedUrl ?? ASSET_FEED_URL;
     this.releaseApiUrl = options.releaseApiUrl ?? ASSET_RELEASE_API_URL;
     this.discoverReleaseAssets = options.discoverReleaseAssets ?? true;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.onProgress = options.onProgress ?? (() => undefined);
+  }
+
+  /**
+   * Keep the cache and backups on the game's drive, next to the install
+   * (`D:\Games\.ROTK-assets`), outside the attested tree.
+   */
+  private useStorageFor(root: string): void {
+    const base = join(dirname(root), `.${basename(root)}-assets`);
+    this.cacheDirectory = join(base, CACHE_DIRECTORY_NAME);
+    this.backupDirectory = join(base, BACKUP_DIRECTORY_NAME);
   }
 
   async readState(): Promise<AssetSyncState | null> {
@@ -472,6 +530,7 @@ export class AssetSyncService {
     if (!(await exists(join(root, INSTALL_MARKER_NAME)))) {
       throw new Error("Installe d’abord le client ROTK.");
     }
+    this.useStorageFor(root);
     const state = await this.readState();
 
     let manifest: AssetManifest;
@@ -484,6 +543,8 @@ export class AssetSyncService {
         : new Error("Le flux d’assets ROTK est indisponible. Vérifie ta connexion puis réessaie.");
     }
 
+    await this.adoptLegacyCache(manifest);
+    await this.adoptLegacyBackups();
     const previousRecords = new Map((state?.assets ?? []).map((asset) => [asset.name, asset]));
     const ownedFiles = new Set(
       (state?.assets ?? []).flatMap((asset) =>
@@ -507,6 +568,7 @@ export class AssetSyncService {
     }
 
     const totalBytes = pending.reduce((sum, asset) => sum + asset.size, 0);
+    await ensureFreeSpace(dirname(root), totalBytes);
     let completedBytes = 0;
     let assetsCompleted = 0;
     const emit = (phase: AssetSyncProgress["phase"], assetName: string, force = false): void => {
@@ -573,6 +635,7 @@ export class AssetSyncService {
    */
   async restore(installRoot: string): Promise<void> {
     const root = resolve(installRoot);
+    this.useStorageFor(root);
     const state = await this.readState();
     for (const record of state?.assets ?? []) {
       for (const file of record.installedFiles) {
@@ -581,6 +644,7 @@ export class AssetSyncService {
     }
     await rm(this.statePath, { force: true });
     await rm(this.backupDirectory, { recursive: true, force: true });
+    await rm(this.legacyBackupDirectory, { recursive: true, force: true });
   }
 
   private async recordNeedsRepair(
@@ -813,14 +877,16 @@ export class AssetSyncService {
     const existing = await stat(target).catch(() => null);
     if (!existing?.isFile()) return;
     const backupPath = join(this.backupDirectory, relativeToNative(relativePath));
-    if (await exists(backupPath)) return;
+    if (await exists(backupPath) || await exists(join(this.legacyBackupDirectory, relativeToNative(relativePath)))) return;
     await mkdir(dirname(backupPath), { recursive: true });
     await copyFile(target, backupPath, fsConstants.COPYFILE_EXCL);
   }
 
   private async restoreOrRemove(root: string, relativePath: string): Promise<void> {
     const target = this.resolveTarget(root, relativePath);
-    const backupPath = join(this.backupDirectory, relativeToNative(relativePath));
+    const current = join(this.backupDirectory, relativeToNative(relativePath));
+    const legacy = join(this.legacyBackupDirectory, relativeToNative(relativePath));
+    const backupPath = await exists(current) ? current : legacy;
     if (await exists(backupPath)) {
       await mkdir(dirname(target), { recursive: true });
       const staging = join(dirname(target), `.rotk-staging-${randomUUID()}`);
@@ -848,6 +914,48 @@ export class AssetSyncService {
     await rename(temporaryPath, this.statePath);
   }
 
+  /** Move still-current packs out of the old userData cache instead of downloading them again. */
+  private async adoptLegacyCache(manifest: AssetManifest): Promise<void> {
+    if (this.legacyCacheDirectory === this.cacheDirectory) return;
+    const entries = await readdir(this.legacyCacheDirectory).catch(() => [] as string[]);
+    if (entries.length === 0) return;
+    const keep = new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`));
+    await mkdir(this.cacheDirectory, { recursive: true });
+    for (const entry of entries) {
+      const from = join(this.legacyCacheDirectory, entry);
+      const to = join(this.cacheDirectory, entry);
+      if (!keep.has(entry) || await exists(to)) continue;
+      // Anything not moved stays in the old cache for the next sync.
+      await moveFile(from, to, async (copy) => await sha256File(copy) === entry.slice(0, 64));
+    }
+  }
+
+  /** Move backups made by older launchers next to the install too, so C: gets its space back. */
+  private async adoptLegacyBackups(): Promise<void> {
+    if (this.legacyBackupDirectory === this.backupDirectory) return;
+    const entries = await readdir(this.legacyBackupDirectory, { recursive: true, withFileTypes: true })
+      .catch(() => []);
+    if (entries.length === 0) return;
+    let leftOver = false;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const from = join(entry.parentPath, entry.name);
+      const to = join(this.backupDirectory, relative(this.legacyBackupDirectory, from));
+      let moved = false;
+      if (!(await exists(to))) {
+        try {
+          const { size } = await stat(from);
+          await mkdir(dirname(to), { recursive: true });
+          moved = await moveFile(from, to, async (copy) => (await stat(copy)).size === size);
+        } catch {
+          // Left in place: still restored from the old folder (see restoreOrRemove).
+        }
+      }
+      if (!moved) leftOver = true;
+    }
+    if (!leftOver) await rm(this.legacyBackupDirectory, { recursive: true, force: true }).catch(() => undefined);
+  }
+
   private async pruneCache(manifest: AssetManifest): Promise<void> {
     const keep = new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`));
     try {
@@ -856,6 +964,15 @@ export class AssetSyncService {
       }
     } catch {
       // Cache pruning is best-effort housekeeping.
+    }
+    // Old cache: only drop what no current pack uses. Anything that could not
+    // be moved yet stays for the next sync.
+    if (this.legacyCacheDirectory !== this.cacheDirectory) {
+      const legacy = await readdir(this.legacyCacheDirectory).catch(() => [] as string[]);
+      for (const entry of legacy) {
+        if (!keep.has(entry)) await rm(join(this.legacyCacheDirectory, entry), { force: true }).catch(() => undefined);
+      }
+      await rmdir(this.legacyCacheDirectory).catch(() => undefined); // only when empty
     }
   }
 }
