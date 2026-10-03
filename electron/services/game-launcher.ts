@@ -1,11 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { InstalledClientConfig, LauncherConfig } from "./config-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { serverList } from "./runtime-config.js";
-import { synchronizeClientConfig, validateLocalCreateSessionUrl } from "./client-config.js";
+import { GAME_LOCALE, synchronizeClientConfig, synchronizeUserOptions, validateLocalCreateSessionUrl } from "./client-config.js";
+import type { AppLocale } from "../../shared/locale.js";
 import { validateInstallDestination } from "./path-policy.js";
 import type { PlayerIdentity } from "./player-identity.js";
 import { startLocalSessionGateway } from "./session-gateway.js";
@@ -61,6 +63,8 @@ export interface LaunchRequest {
   config: LauncherConfig;
   identity: PlayerIdentity;
   runtime: RuntimeConfig;
+  /** Launcher UI language; the game and the ROTK social menu follow it. */
+  locale: AppLocale;
   logsRoot: string;
   bundledShimPath: string;
   bundledVivoxProxyPath: string;
@@ -204,6 +208,8 @@ async function prepareClient(
   await writeFile(configPath, synchronized, "ascii");
   await writeFile(join(root, "steam_persona_name.txt"), `${launchIdentity.displayName}\n`, "utf8");
 
+  await updateUserOptions(root, (options) => synchronizeUserOptions(options, request.locale));
+
   const battleyePath = join(root, "BattlEye", "BEClient_x64.cfg");
   if (existsSync(battleyePath)) {
     const current = await readFile(battleyePath, "utf8");
@@ -213,12 +219,32 @@ async function prepareClient(
   return root;
 }
 
+// Best effort and atomic: a locked or read-only UserOptions.ini must never
+// block Play, and an interrupted write must not truncate the player's settings.
+async function updateUserOptions(root: string, update: (options: string) => string): Promise<void> {
+  const path = join(root, "UserOptions.ini");
+  if (!existsSync(path)) return;
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  try {
+    const current = await readFile(path, "utf8");
+    const next = update(current);
+    if (next === current) return;
+    await writeFile(temporaryPath, next, "utf8");
+    await rename(temporaryPath, path);
+  } catch (error) {
+    console.warn("UserOptions.ini was not updated; launching anyway.", error);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
 function buildLaunchArguments(
   launchTicket: string,
   runtime: RuntimeConfig,
   logsRoot: string,
   installId: string,
   localCreateSessionUrl: string,
+  locale: AppLocale,
 ): string[] {
   const gatewayCreateSession = validateLocalCreateSessionUrl(localCreateSessionUrl);
   const voiceGrantOrigin = validateVoiceGrantOrigin(runtime.voiceGrantOrigin);
@@ -236,6 +262,8 @@ function buildLaunchArguments(
     `CommandQueue:cb_uri=${runtime.gatewayOrigin}/`,
     `CommandQueue:eula_uri=${runtime.gatewayOrigin}/`,
     `LaunchTelemetry:Url=${runtime.gatewayOrigin}/h1z1xx/live/`,
+    // English is the client default: leave a hand-set ClientConfig locale alone.
+    ...(locale === "en" ? [] : [`Internationalization:Locale=${GAME_LOCALE[locale]}`]),
     "Logging:ConsoleLogLevel=999",
     "Logging:FileLogLevel=999",
     "Logging:LocalLogLevel=999",
@@ -396,6 +424,7 @@ export class GameLauncher {
         request.logsRoot,
         installation.installId,
         sessionGateway.createSessionUrl,
+        request.locale,
       );
 
       const executable = join(installationRoot, "H1Z1.exe");
