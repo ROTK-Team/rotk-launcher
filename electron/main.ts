@@ -374,6 +374,9 @@ async function runAssetSync(mode: "sync" | "verify", soft: boolean): Promise<Ope
  * evidence will not match, so the rejection is logged for the admin studio
  * instead of being silently hidden by the client.
  */
+// Ask for a new challenge when less than this is left after hashing.
+const CHALLENGE_MARGIN_MS = 60_000;
+
 async function attestInstallation(
   playerKey: string,
   runtime: RuntimeConfig,
@@ -392,7 +395,7 @@ async function attestInstallation(
     const marker = await readInstallationMarker(root);
     if (!marker) return { status: "not-applicable", clientPatchMode: fallbackMode };
 
-    const challenge = await requestAttestationChallenge(
+    let challenge = await requestAttestationChallenge(
       playerKey,
       runtime.attestationChallengeUrl,
       launcherVersion,
@@ -437,6 +440,10 @@ async function attestInstallation(
         : []),
     ]);
 
+    // The fingerprint only needs the slots the challenge names: read it while
+    // the files are hashed instead of after.
+    const hwidSlots = challenge.hwidSlots ?? HWID_CORE_SLOTS;
+    const hwidPromise = collectHwid(hwidSlots).catch(() => ({}));
     const measurement = await measureInstallation({
       installationRoot: root,
       userDataDirectory,
@@ -455,10 +462,26 @@ async function attestInstallation(
         `Integrity attestation found ${measurement.deviations.length} deviation(s); reporting them.`,
       );
     }
+    // A first launch hashes the whole client and can outlive the challenge.
+    // The measurement does not depend on it, so a fresh one with the same
+    // build, policy, pack, patch mode and slots can be used as is. A failed
+    // renewal keeps the old one, which the server may still accept.
+    if (Date.parse(challenge.expiresAt) - Date.now() < CHALLENGE_MARGIN_MS) {
+      const fresh = await requestAttestationChallenge(playerKey, runtime.attestationChallengeUrl, launcherVersion)
+        .catch(() => challenge);
+      if (
+        fresh.baseBuildId === challenge.baseBuildId
+        && fresh.policyVersion === challenge.policyVersion
+        && fresh.packVersion === challenge.packVersion
+        && (fresh.clientPatchMode ?? "clean") === clientPatchMode
+        && JSON.stringify(fresh.hwidSlots ?? HWID_CORE_SLOTS) === JSON.stringify(hwidSlots)
+      ) {
+        challenge = fresh;
+      }
+    }
     // The fingerprint this launch was asked for (#320 §B): the slots the signed
-    // challenge names, or the core five for a server that names none. Read
-    // after the challenge, so the answer is to this launch's question.
-    const hwid = await collectHwid(challenge.hwidSlots ?? HWID_CORE_SLOTS).catch(() => ({}));
+    // challenge names, or the core five for a server that names none.
+    const hwid = await hwidPromise;
     // Sign with the TPM-backed key when the machine has one; null when it does
     // not, and the launch proceeds without it. The message binds the
     // (single-use) challengeId to the fingerprint exactly as the ticket will
@@ -466,12 +489,15 @@ async function attestInstallation(
     // single-use challenge stops replay. The server decides (behind its own
     // flag) whether a missing proof is acceptable.
     const bindingMessage = tpmBindingMessage(challenge.challengeId, hwid);
-    const tpmProof = await collectTpmProof(bindingMessage).catch(() => null);
+    // Both TPM steps sign the same message; run them side by side.
+    const [tpmProof, anchor] = await Promise.all([
+      collectTpmProof(bindingMessage).catch(() => null),
+      collectTpmAnchor(bindingMessage).catch(() => null),
+    ]);
     // Level-2 anchor (#320 §A): the TPM identity key signs the same message,
     // and the server is told which endorsement key it lives under — a
     // credential activation the first time, one confirming request after.
     // Observe only: a machine without it launches exactly as before.
-    const anchor = await collectTpmAnchor(bindingMessage).catch(() => null);
     if (anchor !== null) {
       const enrolment = await enrolTpmAnchor(
         { beginUrl: runtime.tpmEnrolBeginUrl, completeUrl: runtime.tpmEnrolCompleteUrl },
@@ -1051,7 +1077,7 @@ function registerIpc(): void {
           diagnostics: diagnosticLaunch?.hooks,
           // Best-effort hardware fingerprint; the server hashes it. A failure
           // must never block a launch, so it degrades to no HWID signal.
-          hwid: await collectHwid().catch(() => ({})),
+          fallbackHwid: () => collectHwid(),
           onExit: () => {
             gamePid = null;
             phase = "ready";
