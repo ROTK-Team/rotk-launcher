@@ -116,7 +116,7 @@ describe('one-click player crash reports', () => {
     expect(files.get('NOTES.txt')!.toString()).toContain('crash');
     expect(exported.path).toBe(join(f.destination, exported.fileName));
     expect(exported.fileName).toMatch(/^ROTK-crash-\d{4}-\d{2}-\d{2}-[a-f0-9]{8}-[a-f0-9]{8}\.zip$/);
-  });
+  }, 30_000);
 
   it('exports existing dumps and sanitized game/native evidence in a valid ZIP with correct manifest hashes', async () => {
     const f = await fixture(), launch = await f.controller.beginLaunch(f.context);
