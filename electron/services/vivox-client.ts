@@ -1,15 +1,16 @@
-import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants, createReadStream } from "node:fs";
-import { copyFile, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
+import { atomicCopyFile, atomicWriteFile } from "./fs-safe.js";
 
 export const VIVOX_STOCK_V4_SHA256 =
   "d6915a466a905ae55f7e20019e01228c92cc86ce793a9fc050b49258a210c7b1";
 export const VIVOX_STOCK_V5_SHA256 =
   "33a7f704eda23dda9ccbd9eba1fda2f0589211e9c61ec9d1f9c797acc624ea44";
 export const VIVOX_PROXY_SHA256 =
-  "5350449196dea51278b9c70da36ac621d4bda626bcded8c1bb3a83b07ec62c32";
+  "e797798683e5090760753d4d31bbd368a1d8ebae6f4f94ab61aa4efc410e3b2c";
 export const CROUCH_PARITY_MARKER_NAME = "rotk-crouch-parity.ini";
 
 const CROUCH_CLIENT_BUILD_ID = "h1z1-1.0.326.439939";
@@ -22,7 +23,7 @@ if (!CROUCH_CLIENT_BUILD) {
 
 export const CROUCH_PARITY_MARKER_CONTENTS = [
   "mode=patch-v2",
-  "animation=v13-perf1-ads-safe-cache256-hints-quiet-pose-only-interruptible-sine-idle400-200-move250",
+  "animation=v12-opti1-hints512-nolog-ads-safe-pose-only-js-sine-idle400-200-move250",
   "cameraScalePitch=disabled",
   `h1z1Sha256=${CROUCH_CLIENT_BUILD.executableSha256.toUpperCase()}`,
   `proxySha256=${VIVOX_PROXY_SHA256.toUpperCase()}`,
@@ -64,23 +65,11 @@ async function fileHash(filePath: string): Promise<string> {
 }
 
 async function atomicCopy(source: string, destination: string): Promise<void> {
-  const temporary = `${destination}.rotk-${randomUUID()}.tmp`;
-  try {
-    await copyFile(source, temporary, fsConstants.COPYFILE_EXCL);
-    await rename(temporary, destination);
-  } finally {
-    await rm(temporary, { force: true }).catch(() => undefined);
-  }
+  await atomicCopyFile(source, destination);
 }
 
 async function atomicWrite(destination: string, contents: string): Promise<void> {
-  const temporary = `${destination}.rotk-${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, contents, { encoding: "ascii", flag: "wx" });
-    await rename(temporary, destination);
-  } finally {
-    await rm(temporary, { force: true }).catch(() => undefined);
-  }
+  await atomicWriteFile(destination, contents, "ascii");
 }
 
 async function assertSupportedH1Z1(
@@ -112,7 +101,7 @@ async function assertBundledFiles(
     proxy.size > policy.proxyMaxBytes ||
     await fileHash(bundledProxyPath) !== policy.proxySha256
   ) {
-    throw new Error("Le proxy vocal ROTK embarqu\u00e9 est invalide.");
+    throw new Error("Le proxy vocal ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.");
   }
 
   const runtime = await stat(bundledRuntimePath).catch(() => null);
@@ -120,7 +109,7 @@ async function assertBundledFiles(
     !runtime?.isFile() ||
     await fileHash(bundledRuntimePath) !== policy.stockV5Sha256
   ) {
-    throw new Error("Le runtime Vivox 5 embarqu\u00e9 est invalide.");
+    throw new Error("Le runtime Vivox 5 embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.");
   }
 }
 
@@ -171,7 +160,7 @@ async function deployVivoxCompatibilityWithPolicy(
   // an unexpected DLL. Only our own verified backup is removed; an unknown
   // file under that name stays on disk and gets reported, as it should be.
   if (await fileHash(legacyBackupPath) === policy.stockV4Sha256) {
-    await rm(legacyBackupPath, { force: true });
+    await rm(legacyBackupPath, { force: true, maxRetries: 5, retryDelay: 100 });
   }
 
   // Repair an absent, stale, or corrupt Vivox 5 runtime from the validated copy.

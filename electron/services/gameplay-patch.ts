@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
 export const GAMEPLAY_PATCH_FILE_NAME = "dinput8.dll";
 export const GAMEPLAY_PATCH_SHA256 =
-  "2c8c7d65f8410a2f05f58318978b44f08860c4f5647b5474a11bf70a0ebc0b3a";
-export const GAMEPLAY_PATCH_BYTES = 34_304;
+  "73d6a0fca5ee4a0aac04be49b2440fd26545444bf912fc3e69a5287824c4f230";
+export const GAMEPLAY_PATCH_BYTES = 34_816;
 
 /**
  * Marker next to H1Z1.exe. The proxy enables the sprint byte pair and guarded
@@ -20,6 +21,11 @@ export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
 
 /** Exact retired ROTK artifacts an automatic migration may replace. */
 export const RETIRED_GAMEPLAY_PATCHES = Object.freeze([
+  Object.freeze({
+    // v17 + CZ repair: N fed the admin-gated debug console query.
+    sha256: "2c8c7d65f8410a2f05f58318978b44f08860c4f5647b5474a11bf70a0ebc0b3a",
+    bytes: 34_304,
+  }),
   Object.freeze({
     // Local v17 before the CZ continuation-address repair.
     sha256: "f27379c09f04db9abbeeaee56a0231fe7aeaa2e9570e670091c75a85871e67db",
@@ -57,7 +63,7 @@ const STATE_FILE_NAME = "gameplay-patch-state.v1.json";
 const UNKNOWN_DINPUT_ERROR =
   "Un dinput8.dll inconnu est présent dans le client ROTK. Supprime-le ou réimporte un client propre.";
 const INVALID_BUNDLED_PATCH_ERROR =
-  "Le patch sprint ROTK embarqué est invalide.";
+  "Le patch sprint ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.";
 const UNSUPPORTED_CLIENT_ERROR =
   "Cette version de H1Z1 n’est pas compatible avec le patch sprint ROTK. Vérifie les fichiers du jeu dans Steam puis réessaie.";
 const INSTALL_PATCH_ERROR =
@@ -223,7 +229,7 @@ async function writeMarker(
   const temporaryPath = `${path}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporaryPath, policy.marker.contents, { encoding: "utf8", mode: 0o600 });
-    await rename(temporaryPath, path);
+    await retryFs(() => rename(temporaryPath, path));
   } catch (error) {
     throw new Error(MARKER_ERROR, { cause: error });
   } finally {
@@ -244,7 +250,7 @@ async function removeMarker(
   if (!entry) return;
   if (entry.isSymbolicLink() || !entry.isFile()) throw new Error(MARKER_ERROR);
   try {
-    await unlink(path);
+    await retryFs(() => unlink(path));
   } catch (error) {
     throw new Error(MARKER_ERROR, { cause: error });
   }
@@ -321,7 +327,7 @@ async function deployGameplayPatchWithPolicy(
     // The marker is written after the DLL so an interrupted upgrade leaves an
     // inert DLL rather than an old proxy that would ignore its own opt-in.
     try {
-      await rename(temporaryPath, activePath);
+      await retryFs(() => rename(temporaryPath, activePath));
     } catch (error) {
       throw new Error(INSTALL_PATCH_ERROR, { cause: error });
     }
@@ -337,7 +343,7 @@ async function deployGameplayPatchWithPolicy(
     await writeMarker(root, policy);
   } catch (error) {
     // Fail closed: an unwritable marker must not leave a loaded-looking patch.
-    await unlink(activePath).catch(() => undefined);
+    await retryFs(() => unlink(activePath)).catch(() => undefined);
     throw error;
   }
   return initial.state === "absent" ? "installed" : "replaced";
@@ -362,7 +368,7 @@ async function depatchGameplayPatchWithPolicy(
   if (!sameManagedEntry(initial, current)) throw new Error(UNKNOWN_DINPUT_ERROR);
 
   try {
-    await unlink(activePath);
+    await retryFs(() => unlink(activePath));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
     throw new Error(REMOVE_PATCH_ERROR, { cause: error });
@@ -479,7 +485,7 @@ export async function recordGameplayPatchState(
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = `${path}.${randomUUID()}.tmp`;
   await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
-  await rename(temporaryPath, path);
+  await retryFs(() => rename(temporaryPath, path));
 }
 
 export const gameplayPatchInternals = {

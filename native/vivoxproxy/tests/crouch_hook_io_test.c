@@ -91,9 +91,8 @@ int main(void) {
     g_crouch_blend_call_count = 0;
     tick(1,1,0); tick(501,1,0); tick(3001,0,0);
     assert(file_opens == 0);
-    g_crouch_transition_trace = TRUE;
     reset(0,0); tick(1,1,0);
-    assert(file_opens > 0);
-    printf("PASS v12 unchanged nominal curves, %u forwarded calls, zero normal disk opens, opt-in trace\n",calls);
+    assert(file_opens == 0);
+    printf("PASS v12 nominal curves, %u forwarded calls, zero crouch log disk opens\n",calls);
     return 0;
 }

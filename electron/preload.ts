@@ -28,6 +28,7 @@ const api: RotkLauncherApi = {
   selectSource: () => ipcRenderer.invoke(IPC_CHANNELS.selectSource),
   selectDestination: () => ipcRenderer.invoke(IPC_CHANNELS.selectDestination),
   openSteamInstall: () => ipcRenderer.invoke(IPC_CHANNELS.openSteamInstall),
+  dismissError: () => ipcRenderer.invoke(IPC_CHANNELS.dismissError),
   install: () => ipcRenderer.invoke(IPC_CHANNELS.install),
   cancelInstall: () => ipcRenderer.invoke(IPC_CHANNELS.cancelInstall),
   play: () => ipcRenderer.invoke(IPC_CHANNELS.play),

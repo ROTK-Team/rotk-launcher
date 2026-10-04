@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { join } from "node:path";
 
 const ACTIONS = new Set(["OpenMap", "ToggleInventory"]);
@@ -156,7 +157,7 @@ async function optionalRead(path: string): Promise<string | null> {
 
 async function atomicWrite(path: string, contents: string): Promise<void> {
   const temporary = `${path}.rotk-tmp-${process.pid}`;
-  try { await writeFile(temporary, contents, "utf8"); await rename(temporary, path); }
+  try { await writeFile(temporary, contents, "utf8"); await retryFs(() => rename(temporary, path)); }
   finally { await rm(temporary, { force: true }); }
 }
 

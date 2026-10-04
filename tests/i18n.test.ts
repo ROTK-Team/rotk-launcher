@@ -40,10 +40,10 @@ describe("launcher locales", () => {
     ).toBe("This H1Z1 version is not compatible with the ROTK sprint patch. Verify the game files in Steam and try again.");
     expect(
       localizeServiceError(
-        "Le patch sprint ROTK embarqué est invalide.",
+        "Le patch sprint ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.",
         "en",
       ),
-    ).toBe("The bundled ROTK sprint patch is invalid.");
+    ).toBe("The bundled ROTK sprint patch is missing or modified. Your antivirus may have quarantined it: restore it from Windows Security or reinstall the launcher.");
     expect(
       localizeServiceError(
         "Le marqueur du patch sprint ROTK n’a pas pu être écrit. Ferme H1Z1 puis réessaie.",
@@ -62,5 +62,21 @@ describe("launcher locales", () => {
     expect(localizeServiceError("Invalid ROTK session identity", "fr")).toBe(
       "L’identité de session ROTK est invalide.",
     );
+  });
+
+  it("localizes common install errors in Chinese and falls back to English", () => {
+    expect(localizeServiceError("Espace disque insuffisant : 19 Go sont nécessaires.", "zh"))
+      .toBe("磁盘空间不足，需要 19 GB。");
+    expect(localizeServiceError("H1Z1 est déjà lancé depuis cette installation.", "zh"))
+      .toBe("H1Z1 正在运行，请先关闭游戏。");
+    expect(localizeServiceError("Trop de redirections pendant le téléchargement des assets.", "zh"))
+      .toBe("Too many redirects while downloading assets.");
+  });
+
+  it("localizes account service errors for Chinese players", () => {
+    expect(localizeServiceError("The ROTK launcher key was rejected", "zh"))
+      .toBe("ROTK 启动器密钥无效，请到网站账号页面重新复制。");
+    expect(localizeServiceError("This ROTK account is permanently banned. Reason: cheating", "zh"))
+      .toBe("此 ROTK 账号已被永久封禁。原因：cheating");
   });
 });

@@ -48,14 +48,7 @@ Write-Host "Verified crouch state cache: $output"
 
 $hookTest = Join-Path $outputDirectory "crouch_hook_io_test.exe"
 & $zig.Source cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Werror `
-    -o $hookTest (Join-Path $PSScriptRoot "tests\crouch_hook_io_test.c") -lwinhttp -lshell32
+    -DROTK_VIVOX_V5_COMPAT=1 -o $hookTest (Join-Path $PSScriptRoot "tests\crouch_hook_io_test.c") -lwinhttp -lshell32
 if ($LASTEXITCODE -ne 0) { throw "Crouch hook I/O test build failed" }
 & $hookTest
 if ($LASTEXITCODE -ne 0) { throw "Crouch hook I/O test failed" }
-$transitionOutput = Join-Path $outputDirectory "crouch_transition_test.exe"
-& $zig.Source cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Werror `
-    -DROTK_VIVOX_V5_COMPAT=1 -o $transitionOutput `
-    (Join-Path $PSScriptRoot "tests\crouch_transition_test.c") -lwinhttp -lshell32
-if ($LASTEXITCODE -ne 0) { throw "Crouch transition test build failed." }
-& $transitionOutput
-if ($LASTEXITCODE -ne 0) { throw "Crouch transition tests failed." }

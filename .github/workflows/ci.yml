@@ -95,7 +95,7 @@ jobs:
           }
 
           $gameplayHash = (Get-FileHash -LiteralPath $allowedGameplayDll -Algorithm SHA256).Hash
-          if ($gameplayHash -ne "2C8C7D65F8410A2F05F58318978B44F08860C4F5647B5474A11BF70A0EBC0B3A") {
+          if ($gameplayHash -ne "73D6A0FCA5EE4A0AAC04BE49B2440FD26545444BF912FC3E69A5287824C4F230") {
             throw "Unexpected shotgun sprint proxy SHA-256: $gameplayHash"
           }
           $gameplaySidecar = ((Get-Content -LiteralPath "$allowedGameplayDll.sha256" -Raw) -split "\s+")[0]
@@ -214,7 +214,7 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File native/vivoxproxy/build-v5-compat.ps1 -OutputPath $alternateProxy
           if ($LASTEXITCODE -ne 0) { throw "Second reference Vivox build failed." }
           $alternateHash = (Get-FileHash -LiteralPath $alternateProxy -Algorithm SHA256).Hash
-          if ($hash -ne $alternateHash -or $hash -ne "8AB1F2379C61B81391492EDB84875610FFBE4D3A8D97A180C73355D989AC27A2") {
+          if ($hash -ne $alternateHash -or $hash -ne "E797798683E5090760753D4D31BBD368A1D8EBAE6F4F94AB61AA4EFC410E3B2C") {
             throw "The reference Vivox source build changed: $hash / $alternateHash"
           }
           # Prove neither source build overwrote the release input or sidecar.

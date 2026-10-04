@@ -38,6 +38,16 @@
   box-sizing: border-box;
 }
 
+/* Chinese: a proper CJK face, and no wide tracking (it only suits Latin caps). */
+html:lang(zh) {
+  --display: "Eurostile", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-family: "Inter", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+html:lang(zh) * {
+  letter-spacing: normal !important;
+}
+
 html,
 body,
 #root {
@@ -1714,6 +1724,17 @@ button:focus-visible {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.5;
+}
+
+.install-panel__error {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--signal);
+  background: rgba(16, 16, 15, 0.96);
+  color: var(--paper-dim);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .install-panel__primary {

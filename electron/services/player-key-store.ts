@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isValidPlayerKey, normalizePlayerKey } from "../../shared/player-key.js";
@@ -128,11 +129,13 @@ export class PlayerKeyStore {
 
   private async readStored(): Promise<StoredPlayerKeys | null> {
     try {
-      const parsed: unknown = JSON.parse(await readFile(this.path, "utf8"));
+      const parsed: unknown = JSON.parse(await retryFs(() => readFile(this.path, "utf8")));
       if (!isStoredPlayerKeys(parsed)) throw new Error("Invalid encrypted player key record");
       return { schemaVersion: 2, keys: { ...parsed.keys } };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      // A locked file (antivirus, sync client) is not a corrupt one: keep the key.
+      if ((error as NodeJS.ErrnoException).code) throw error;
       // Unreadable credential state is replaced, never retained under a
       // forensic filename: it may hold a durable bearer.
       await rm(this.path, { force: true });
@@ -144,17 +147,18 @@ export class PlayerKeyStore {
     if (!this.legacyPath) return {};
     const profile = launchProfileId(DEFAULT_SERVER_ID, "player");
     try {
-      const parsed: unknown = JSON.parse(await readFile(this.legacyPath, "utf8"));
+      const parsed: unknown = JSON.parse(await retryFs(() => readFile(this.legacyPath!, "utf8")));
       if (!isLegacyStoredPlayerKey(parsed)) throw new Error("Invalid encrypted player key record");
       const playerKey = this.encryption.decryptString(Buffer.from(parsed.encryptedKey, "base64"));
       if (!isValidPlayerKey(playerKey)) throw new Error("Invalid decrypted player key");
       await this.writeStored({ schemaVersion: 2, keys: { [profile]: parsed.encryptedKey } });
-      await rm(this.legacyPath, { force: true });
+      // The key is migrated: a leftover legacy file is never read again.
+      await rm(this.legacyPath, { force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined);
       return { [profile]: normalizePlayerKey(playerKey) };
     } catch (error) {
-      // Absent is the ordinary case; anything else is an unusable record. Both
-      // leave the launcher asking for the key again, never with a stale file.
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      // Absent is the ordinary case. A locked file or a failed write keeps the
+      // legacy key for the next start; only an unusable record is removed.
+      if (!(error as NodeJS.ErrnoException).code) {
         await rm(this.legacyPath, { force: true });
       }
       return {};
@@ -169,6 +173,6 @@ export class PlayerKeyStore {
       flag: "wx",
       mode: 0o600,
     });
-    await rename(temporaryPath, this.path);
+    await retryFs(() => rename(temporaryPath, this.path));
   }
 }

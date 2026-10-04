@@ -141,7 +141,10 @@ export default function App() {
         <div className="error-toast" role="alert">
           <strong>{copy.app.operationInterrupted}</strong>
           <span>{snapshot.error ?? transientError}</span>
-          <button type="button" aria-label={copy.app.closeError} onClick={() => setTransientError(null)}>×</button>
+          <button type="button" aria-label={copy.app.closeError} onClick={() => {
+            setTransientError(null);
+            void window.rotk.dismissError();
+          }}>×</button>
         </div>
       )}
       <UpdateBanner

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
 import { join, basename, dirname, resolve, sep } from "node:path";
+import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -97,6 +98,8 @@ import {
 } from "./services/integrity-attestation.js";
 import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { StartupLog } from "./services/startup-log.js";
+import { describeSystemError, isSystemError } from "./services/system-error.js";
+import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
@@ -112,6 +115,17 @@ import {
 } from "./services/gameplay-patch.js";
 
 app.setName(APP_NAME);
+// Also trust the Windows certificate store. Antivirus HTTPS scanning (Kaspersky,
+// ESET, Avast...) installs its root there, and Node's fetch only knows its own
+// bundled list, so every request failed on those machines.
+try {
+  tls.setDefaultCACertificates([
+    ...new Set([...tls.getCACertificates("default"), ...tls.getCACertificates("system")]),
+  ]);
+} catch (error) {
+  // Keep the bundled list.
+  console.warn("Windows certificate store not loaded", error);
+}
 if (!app.isPackaged && process.env.ROTK_USER_DATA_DIR) {
   app.setPath("userData", resolve(process.env.ROTK_USER_DATA_DIR));
 } else {
@@ -202,6 +216,11 @@ function diagnosticCopy(): { failed: string; invalid: string; save: string; exis
     invalid: "La demande de diagnostic est invalide.", save: "Enregistrer le rapport de diagnostic ROTK",
     exists: "Ce fichier existe déjà. Choisis un autre nom pour conserver les deux rapports.",
     settings: "Le réglage de capture pourra être changé une fois la session terminée.",
+  } : currentLocale === "zh" ? {
+    failed: "诊断未能完成。已保存的报告仍然可用。",
+    invalid: "诊断请求无效。", save: "保存 ROTK 诊断报告",
+    exists: "文件已存在。请换一个文件名，以免覆盖之前的报告。",
+    settings: "游戏结束后才能修改记录设置。",
   } : {
     failed: "The diagnostic operation could not be completed. Previously saved reports are still available.",
     invalid: "The diagnostic request is invalid.", save: "Save ROTK diagnostic report",
@@ -232,18 +251,54 @@ function diagnosticWorkInProgress(): boolean {
   return debugSettingWrite || crashReportRequests > 0 || Boolean(diagnostics?.isBusy());
 }
 
+function bundledResourcesRoot(): string {
+  return app.isPackaged ? process.resourcesPath : join(app.getAppPath(), "resources");
+}
+
 function rawErrorMessage(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") return "Installation annulée.";
-  if (error instanceof Error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (typeof code === "string" && /^[A-Z0-9_]+$/.test(code)) return `Erreur système (${code}).`;
-    return error.message;
+  // Wrapped errors ("... could not be installed") keep the system cause.
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (isSystemError(error)) return describeSystemError(error, bundledResourcesRoot());
+  if (error instanceof Error && isSystemError(cause)) {
+    return `${error.message} ${describeSystemError(cause, bundledResourcesRoot())}`;
   }
+  if (error instanceof Error) return error.message;
   return "Une erreur inattendue est survenue.";
+}
+
+function logOperationError(error: unknown): void {
+  const details = error as NodeJS.ErrnoException | null;
+  const cause = (error instanceof Error ? error.cause : undefined) as NodeJS.ErrnoException | undefined;
+  startupLog.mark(
+    "operation-failed",
+    redactDiagnosticText([details?.code, details?.syscall, details?.path, details?.message, cause?.code, cause?.path]
+      .filter(Boolean).join(" | ")),
+  );
+  void diagnostics?.recordLauncherError("launcher_operation_failed", error).catch(() => undefined);
 }
 
 function errorMessage(error: unknown): string {
   return localizeServiceError(rawErrorMessage(error), currentLocale);
+}
+
+/**
+ * Antivirus products quarantine our unsigned DLL proxies. Checking them at
+ * startup tells the player what happened before they click Play. Only presence
+ * is checked here: the services validate the hashes when they deploy.
+ */
+async function findQuarantinedPatches(): Promise<string[]> {
+  const bundled = [
+    resolveBundledShimPath(),
+    resolveBundledVivoxProxyPath(),
+    resolveBundledVivoxRuntimePath(),
+    resolveBundledGameplayPatchPath(),
+  ];
+  const missing: string[] = [];
+  for (const path of bundled) {
+    if (!(await stat(path).catch(() => null))?.isFile()) missing.push(path);
+  }
+  return missing;
 }
 
 async function installationRoot(): Promise<string | null> {
@@ -648,6 +703,7 @@ function trustedHandler<T extends unknown[], R>(
 }
 
 function operationError<T = undefined>(error: unknown): OperationResult<T> {
+  logOperationError(error);
   lastErrorRaw = rawErrorMessage(error);
   return { ok: false, error: localizeServiceError(lastErrorRaw, currentLocale) };
 }
@@ -935,6 +991,14 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.dismissError,
+    trustedHandler(async () => {
+      lastErrorRaw = null;
+      await broadcastSnapshot();
+    }),
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.install,
     trustedHandler(async (): Promise<OperationResult<{ installationRoot: string }>> => {
       const copy = MAIN_COPY[currentLocale];
@@ -1051,6 +1115,7 @@ function registerIpc(): void {
           config: await configStore.load(),
           identity: launchCredential,
           runtime: launchRuntime,
+          locale: currentLocale,
           logsRoot: join(app.getPath("userData"), "logs"),
           bundledShimPath: resolveBundledShimPath(),
           bundledVivoxProxyPath: resolveBundledVivoxProxyPath(),
@@ -1280,6 +1345,10 @@ function createWindow(): BrowserWindow {
 
 async function initialize(): Promise<void> {
   startupLog.mark("ready");
+  // Until the window reports the player's choice, follow Windows: a startup
+  // error box then reads in the right language.
+  const systemLanguage = app.getLocale().toLowerCase();
+  currentLocale = systemLanguage.startsWith("zh") ? "zh" : systemLanguage.startsWith("fr") ? "fr" : "en";
   // The window comes first: a step below that stalls (a sleeping drive under
   // the installation root, a slow profile) still leaves a launcher on screen,
   // and a renderer or GPU child that cannot start is seen and logged rather
@@ -1340,6 +1409,12 @@ async function initialize(): Promise<void> {
     }
   }
   startupLog.mark("installation-checked", `phase=${phase}`);
+  const quarantined = await findQuarantinedPatches();
+  if (quarantined.length > 0) {
+    startupLog.mark("bundled-patches-missing", quarantined.join(" | "));
+    // Keep the installation error if there is one.
+    lastErrorRaw ??= `Un fichier du launcher est absent : ${quarantined[0]}. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.`;
+  }
   launcherUpdate = new LauncherUpdateService({
     // In development there is no installed package to update against;
     // the updater stays inert and the snapshot reports "idle".

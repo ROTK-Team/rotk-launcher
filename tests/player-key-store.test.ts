@@ -91,6 +91,22 @@ describe("PlayerKeyStore", () => {
     await expect(stat(legacyPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("keeps the 1.1.x key when the new file cannot be written", async () => {
+    const directory = await temporaryDirectory();
+    const { legacyPath } = storePaths(directory);
+    const legacy = JSON.stringify({
+      schemaVersion: 1,
+      encryptedKey: encryption.encryptString(playerKey).toString("base64"),
+    });
+    await writeFile(legacyPath, legacy, "utf8");
+    // A file where the profile folder should be makes the write fail.
+    await writeFile(join(directory, "blocked"), "", "utf8");
+    const store = new PlayerKeyStore(join(directory, "blocked", "player-keys.v2.json"), encryption, legacyPath);
+
+    await expect(store.load()).resolves.toEqual({});
+    await expect(readFile(legacyPath, "utf8")).resolves.toBe(legacy);
+  });
+
   it("migrates before a first save so an older key is never overwritten", async () => {
     const directory = await temporaryDirectory();
     const { legacyPath } = storePaths(directory);

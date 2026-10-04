@@ -77,6 +77,17 @@ int main(void) {
     *(int *)(actor+0x9a0)=0; stance_idle(actor);
     assert(stance_u32(actor+0x9a0)==0);
     puts("PASS real stance hook raises for remapped Infantry Fire/SecondaryFire only");
+    /* Stock console gate: exact signature, one byte, restorable, refuses drift. */
+    BYTE *gate=image+CONSOLE_GATE_SIGNATURE_RVA;
+    memcpy(gate,console_gate_signature,sizeof(console_gate_signature));
+    assert(VirtualProtect(gate,sizeof(console_gate_signature),PAGE_EXECUTE_READ,&old));
+    assert(console_gate_install(image)); assert(gate[CONSOLE_GATE_OFFSET]==CONSOLE_GATE_VALUE);
+    assert(!console_gate_install(image));
+    assert(console_gate_restore(image)); assert(!memcmp(gate,console_gate_signature,sizeof(console_gate_signature)));
+    assert(console_gate_restore(image));
+    assert(VirtualProtect(gate,sizeof(console_gate_signature),PAGE_READWRITE,&old));
+    gate[33]^=1; assert(!console_gate_install(image)); assert(gate[CONSOLE_GATE_OFFSET]==CONSOLE_GATE_STOCK);
+    puts("PASS stock console gate patches one guarded byte and restores it");
     VirtualFree(image,0,MEM_RELEASE);
     puts("PASS: native virtual setter thunk, foreign target refusal, input registry, pressed bit and corrupt table refusal.");
     return 0;

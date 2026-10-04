@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clientConfigInternals,
   synchronizeClientConfig,
+  synchronizeUserOptions,
 } from "../electron/services/client-config.js";
 import type { RuntimeConfig } from "../electron/services/runtime-config.js";
 
@@ -21,6 +22,18 @@ const runtime: RuntimeConfig = {
 };
 const authKey = "0123456789abcdef0123456789abcdef";
 const localCreateSessionUrl = "http://127.0.0.1:49152/rest/auth/session/create";
+
+describe("UserOptions synchronization", () => {
+  it("makes the social menu language follow the launcher locale", () => {
+    const original = "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=en\n";
+    expect(synchronizeUserOptions(original, "fr")).toBe(
+      "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=fr\n",
+    );
+    expect(synchronizeUserOptions("[Display]\nWidth=1920\n", "en")).toBe(
+      "[Display]\nWidth=1920\n\n[UI]\nROTKSocialLanguage=en\n",
+    );
+  });
+});
 
 describe("ClientConfig synchronization", () => {
   it("is idempotent and removes stale duplicate directives", () => {

@@ -21,7 +21,7 @@ import {
 
 /** Published beside the asset packs, in the same public repository. */
 export const BASE_MANIFEST_URL =
-  "https://raw.githubusercontent.com/h1z1rotk/assets/main/base-manifest.v1.json";
+  "https://raw.githubusercontent.com/ROTK-Team/assets/main/base-manifest.v1.json";
 
 const CACHE_FILE_NAME = "base-manifest.v1.json";
 const MAX_MANIFEST_BYTES = 32 * 1024 * 1024;

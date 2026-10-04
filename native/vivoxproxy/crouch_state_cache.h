@@ -23,8 +23,6 @@ typedef struct crouch_transition_state {
     float start_output;
     float target;
     double duration_seconds;
-    double phase;
-    int64_t evaluated_counter;
     int64_t start_counter;
     int64_t transition_end_counter;
     int64_t last_move_counter;
@@ -216,23 +214,61 @@ static crouch_transition_state *crouch_state_cache_acquire(
     return selected;
 }
 
-/* Hint only: the state identity is still checked by acquire under the same
- * lock. Collisions and evictions fall back to the existing bounded scan. */
+/*
+ * A hint is only an index, never a cached actor pointer or unchecked identity.
+ * Use the exact v12 resolver on a verified slot. Collisions, evictions and
+ * corrupt/out-of-range hints fall back to the original full resolver.
+ * Access hints under the same caller lock as states. Store index+1 so a
+ * zero-initialized hint table needs no initialization or allocation.
+ */
 static crouch_transition_state *crouch_state_cache_acquire_hint(
-    crouch_transition_state *states, size_t capacity, size_t *hints, size_t hint_count,
-    void *network, uintptr_t generation, uintptr_t control_generation,
-    int64_t now, int64_t stale, int64_t sequence, crouch_state_cache_lookup *lookup) {
+    crouch_transition_state *states,
+    size_t capacity,
+    size_t *hints,
+    size_t hint_capacity,
+    void *network,
+    uintptr_t generation,
+    uintptr_t control_generation,
+    int64_t now_counter,
+    int64_t stale_after_ticks,
+    int64_t call_sequence,
+    crouch_state_cache_lookup *lookup) {
     uintptr_t key = (uintptr_t)network;
-    size_t bucket = ((key >> 4U) ^ (key >> 16U)) % hint_count;
-    size_t index = hints[bucket];
-    if (index < capacity && states[index].network == network && network != NULL) {
-        return crouch_state_cache_acquire(states + index, 1U, network,
-            generation, control_generation, now, stale, sequence, lookup);
+    size_t bucket;
+    size_t encoded;
+    crouch_transition_state *result;
+
+    if (hints == NULL || hint_capacity == 0U || states == NULL ||
+        capacity == 0U || network == NULL || generation == 0U ||
+        control_generation == 0U || stale_after_ticks < 0 ||
+        call_sequence <= 0) {
+        return crouch_state_cache_acquire(
+            states, capacity, network, generation, control_generation,
+            now_counter, stale_after_ticks, call_sequence, lookup);
     }
-    crouch_transition_state *state = crouch_state_cache_acquire(states, capacity,
-        network, generation, control_generation, now, stale, sequence, lookup);
-    if (state != NULL) hints[bucket] = (size_t)(state - states);
-    return state;
+    /* The local actor commonly occupies slot zero: avoid hashing that hit. */
+    if (states[0].network == network) {
+        return crouch_state_cache_acquire(
+            states, 1U, network, generation, control_generation,
+            now_counter, stale_after_ticks, call_sequence, lookup);
+    }
+    key = (key >> 4U) ^ (key >> 16U) ^ (key >> 32U);
+    bucket = (size_t)(key % hint_capacity);
+    encoded = hints[bucket];
+    if (encoded != 0U && encoded <= capacity &&
+        states[encoded - 1U].network == network) {
+        return crouch_state_cache_acquire(
+            &states[encoded - 1U], 1U, network, generation,
+            control_generation, now_counter, stale_after_ticks,
+            call_sequence, lookup);
+    }
+    result = crouch_state_cache_acquire(
+        states, capacity, network, generation, control_generation,
+        now_counter, stale_after_ticks, call_sequence, lookup);
+    if (result != NULL) {
+        hints[bucket] = (size_t)(result - states) + 1U;
+    }
+    return result;
 }
 
 #endif

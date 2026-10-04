@@ -213,12 +213,12 @@ describe("Vivox client deployment", () => {
     await writeFile(activePath, contents.v4);
     await writeFile(fixture.runtime, contents.stale);
 
-    await expect(deploy(fixture)).rejects.toThrow(/runtime Vivox 5.+invalide/i);
+    await expect(deploy(fixture)).rejects.toThrow(/runtime Vivox 5.+absent ou modifié/i);
     await expect(readFile(activePath, "utf8")).resolves.toBe(contents.v4);
 
     await writeFile(fixture.runtime, contents.v5);
     await writeFile(fixture.proxy, contents.stale);
-    await expect(deploy(fixture)).rejects.toThrow(/proxy vocal ROTK.+invalide/i);
+    await expect(deploy(fixture)).rejects.toThrow(/proxy vocal ROTK.+absent ou modifié/i);
     await expect(readFile(activePath, "utf8")).resolves.toBe(contents.v4);
   });
 

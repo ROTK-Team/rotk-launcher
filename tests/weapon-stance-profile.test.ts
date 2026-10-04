@@ -29,20 +29,36 @@ describe("stance binding migration and rollback", () => {
       expect(await readFile(join(root, "InputProfile_User.xml"), "utf8")).toBe(source);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
-  it("keeps console internals and unrelated bindings intact", () => {
+  it("keeps the stock console and unrelated bindings intact", () => {
     const next = migrateStanceProfile(source, true);
     expect(next.text).toContain('<Action name="ToggleDebugConsole" unbindable="true"><Trigger>Tilde</Trigger></Action>');
+    expect(next.text).toContain('<Action name="ToggleNetworkStats"><Trigger>N</Trigger></Action>');
     expect(next.text).toContain('<Action name="OpenMap"><Trigger>M</Trigger></Action>');
     expect(next.text).toContain('<Action name="Sprint"><Trigger>Shift</Trigger></Action>');
-    expect(next.text).toContain('<Action name="ROTKConsole" version="1"><Trigger>N</Trigger></Action>');
+    expect(next.text).not.toContain('ROTKConsole');
+    expect(next.state).toEqual({ added: ["ToggleWeaponStance"], removedNetworkN: false });
     expect(migrateStanceProfile(next.text,true,next.state)).toEqual(next);
   });
-  it("preserves custom stance and console shortcuts", () => {
-    const custom=source.replace('</ActionSet>', '<Action name="ToggleWeaponStance"><Trigger>B</Trigger></Action><Action name="ROTKConsole"><Trigger>F6</Trigger></Action></ActionSet>');
+  it("preserves a custom stance shortcut", () => {
+    const custom=source.replace('</ActionSet>', '<Action name="ToggleWeaponStance"><Trigger>B</Trigger></Action></ActionSet>');
     const next=migrateStanceProfile(custom,true);
     expect(next.text).toBe(custom); expect(next.state.added).toEqual([]);
   });
-  it("rolls back only owned actions and restores N", () => {
+  it("unbinds the legacy console N, keeps a chosen console key and gives N back", () => {
+    const legacy=source.replace('<Action name="ToggleNetworkStats"><Trigger>N</Trigger></Action>','<Action name="ToggleNetworkStats"></Action>')
+      .replace('</ActionSet>', '<Action name="ToggleWeaponStance" version="1"><Trigger>V</Trigger></Action><Action name="ROTKConsole" version="1"><Trigger>N</Trigger></Action></ActionSet>');
+    const state={ added: ["ToggleWeaponStance", "ROTKConsole"], removedNetworkN: true };
+    const next=migrateStanceProfile(legacy,true,state);
+    expect(next.text).not.toContain('ROTKConsole');
+    expect(next.text).toContain('<Action name="ToggleNetworkStats"><Trigger>N</Trigger></Action>');
+    expect(next.state).toEqual({ added: ["ToggleWeaponStance"], removedNetworkN: false });
+    expect(migrateStanceProfile(next.text,true,next.state)).toEqual(next);
+    const rebound=legacy.replace('<Action name="ToggleNetworkStats"></Action>','<Action name="ToggleNetworkStats"><Trigger>F5</Trigger></Action>');
+    const kept=migrateStanceProfile(rebound,true,state).text;
+    expect(kept).toContain('<Trigger>F5</Trigger>'); expect(kept).not.toContain('<Trigger>N</Trigger>');    const custom=legacy.replace('<Action name="ROTKConsole" version="1"><Trigger>N</Trigger></Action>','<Action name="ROTKConsole" version="1"><Trigger>F6</Trigger></Action>');
+    expect(migrateStanceProfile(custom,true,state).text).toContain('<Action name="ROTKConsole" version="1"><Trigger>F6</Trigger></Action>');
+  });
+  it("rolls back only owned actions", () => {
     const installed=migrateStanceProfile(source,true);
     const restored=migrateStanceProfile(installed.text,false,installed.state);
     expect(restored.text.replace(/\s+/g,'')).toBe(source.replace(/\s+/g,''));
@@ -50,9 +66,8 @@ describe("stance binding migration and rollback", () => {
   });
   it("keeps player edits to other bindings during rollback", () => {
     const installed=migrateStanceProfile(source,true);
-    const edited=installed.text.replace('<Trigger>M</Trigger>','<Trigger>J</Trigger>').replace('<Action name="ToggleNetworkStats"></Action>','<Action name="ToggleNetworkStats"><Trigger>F5</Trigger></Action>');
+    const edited=installed.text.replace('<Trigger>M</Trigger>','<Trigger>J</Trigger>');
     const result=migrateStanceProfile(edited,false,installed.state);
-    expect(result.text).toContain('<Trigger>J</Trigger>'); expect(result.text).toContain('<Trigger>F5</Trigger>');
-    expect(result.text).not.toContain('<Trigger>N</Trigger>');
+    expect(result.text).toContain('<Trigger>J</Trigger>'); expect(result.text).not.toContain('ToggleWeaponStance');
   });
 });

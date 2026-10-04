@@ -467,6 +467,13 @@ static void proxy_trace_once(LONG flag, const char *event) {
 }
 
 #include "crouch_parity_patch.h"
+/* Retain the draft's safe log rotation; transition code stays Alpha/Bravo v12. */
+static void crouch_delete_stale_log(void) {
+    static WCHAR path[32768];
+    if (crouch_sibling_path(CROUCH_LOG_NAME, path, sizeof(path) / sizeof(path[0]))) {
+        (void)DeleteFileW(path);
+    }
+}
 #include "voice_rank_patch.h"
 
 static uint16_t load_le16(const uint8_t *value) {
