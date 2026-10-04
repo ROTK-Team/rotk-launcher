@@ -269,6 +269,18 @@ describe("ROTK asset sync", () => {
       });
     });
 
+    it("accepts release ZIPs under the ROTK-Team owner and refuses other owners", () => {
+      const pack = Buffer.from("pack");
+      const moved = releaseAsset("assets_x64_10.zip", pack);
+      moved.browser_download_url = moved.browser_download_url.replace("/h1z1rotk/", "/ROTK-Team/");
+      expect(mergeGitHubReleaseAssets(manifest([]), release([moved])).assets[0].url)
+        .toBe("https://github.com/ROTK-Team/assets/releases/download/assets-v1.1.0/assets_x64_10.zip");
+
+      const foreign = { ...moved, browser_download_url: moved.browser_download_url.replace("/ROTK-Team/", "/someone/") };
+      expect(() => mergeGitHubReleaseAssets(manifest([]), release([foreign])))
+        .toThrow("URL GitHub inattendue");
+    });
+
     it("refuses an auto-discovered ZIP without GitHub SHA-256 metadata", () => {
       const candidate = {
         ...releaseAsset("assets_x64_10.zip", Buffer.from("pack")),
