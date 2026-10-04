@@ -178,8 +178,13 @@ async function prepareClient(
   // All subsequent I/O and the spawned process use the same physical root that
   // passed policy validation. This prevents a logical junction alias from
   // steering configuration and execution to a different tree.
+  // Rewriting an unchanged file only triggers an antivirus scan, and fails
+  // with EBUSY while another copy of the game holds it.
   const activeShimPath = join(root, "steam_api64.dll");
-  await copyFile(request.bundledShimPath, activeShimPath);
+  const activeShim = await readFile(activeShimPath).catch(() => null);
+  if (!activeShim?.equals(await readFile(request.bundledShimPath))) {
+    await copyFile(request.bundledShimPath, activeShimPath);
+  }
   await assertVivoxCompatibility(root);
   // The attestation pass has already installed or removed the shotgun sprint
   // proxy for the mode the server directed; preparation only rechecks it so a
@@ -196,19 +201,17 @@ async function prepareClient(
   const configPath = join(root, "ClientConfig.ini");
   const configBackupPath = join(root, "ClientConfig.original.ini");
   if (!existsSync(configBackupPath)) await copyFile(configPath, configBackupPath);
-  const synchronized = synchronizeClientConfig(
-    await readFile(configPath, "utf8"),
-    request.runtime,
-    localCreateSessionUrl,
-  );
-  await writeFile(configPath, synchronized, "ascii");
+  const currentConfig = await readFile(configPath, "utf8");
+  const synchronized = synchronizeClientConfig(currentConfig, request.runtime, localCreateSessionUrl);
+  // utf8, not ascii: an ascii write turned a BOM into a stray 0xFF byte.
+  if (synchronized !== currentConfig) await writeFile(configPath, synchronized, "utf8");
   await writeFile(join(root, "steam_persona_name.txt"), `${launchIdentity.displayName}\n`, "utf8");
 
   const battleyePath = join(root, "BattlEye", "BEClient_x64.cfg");
   if (existsSync(battleyePath)) {
     const current = await readFile(battleyePath, "utf8");
     const patched = current.replace(/MasterPort\s+\d+/i, "MasterPort 20099");
-    if (patched !== current) await writeFile(battleyePath, patched, "ascii");
+    if (patched !== current) await writeFile(battleyePath, patched, "utf8");
   }
   return root;
 }
