@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  GAME_LOCALE,
   clientConfigInternals,
   synchronizeClientConfig,
   synchronizeUserOptions,
@@ -32,6 +33,12 @@ describe("UserOptions synchronization", () => {
     expect(synchronizeUserOptions("[Display]\nWidth=1920\n", "en")).toBe(
       "[Display]\nWidth=1920\n\n[UI]\nROTKSocialLanguage=en\n",
     );
+  });
+});
+
+describe("Game locale", () => {
+  it("gives every launcher locale a game locale the client ships", () => {
+    expect(GAME_LOCALE).toEqual({ en: "en_us", fr: "fr_fr", zh: "zh_cn" });
   });
 });
 
