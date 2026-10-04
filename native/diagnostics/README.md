@@ -5,6 +5,14 @@ starts it hidden for the exact `H1Z1.exe` PID it launched, drains stdout, and ke
 stdin open while the game runs. It requires the same user/integrity level as the
 game. Failure to attach is reported and must never block game launch.
 
+## Launcher startup commands
+
+The separate `--admin-status` command reads the inherited process token using
+`GetTokenInformation`. `--elevate-launcher` requests normal Windows UAC consent
+for the fixed `ROTK Launcher.exe` beside the helper's own installed resources
+folder. These commands accept no additional arguments. Capture modes never
+request elevation or change Windows security policy.
+
 ## Build and verification
 
 Zig **0.15.2** is required, matching the existing native build scripts.

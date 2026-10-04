@@ -101,14 +101,14 @@ export function synchronizeClientConfig(
  * it from `Internationalization:Locale` and defaults to en_us; it does not ask
  * Steam for it.
  */
-export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "fr_fr" };
+export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "fr_fr", zh: "en_us" };
 
 /** The ROTK social menu speaks en/fr, like the launcher. */
 export function synchronizeUserOptions(config: string, locale: AppLocale): string {
   return upsertIniDirective(config, {
     section: "UI",
     key: "ROTKSocialLanguage",
-    value: locale,
+    value: locale === "zh" ? "en" : locale,
   });
 }
 
