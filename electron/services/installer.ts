@@ -14,6 +14,7 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -199,7 +200,7 @@ async function deployOpenSourceShim(stagingRoot: string, shimPath: string): Prom
   const activePath = join(stagingRoot, "steam_api64.dll");
   const originalPath = join(stagingRoot, "steam_api64.original.dll");
   await copyOnce(activePath, originalPath);
-  await copyFile(shimPath, activePath);
+  await retryFs(() => copyFile(shimPath, activePath));
 }
 
 export async function adoptExistingClient(
@@ -260,7 +261,7 @@ export async function adoptExistingClient(
     encoding: "utf8",
     flag: "wx",
   });
-  await rename(temporaryMarkerPath, markerPath);
+  await retryFs(() => rename(temporaryMarkerPath, markerPath));
 
   request.onProgress({
     phase: "finalizing",
@@ -407,7 +408,7 @@ export async function installClient(request: InstallRequest): Promise<Installati
       totalFiles: files.length,
       currentFile: "Finalisation atomique",
     });
-    await rename(stagingRoot, destinationRoot);
+    await retryFs(() => rename(stagingRoot, destinationRoot));
     return marker;
   } catch (error) {
     await safeCleanup(stagingRoot, destinationRoot).catch(() => undefined);

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { retryFs } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import {
   isPlayerRole,
@@ -117,7 +118,7 @@ export class ConfigStore {
 
     for (const path of [...new Set(candidates)]) {
       try {
-        const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+        const parsed: unknown = JSON.parse(await retryFs(() => readFile(path, "utf8")));
         if (!isValidConfig(parsed)) continue;
         const candidate = {
           path,
@@ -212,6 +213,6 @@ export class ConfigStore {
     await mkdir(dirname(path), { recursive: true });
     const temporaryPath = `${path}.${randomUUID()}.tmp`;
     await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-    await rename(temporaryPath, path);
+    await retryFs(() => rename(temporaryPath, path));
   }
 }

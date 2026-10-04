@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { retryFs } from "./fs-safe.js";
 import type { InstalledClientConfig, LauncherConfig } from "./config-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { serverList } from "./runtime-config.js";
@@ -183,7 +184,7 @@ async function prepareClient(
   // passed policy validation. This prevents a logical junction alias from
   // steering configuration and execution to a different tree.
   const activeShimPath = join(root, "steam_api64.dll");
-  await copyFile(request.bundledShimPath, activeShimPath);
+  await retryFs(() => copyFile(request.bundledShimPath, activeShimPath));
   await assertVivoxCompatibility(root);
   // The attestation pass has already installed or removed the shotgun sprint
   // proxy for the mode the server directed; preparation only rechecks it so a
