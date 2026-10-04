@@ -56,3 +56,10 @@ export function resolveBundledGameplayPatchPath(): string {
     ? join(process.resourcesPath, "patches", "dinput8.dll")
     : join(app.getAppPath(), "resources", "patches", "dinput8.dll");
 }
+
+// Temporary: ships the anticheat module until it has its own distribution.
+export function resolveBundledRotkcPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, "patches", "rotkc.dll")
+    : join(app.getAppPath(), "resources", "patches", "rotkc.dll");
+}

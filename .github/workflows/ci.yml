@@ -86,8 +86,12 @@ jobs:
           $allowedGameplayDll = [System.IO.Path]::GetFullPath(
             (Join-Path $env:GITHUB_WORKSPACE "resources\patches\dinput8.dll")
           )
+          # Temporary closed-source anticheat module, until it has its own distribution.
+          $allowedRotkcDll = [System.IO.Path]::GetFullPath(
+            (Join-Path $env:GITHUB_WORKSPACE "resources\patches\rotkc.dll")
+          )
           $unexpectedDlls = Get-ChildItem -LiteralPath $env:GITHUB_WORKSPACE -Recurse -File -Filter "*.dll" |
-            Where-Object { @($allowedDll, $allowedVivoxDll, $allowedVivoxProxy, $allowedGameplayDll) -notcontains $_.FullName } |
+            Where-Object { @($allowedDll, $allowedVivoxDll, $allowedVivoxProxy, $allowedGameplayDll, $allowedRotkcDll) -notcontains $_.FullName } |
             Select-Object -ExpandProperty FullName
           if ($unexpectedDlls) {
             $unexpectedDlls | ForEach-Object { Write-Error "DLL inattendu dans le dépôt : $_" }
@@ -214,7 +218,7 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File native/vivoxproxy/build-v5-compat.ps1 -OutputPath $alternateProxy
           if ($LASTEXITCODE -ne 0) { throw "Second reference Vivox build failed." }
           $alternateHash = (Get-FileHash -LiteralPath $alternateProxy -Algorithm SHA256).Hash
-          if ($hash -ne $alternateHash -or $hash -ne "E797798683E5090760753D4D31BBD368A1D8EBAE6F4F94AB61AA4EFC410E3B2C") {
+          if ($hash -ne $alternateHash -or $hash -ne "6A294920F30FBA286BA3CE521FCC57C26560D6C714CEA3205382B12D64B536FD") {
             throw "The reference Vivox source build changed: $hash / $alternateHash"
           }
           # Prove neither source build overwrote the release input or sidecar.
