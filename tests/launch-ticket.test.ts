@@ -137,6 +137,31 @@ describe("ROTK launch ticket client", () => {
     })).rejects.toThrow(/could not verify your game files.*could not be reached/s);
   });
 
+  it("tells a timeout apart from a cancelled request", async () => {
+    const hanging = vi.fn((_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+    })) as unknown as typeof fetch;
+    await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl: hanging, timeoutMs: 1 }))
+      .rejects.toThrow("Unable to reach the ROTK account service (timeout)");
+    const cancelled = vi.fn(async () => { throw new DOMException("aborted", "AbortError"); }) as unknown as typeof fetch;
+    await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl: cancelled }))
+      .rejects.toThrow("Unable to reach the ROTK account service (cancelled)");
+  });
+
+  it("names the required version and keeps the update tag for a refused version", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ error: "launcher_update_required", failureCode: "launcher_update_required", requiredVersion: "2.0.25" }, 403),
+    ) as typeof fetch;
+    // Even when attestation could not run: the version list decides on its own.
+    await expect(createLaunchTicket(launcherKey, endpoint, {
+      fetchImpl,
+      attestationUnavailableReason: "the ROTK integrity service could not be reached.",
+    })).rejects.toMatchObject({
+      code: "launcher_update_required",
+      message: expect.stringContaining("Required version: 2.0.25."),
+    });
+  });
+
   it("keeps the update message when attestation actually ran and the launcher is old", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({ error: "launcher_update_required", failureCode: "launcher_update_required" }, 403),
