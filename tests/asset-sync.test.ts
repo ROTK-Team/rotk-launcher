@@ -15,6 +15,30 @@ import {
 } from "../electron/services/asset-sync.js";
 import { buildZip } from "./helpers/build-zip.js";
 
+const faults = vi.hoisted(() => ({
+  locked: null as { operation: "copyFile" | "rename"; path: string } | null,
+}));
+// Until released, every copy from or rename onto the locked path fails with
+// EPERM, like a file an antivirus holds for the whole attempt.
+vi.mock("node:fs/promises", async (original) => {
+  const fs = await original<typeof import("node:fs/promises")>();
+  const fault = (operation: "copyFile" | "rename", path: string): NodeJS.ErrnoException | null => {
+    if (faults.locked?.operation !== operation || faults.locked.path !== path) return null;
+    return Object.assign(new Error(`EPERM: operation not permitted, ${operation} '${path}'`), { code: "EPERM" });
+  };
+  return {
+    ...fs,
+    copyFile: (...args: Parameters<typeof fs.copyFile>) => {
+      const failure = fault("copyFile", String(args[0]));
+      return failure ? Promise.reject(failure) : fs.copyFile(...args);
+    },
+    rename: (...args: Parameters<typeof fs.rename>) => {
+      const failure = fault("rename", String(args[1]));
+      return failure ? Promise.reject(failure) : fs.rename(...args);
+    },
+  };
+});
+
 const FEED_URL = "https://raw.githubusercontent.com/rotk/rotk-assets/main/feed.json";
 const INSTALL_MARKER_NAME = ".rotk-installation.json";
 
@@ -84,6 +108,7 @@ describe("ROTK asset sync", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
+    faults.locked = null;
     await Promise.all(temporaryDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true })));
   });
@@ -662,5 +687,137 @@ describe("ROTK asset sync", () => {
     await expect(stat(join(root, "added.pack"))).rejects.toThrow();
     expect(await sync.readState()).toBeNull();
     await expect(stat(join(assetStorage(root), "asset-backups"))).rejects.toThrow();
+  });
+
+  it("restore() retried after an interrupted pass keeps every restored original", async () => {
+    const { userData, root } = await setup();
+    await writeFile(join(root, "first.pack"), "vanilla first");
+    await writeFile(join(root, "second.pack"), "vanilla second");
+    const first = Buffer.from("custom first");
+    const second = Buffer.from("custom second");
+    const added = Buffer.from("brand new");
+    const feed = manifest([
+      assetEntry("first", first, { installPath: "first.pack" }),
+      assetEntry("second", second, { installPath: "second.pack" }),
+      assetEntry("added", added, { installPath: "added.pack" }),
+    ]);
+    const sync = service(userData, {
+      [FEED_URL]: () => new Response(JSON.stringify(feed)),
+      [feed.assets[0].url]: () => new Response(first),
+      [feed.assets[1].url]: () => new Response(second),
+      [feed.assets[2].url]: () => new Response(added),
+    });
+    await sync.sync(root);
+
+    // A locked second file stops the first attempt after the first file is back.
+    faults.locked = { operation: "rename", path: join(root, "second.pack") };
+    await expect(sync.restore(root)).rejects.toMatchObject({ code: "EPERM" });
+    faults.locked = null;
+    expect(await readFile(join(root, "first.pack"), "utf8")).toBe("vanilla first");
+    expect(await readFile(join(root, "second.pack"), "utf8")).toBe("custom second");
+    expect(await sync.readState()).not.toBeNull();
+
+    await sync.restore(root);
+    expect(await readFile(join(root, "first.pack"), "utf8")).toBe("vanilla first");
+    expect(await readFile(join(root, "second.pack"), "utf8")).toBe("vanilla second");
+    expect((await readdir(root)).sort()).toEqual([INSTALL_MARKER_NAME, "first.pack", "second.pack"]);
+    expect(await sync.readState()).toBeNull();
+    await expect(stat(join(assetStorage(root), "asset-backups"))).rejects.toThrow();
+  });
+
+  it("keeps the backups of a dropped asset until the state without it is written", async () => {
+    const { userData, root } = await setup();
+    await writeFile(join(root, "first.pack"), "vanilla first");
+    await writeFile(join(root, "second.pack"), "vanilla second");
+    const zipPayload = buildZip([
+      { name: "first.pack", data: "custom first", method: 8 },
+      { name: "second.pack", data: "custom second", method: 8 },
+    ]);
+    const feedV1 = manifest([assetEntry("overlay", zipPayload, { type: "zip", installPath: "." })]);
+    await service(userData, {
+      [FEED_URL]: () => new Response(JSON.stringify(feedV1)),
+      [feedV1.assets[0].url]: () => new Response(new Uint8Array(zipPayload)),
+    }).sync(root);
+
+    const backups = join(assetStorage(root), "asset-backups");
+    const sync = service(userData, {
+      [FEED_URL]: () => new Response(JSON.stringify(manifest([], "2.0.0"))),
+    });
+    // Reading the second backup fails, after the first file is back.
+    faults.locked = { operation: "copyFile", path: join(backups, "second.pack") };
+    await expect(sync.sync(root)).rejects.toMatchObject({ code: "EPERM" });
+    faults.locked = null;
+    expect(await readFile(join(root, "first.pack"), "utf8")).toBe("vanilla first");
+    expect(await readFile(join(root, "second.pack"), "utf8")).toBe("custom second");
+    expect((await sync.readState())?.packVersion).toBe("1.0.0");
+
+    // Writing the new state fails: the previous state still lists both files,
+    // so both backups must survive.
+    faults.locked = { operation: "rename", path: join(userData, "asset-state.v1.json") };
+    await expect(sync.sync(root)).rejects.toMatchObject({ code: "EPERM" });
+    faults.locked = null;
+    expect(await readFile(join(root, "first.pack"), "utf8")).toBe("vanilla first");
+    expect(await readFile(join(root, "second.pack"), "utf8")).toBe("vanilla second");
+    expect((await sync.readState())?.packVersion).toBe("1.0.0");
+    expect(await readFile(join(backups, "first.pack"), "utf8")).toBe("vanilla first");
+    expect(await readFile(join(backups, "second.pack"), "utf8")).toBe("vanilla second");
+
+    expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "2.0.0" });
+    expect(await readFile(join(root, "first.pack"), "utf8")).toBe("vanilla first");
+    expect(await readFile(join(root, "second.pack"), "utf8")).toBe("vanilla second");
+    expect((await sync.readState())?.assets).toEqual([]);
+    expect(await readdir(backups)).toEqual([]);
+  });
+
+  it("a normal removal deletes only the backups of the files it restored", async () => {
+    const { userData, root } = await setup();
+    await writeFile(join(root, "kept.pack"), "vanilla kept");
+    await writeFile(join(root, "dropped.pack"), "vanilla dropped");
+    const kept = Buffer.from("custom kept");
+    const dropped = Buffer.from("custom dropped");
+    const feedV1 = manifest([
+      assetEntry("kept", kept, { installPath: "kept.pack" }),
+      assetEntry("dropped", dropped, { installPath: "dropped.pack" }),
+    ]);
+    await service(userData, {
+      [FEED_URL]: () => new Response(JSON.stringify(feedV1)),
+      [feedV1.assets[0].url]: () => new Response(kept),
+      [feedV1.assets[1].url]: () => new Response(dropped),
+    }).sync(root);
+
+    const sync = service(userData, {
+      [FEED_URL]: () => new Response(JSON.stringify(manifest([feedV1.assets[0]], "2.0.0"))),
+    });
+    expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "2.0.0" });
+    expect(await readFile(join(root, "dropped.pack"), "utf8")).toBe("vanilla dropped");
+    expect(await readFile(join(root, "kept.pack"), "utf8")).toBe("custom kept");
+    expect(await readdir(join(assetStorage(root), "asset-backups"))).toEqual(["kept.pack"]);
+
+    await sync.restore(root);
+    expect(await readFile(join(root, "kept.pack"), "utf8")).toBe("vanilla kept");
+    expect(await sync.readState()).toBeNull();
+    await expect(stat(join(assetStorage(root), "asset-backups"))).rejects.toThrow();
+  });
+
+  it("drops a backup left in the old userData folder once the state without it is written", async () => {
+    const { userData, root } = await setup();
+    await writeFile(join(root, "sounds.pack"), "custom sounds");
+    await mkdir(join(userData, "asset-backups"), { recursive: true });
+    await writeFile(join(userData, "asset-backups", "sounds.pack"), "vanilla sounds");
+    await writeFile(join(userData, "asset-state.v1.json"), JSON.stringify({
+      schemaVersion: 1, packVersion: "0.9.0", syncedAt: "2026-09-01T00:00:00Z",
+      assets: [{
+        name: "rotk-sounds", version: "0.9.0", sha256: sha256("custom sounds"),
+        installedFiles: [{ path: "sounds.pack", sha256: sha256("custom sounds"), size: 13 }],
+      }],
+    }));
+
+    // The old backup cannot be moved next to the install, so it is restored in place.
+    faults.locked = { operation: "rename", path: join(assetStorage(root), "asset-backups", "sounds.pack") };
+    const sync = service(userData, { [FEED_URL]: () => new Response(JSON.stringify(manifest([]))) });
+    expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "1.0.0" });
+    expect(await readFile(join(root, "sounds.pack"), "utf8")).toBe("vanilla sounds");
+    expect((await sync.readState())?.assets).toEqual([]);
+    await expect(stat(join(userData, "asset-backups", "sounds.pack"))).rejects.toThrow();
   });
 });

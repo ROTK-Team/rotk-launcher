@@ -612,10 +612,12 @@ export class AssetSyncService {
       newRecords.flatMap((record) =>
         record.installedFiles.map((file) => file.path.toLocaleLowerCase("en-US"))),
     );
+    const restoredFiles: string[] = [];
     for (const record of state?.assets ?? []) {
       for (const file of record.installedFiles) {
         if (!desiredFiles.has(file.path.toLocaleLowerCase("en-US"))) {
           await this.restoreOrRemove(root, file.path);
+          restoredFiles.push(file.path);
         }
       }
     }
@@ -628,6 +630,16 @@ export class AssetSyncService {
       syncedAt: new Date().toISOString(),
       assets: newRecords,
     });
+    // Until the new state is written, an interrupted pass is retried from the
+    // previous one, which still lists these files and needs their backups.
+    // Best-effort: the new state no longer references them either way. A backup
+    // adoptLegacyBackups() could not move is still in the old folder.
+    for (const path of restoredFiles) {
+      for (const backups of [this.backupDirectory, this.legacyBackupDirectory]) {
+        await rm(join(backups, relativeToNative(path)), { force: true, maxRetries: 5, retryDelay: 100 })
+          .catch(() => undefined);
+      }
+    }
     await this.pruneCache(manifest);
     return { status: changed ? "updated" : "up-to-date", packVersion: manifest.packVersion };
   }
@@ -650,6 +662,7 @@ export class AssetSyncService {
         await this.restoreOrRemove(root, file.path);
       }
     }
+    // State first: a retry must never see a state whose backups are gone.
     await rm(this.statePath, { force: true });
     await rm(this.backupDirectory, { recursive: true, force: true });
     await rm(this.legacyBackupDirectory, { recursive: true, force: true });
@@ -890,6 +903,11 @@ export class AssetSyncService {
     await copyFile(target, backupPath, fsConstants.COPYFILE_EXCL);
   }
 
+  /**
+   * The backup is kept: callers drop it only once the state no longer lists
+   * the file, otherwise a retried pass would find no backup and delete the
+   * original it already put back.
+   */
   private async restoreOrRemove(root: string, relativePath: string): Promise<void> {
     const target = this.resolveTarget(root, relativePath);
     const current = join(this.backupDirectory, relativeToNative(relativePath));
@@ -906,7 +924,6 @@ export class AssetSyncService {
         await rm(staging, { force: true });
         throw error;
       }
-      await rm(backupPath, { force: true, maxRetries: 5, retryDelay: 100 });
     } else {
       await rm(target, { force: true, maxRetries: 5, retryDelay: 100 });
     }
