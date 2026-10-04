@@ -23,7 +23,7 @@ function formatBytes(value: number, locale: AppLocale): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   const index = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)));
   const scaled = value / (1024 ** index);
-  return `${new Intl.NumberFormat(locale === "fr" ? "fr-FR" : "en-US", {
+  return `${new Intl.NumberFormat(locale === "fr" ? "fr-FR" : locale === "zh" ? "zh-CN" : "en-US", {
     maximumFractionDigits: index === 0 ? 0 : 1,
     minimumFractionDigits: 0,
   }).format(scaled)} ${units[index]}`;

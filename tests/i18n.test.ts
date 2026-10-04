@@ -63,4 +63,20 @@ describe("launcher locales", () => {
       "L’identité de session ROTK est invalide.",
     );
   });
+
+  it("localizes common install errors in Chinese and falls back to English", () => {
+    expect(localizeServiceError("Espace disque insuffisant : 19 Go sont nécessaires.", "zh"))
+      .toBe("磁盘空间不足，需要 19 GB。");
+    expect(localizeServiceError("H1Z1 est déjà lancé depuis cette installation.", "zh"))
+      .toBe("H1Z1 正在运行，请先关闭游戏。");
+    expect(localizeServiceError("Trop de redirections pendant le téléchargement des assets.", "zh"))
+      .toBe("Too many redirects while downloading assets.");
+  });
+
+  it("localizes account service errors for Chinese players", () => {
+    expect(localizeServiceError("The ROTK launcher key was rejected", "zh"))
+      .toBe("ROTK 启动器密钥无效，请到网站账号页面重新复制。");
+    expect(localizeServiceError("This ROTK account is permanently banned. Reason: cheating", "zh"))
+      .toBe("此 ROTK 账号已被永久封禁。原因：cheating");
+  });
 });

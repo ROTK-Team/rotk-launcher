@@ -89,6 +89,50 @@ export const MAIN_COPY = {
       disabled: "La synchronisation des assets est désactivée dans les réglages du launcher.",
     },
   },
+  zh: {
+    unexpectedError: "出现了意外错误。",
+    installationCancelled: "安装已取消。",
+    windowUnavailable: "启动器窗口不可用。",
+    selectSourceFirst: "请先选择 H1Z1 客户端。",
+    selectBoth: "请选择 ROTK 副本的安装位置。",
+    destinationNotNeeded: "这个客户端可以直接使用，无需复制。",
+    clientInUse: "请先关闭 H1Z1，再修改安装。",
+    installationInProgress: "已有安装正在进行。",
+    clientNotReady: "ROTK 客户端尚未就绪。",
+    identityLocked: "请先关闭 H1Z1，再修改 ROTK 账号密钥。",
+    serverLocked: "请先关闭 H1Z1，再切换 ROTK 服务器。",
+    unknownServer: "此启动器不支持这个 ROTK 服务器。",
+    unknownRole: "不支持这种 ROTK 启动模式。",
+    keyRequired: "开始游戏前，请先添加你账号里的 ROTK 启动器密钥。",
+    adminKeyRequired: "请添加此服务器的管理员密钥，或切换回玩家模式。",
+    unauthorizedLink: "不允许打开这个链接。",
+    sourceDialog: {
+      title: "选择 H1Z1 客户端",
+      message: "不在 Steam 目录里的客户端会直接使用；Steam 里的客户端会先复制一份，再由 ROTK 配置。",
+      button: "选择此客户端",
+    },
+    destinationDialog: {
+      title: "ROTK 要安装到哪里？",
+      message: (directory: string) => `启动器会在这里创建一个 ${directory} 子文件夹。`,
+      button: "安装到这里",
+    },
+    startupTitle: "ROTK 启动器无法启动",
+    startupSafety: "H1Z1 的游戏文件没有被改动。",
+    rendererGone: (reason: string) =>
+      `启动器窗口进程已停止（${reason}）。请重启启动器；如果再次出现，请把 %APPDATA%\\ROTK Launcher\\startup.log 发给 ROTK 团队。`,
+    launcherError: (id: string, message: string) => `启动器错误 ${id}：${message}`,
+    update: {
+      required: "开始游戏前，请先更新 ROTK 启动器。",
+      unavailable: "只有安装版启动器才能自动更新。",
+      "no-update": "暂时没有启动器更新。",
+      "not-downloaded": "启动器更新还没有下载完成。",
+      gameRunning: "请先关闭 H1Z1，再更新启动器。",
+    },
+    assets: {
+      busy: "资源正在同步中。",
+      disabled: "资源同步已在启动器设置中关闭。",
+    },
+  },
 } as const;
 
 const ENGLISH_ERRORS = new Map<string, string>([
@@ -172,8 +216,48 @@ const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string
   [/^Fichier introuvable : (.+)\.$/, (match) => `File not found: ${match[1]}.`],
 ];
 
+const CHINESE_ERRORS = new Map<string, string>([
+  ["The ROTK launcher key was rejected", "ROTK 启动器密钥无效，请到网站账号页面重新复制。"],
+  ["Too many ROTK authentication attempts. Wait a moment and try again", "登录尝试次数过多，请稍后再试。"],
+  ["The ROTK account service is temporarily unavailable", "ROTK 账号服务暂时不可用，请几分钟后重试。"],
+  ["The ROTK account service refused the launch request", "ROTK 账号服务拒绝了本次启动。"],
+  ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "游戏文件与 ROTK 官方版本不一致。请点击“验证文件”后重试。"],
+  ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "此 ROTK 账号还不能进入游戏。请先登录 ROTK 网站，然后重试。"],
+  ["Unable to reach the ROTK integrity service", "无法连接 ROTK 校验服务，请检查网络。"],
+  ["The ROTK integrity service is temporarily unavailable", "ROTK 校验服务暂时不可用。"],
+  ["Too many ROTK integrity checks. Wait a moment and try again", "校验请求过于频繁，请稍后再试。"],
+  ["Installation annulée.", "安装已取消。"],
+  ["H1Z1 est déjà lancé depuis cette installation.", "H1Z1 正在运行，请先关闭游戏。"],
+  ["Le flux d’assets ROTK est indisponible. Vérifie ta connexion puis réessaie.", "无法连接 ROTK 资源服务器，请检查网络后重试。"],
+  ["Cette version de H1Z1 n’est pas encore prise en charge par ROTK. Vérifie les fichiers du jeu dans Steam puis réessaie.", "ROTK 暂不支持这个版本的 H1Z1。请在 Steam 中验证游戏文件完整性后重试。"],
+  ["Installe d’abord le client ROTK.", "请先安装 ROTK 客户端。"],
+  ["L’installation ROTK est incomplète : son marqueur est introuvable.", "ROTK 安装不完整，请重新安装。"],
+  ["This launcher version is too old to verify the game files. Update the launcher.", "服务器不接受当前版本的启动器，请先更新启动器。"],
+  ["Unable to reach the ROTK account service", "无法连接 ROTK 账号服务。请检查网络、防火墙或杀毒软件设置。"],
+  ["Invalid response from the ROTK account service", "ROTK 账号服务返回异常，请几分钟后重试。"],
+]);
+
+const DYNAMIC_CHINESE_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
+  [/^Espace disque insuffisant : (.+) Go sont nécessaires\.$/, (match) => `磁盘空间不足，需要 ${match[1]} GB。`],
+  [/^Client H1Z1 incomplet : (.+) est introuvable\.$/, (match) => `H1Z1 客户端不完整：找不到 ${match[1]}。请在 Steam 中验证游戏文件完整性。`],
+  [/^Téléchargement d’assets refusé \(HTTP (\d+)\)\.$/, (match) => `资源下载失败（HTTP ${match[1]}），请稍后重试。`],
+  [/^ROTK could not verify your game files: (.+) Check your connection and try again\.$/, (match) => `ROTK 无法验证你的游戏文件：${match[1]} 请检查网络后重试。`],
+  [/^This ROTK account is suspended until (.+?)\.(?: Reason: (.+))?$/, (match) => `此 ROTK 账号已被封禁至 ${match[1]}。${match[2] ? `原因：${match[2]}` : ""}`],
+  [/^This ROTK account is permanently banned\.(?: Reason: (.+))?$/, (match) => `此 ROTK 账号已被永久封禁。${match[1] ? `原因：${match[1]}` : ""}`],
+];
+
 export function localizeServiceError(message: string, locale: AppLocale): string {
   if (locale === "fr") return FRENCH_ERRORS.get(message) ?? message;
+  if (locale === "zh") {
+    const exact = CHINESE_ERRORS.get(message);
+    if (exact) return exact;
+    for (const [pattern, translate] of DYNAMIC_CHINESE_ERRORS) {
+      const match = message.match(pattern);
+      if (match) return translate(match);
+    }
+    // Everything else: English reads better than French for most players.
+    return localizeServiceError(message, "en");
+  }
   const exact = ENGLISH_ERRORS.get(message);
   if (exact) return exact;
   for (const [pattern, translate] of DYNAMIC_ENGLISH_ERRORS) {
