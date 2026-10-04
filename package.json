@@ -103,7 +103,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "h1z1rotk",
+        "owner": "ROTK-Team",
         "repo": "rotk-launcher"
       }
     ],

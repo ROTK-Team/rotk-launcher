@@ -31,8 +31,13 @@ import { extractZipEntry, readZipDirectory } from "./zip-archive.js";
  * deliver executable code: binaries stay in the signed launcher.
  */
 
-export const ASSET_FEED_URL = "https://raw.githubusercontent.com/h1z1rotk/assets/main/feed.json";
-export const ASSET_RELEASE_API_URL = "https://api.github.com/repos/h1z1rotk/assets/releases/latest";
+export const ASSET_FEED_URL = "https://raw.githubusercontent.com/ROTK-Team/assets/main/feed.json";
+export const ASSET_RELEASE_API_URL = "https://api.github.com/repos/ROTK-Team/assets/releases/latest";
+/**
+ * Owners the assets repository is published under. GitHub reports the current
+ * one (ROTK-Team since 2026-10-04); h1z1rotk URLs still redirect to it.
+ */
+const ASSET_RELEASE_OWNERS = ["ROTK-Team", "h1z1rotk"];
 
 /** Hosts an asset URL may declare in the manifest. */
 const ASSET_URL_HOSTS = new Set(["github.com", "raw.githubusercontent.com"]);
@@ -348,9 +353,11 @@ export function mergeGitHubReleaseAssets(
       throw manifestError("taille GitHub invalide (" + raw.name + ")");
     }
 
-    const expectedUrl = "https://github.com/h1z1rotk/assets/releases/download/"
-      + release.tag_name + "/" + raw.name;
-    if (raw.browser_download_url !== expectedUrl) {
+    const expectedUrl = ASSET_RELEASE_OWNERS
+      .map((owner) => "https://github.com/" + owner + "/assets/releases/download/"
+        + release.tag_name + "/" + raw.name)
+      .find((url) => url === raw.browser_download_url);
+    if (!expectedUrl) {
       throw manifestError("URL GitHub inattendue (" + raw.name + ")");
     }
 
