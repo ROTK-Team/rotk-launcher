@@ -343,6 +343,137 @@ describe("ROTK asset sync", () => {
     ).rejects.toThrow();
   });
 
+  it("resumes a partial download with a Range request", async () => {
+    const { userData, root } = await setup();
+    const payload = Buffer.from("0123456789".repeat(100));
+    const entry = assetEntry("big.pack", payload, { installPath: "data/big.pack" });
+    const cacheDirectory = join(userData, "asset-cache");
+    await mkdir(cacheDirectory, { recursive: true });
+    await writeFile(join(cacheDirectory, `${entry.sha256}.pack.part`), payload.subarray(0, 400));
+    const ranges: Array<string | null> = [];
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      discoverReleaseAssets: false,
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        const range = new Headers(init?.headers).get("range");
+        ranges.push(range);
+        if (range !== "bytes=400-") return new Response(new Uint8Array(payload));
+        return new Response(new Uint8Array(payload.subarray(400)), {
+          status: 206,
+          headers: { "content-range": `bytes 400-999/${payload.length}` },
+        });
+      }) as typeof fetch,
+    });
+
+    await sync.sync(root);
+    expect(ranges).toEqual(["bytes=400-"]);
+    expect(await readFile(join(root, "data", "big.pack"))).toEqual(payload);
+  });
+
+  it("restarts a corrupt resumed download without overcounting progress", async () => {
+    const { userData, root } = await setup();
+    const payload = Buffer.from("0123456789".repeat(100));
+    const entry = assetEntry("big.pack", payload, { installPath: "data/big.pack" });
+    const cacheDirectory = join(userData, "asset-cache");
+    await mkdir(cacheDirectory, { recursive: true });
+    await writeFile(join(cacheDirectory, `${entry.sha256}.pack.part`), Buffer.alloc(400, 0x78));
+    const ranges: Array<string | null> = [];
+    const progress: Array<{ completedBytes: number; totalBytes: number }> = [];
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      discoverReleaseAssets: false,
+      onProgress: (event) => progress.push(event),
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        const range = new Headers(init?.headers).get("range");
+        ranges.push(range);
+        if (range !== "bytes=400-") return new Response(new Uint8Array(payload));
+        return new Response(new Uint8Array(payload.subarray(400)), {
+          status: 206,
+          headers: { "content-range": `bytes 400-999/${payload.length}` },
+        });
+      }) as typeof fetch,
+    });
+
+    await sync.sync(root);
+    expect(ranges).toEqual(["bytes=400-", null]);
+    expect(await readFile(join(root, "data", "big.pack"))).toEqual(payload);
+    expect(Math.max(...progress.map((event) => event.completedBytes))).toBe(payload.length);
+    expect(progress.every((event) => event.completedBytes <= event.totalBytes)).toBe(true);
+  });
+
+  it("drops a partial answer for another offset and retries without Range", async () => {
+    const { userData, root } = await setup();
+    const payload = Buffer.from("0123456789".repeat(100));
+    const entry = assetEntry("big.pack", payload, { installPath: "data/big.pack" });
+    const cacheDirectory = join(userData, "asset-cache");
+    await mkdir(cacheDirectory, { recursive: true });
+    await writeFile(join(cacheDirectory, `${entry.sha256}.pack.part`), payload.subarray(0, 400));
+    const ranges: Array<string | null> = [];
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      discoverReleaseAssets: false,
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        const range = new Headers(init?.headers).get("range");
+        ranges.push(range);
+        if (range === null) return new Response(new Uint8Array(payload));
+        return new Response(new Uint8Array(payload.subarray(0, 600)), {
+          status: 206,
+          headers: { "content-range": `bytes 0-599/${payload.length}` },
+        });
+      }) as typeof fetch,
+    });
+
+    await sync.sync(root);
+    expect(ranges).toEqual(["bytes=400-", null]);
+    expect(await readFile(join(root, "data", "big.pack"))).toEqual(payload);
+  });
+
+  it("retries a download after a server error", async () => {
+    const { userData, root } = await setup();
+    const payload = Buffer.from("custom sounds");
+    const entry = assetEntry("sounds.pack", payload);
+    let downloads = 0;
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      discoverReleaseAssets: false,
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        downloads += 1;
+        return downloads === 1 ? new Response("busy", { status: 503 }) : new Response(new Uint8Array(payload));
+      }) as typeof fetch,
+    });
+
+    await sync.sync(root);
+    expect(downloads).toBe(2);
+    await expect(readFile(join(root, "sounds.pack"), "utf8")).resolves.toBe("custom sounds");
+  });
+
+  it("does not retry a missing asset", async () => {
+    const { userData, root } = await setup();
+    const entry = assetEntry("gone.pack", Buffer.from("x"));
+    let downloads = 0;
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      discoverReleaseAssets: false,
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        downloads += 1;
+        return new Response("not found", { status: 404 });
+      }) as typeof fetch,
+    });
+
+    await expect(sync.sync(root)).rejects.toThrow(/HTTP 404/);
+    expect(downloads).toBe(1);
+  });
+
   it("installs file and zip assets, backs up originals and keeps state", async () => {
     const { userData, root } = await setup();
     await mkdir(join(root, "data"), { recursive: true });

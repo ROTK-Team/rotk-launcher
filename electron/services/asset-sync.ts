@@ -15,6 +15,7 @@ import { constants as fsConstants } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import type { AssetSyncProgress } from "../../shared/contracts.js";
 import {
   CRITICAL_CLIENT_FILES,
@@ -62,6 +63,9 @@ const MAX_TOTAL_ASSET_BYTES = 8 * 1024 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 20_000;
 const MAX_REDIRECTS = 5;
 const MANIFEST_TIMEOUT_MS = 10_000;
+const DOWNLOAD_ATTEMPTS = 4;
+// A download that sends nothing for this long is dropped and resumed.
+const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
 const STATE_FILE_NAME = "asset-state.v1.json";
 const CACHE_DIRECTORY_NAME = "asset-cache";
 const BACKUP_DIRECTORY_NAME = "asset-backups";
@@ -434,6 +438,30 @@ function relativeToNative(relativePath: string): string {
   return relativePath.split("/").join(sep);
 }
 
+class DownloadStalledError extends Error {
+  constructor(assetName: string) {
+    super(`Le téléchargement de l’asset ${assetName} s’est interrompu.`);
+    this.name = "DownloadStalledError";
+  }
+}
+
+const NETWORK_ERROR_CODES = new Set([
+  "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "ENOTFOUND", "EPIPE", "ENETUNREACH", "EHOSTUNREACH",
+]);
+
+/** Network drops, stalls and server-side hiccups are worth another attempt. */
+function isRetryableDownloadError(error: unknown): boolean {
+  if (error instanceof DownloadStalledError) return true;
+  if (!(error instanceof Error)) return false;
+  if (error.name === "AbortError") return false;
+  const status = /HTTP (\d{3})/.exec(error.message)?.[1];
+  if (status) return status === "408" || status === "429" || status.startsWith("5");
+  // fetch() failures (DNS, reset, TLS) surface as TypeError("fetch failed"); socket resets carry a code.
+  const code = (error as NodeJS.ErrnoException).code ?? "";
+  return (error instanceof TypeError && error.message === "fetch failed")
+    || code.startsWith("UND_ERR") || NETWORK_ERROR_CODES.has(code);
+}
+
 export class AssetSyncService {
   private readonly statePath: string;
   private readonly cacheDirectory: string;
@@ -651,6 +679,7 @@ export class AssetSyncService {
     rawUrl: string,
     signal?: AbortSignal,
     firstHopHosts: ReadonlySet<string> = ASSET_URL_HOSTS,
+    headers?: Record<string, string>,
   ): Promise<Response> {
     let url = new URL(rawUrl);
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
@@ -658,7 +687,7 @@ export class AssetSyncService {
       if (url.protocol !== "https:" || !allowedHosts.has(url.hostname)) {
         throw new Error(`Hôte de téléchargement d’assets non autorisé : ${url.hostname}.`);
       }
-      const response = await this.fetchImpl(url.href, { redirect: "manual", signal });
+      const response = await this.fetchImpl(url.href, { redirect: "manual", signal, headers });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         const location = response.headers.get("location");
         await response.body?.cancel().catch(() => undefined);
@@ -675,7 +704,8 @@ export class AssetSyncService {
   /**
    * Return the cache path holding the verified payload for `asset`,
    * downloading it first when the cache misses or no longer matches the
-   * expected SHA-256.
+   * expected SHA-256. Downloads go to a `.part` file that survives failures,
+   * so a dropped connection or a launcher restart resumes with a Range request.
    */
   private async ensureCachedAsset(
     asset: AssetManifestEntry,
@@ -691,38 +721,120 @@ export class AssetSyncService {
     }
     await rm(cachePath, { force: true });
 
-    const response = await this.fetchFollowingRedirects(asset.url, signal);
-    if (!response.body) throw new Error(`Téléchargement d’assets refusé (HTTP ${response.status}).`);
-    const temporaryPath = `${cachePath}.${randomUUID()}.tmp`;
-    const hash = createHash("sha256");
-    let receivedBytes = 0;
-    const meter = new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        receivedBytes += chunk.byteLength;
-        if (receivedBytes > asset.size) {
-          callback(new Error(`L’asset ${asset.name} dépasse la taille annoncée.`));
-          return;
+    // Progress only moves forward, even when an attempt restarts from zero.
+    let reported = 0;
+    const report = (total: number): void => {
+      if (total > reported) {
+        onBytes(total - reported);
+        reported = total;
+      }
+    };
+    const partialPath = `${cachePath}.part`;
+    // A bad resumed part is worth one clean download before giving up.
+    for (let pass = 1; ; pass += 1) {
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await this.downloadToPartial(asset, partialPath, signal, report);
+          break;
+        } catch (error) {
+          if (signal?.aborted || attempt >= DOWNLOAD_ATTEMPTS || !isRetryableDownloadError(error)) throw error;
+          await delay(1_000 * attempt, undefined, { signal });
         }
-        hash.update(chunk);
-        onBytes(chunk.byteLength);
-        callback(null, chunk);
-      },
-    });
+      }
+      if (await sha256File(partialPath) === asset.sha256) break;
+      await rm(partialPath, { force: true });
+      if (pass >= 2) throw new Error(`L’asset ${asset.name} est corrompu (empreinte SHA-256 inattendue).`);
+    }
+    await rename(partialPath, cachePath);
+    return cachePath;
+  }
+
+  private async downloadToPartial(
+    asset: AssetManifestEntry,
+    partialPath: string,
+    signal: AbortSignal | undefined,
+    report: (total: number) => void,
+  ): Promise<void> {
+    let offset = (await stat(partialPath).catch(() => null))?.size ?? 0;
+    if (offset > asset.size) {
+      await rm(partialPath, { force: true });
+      offset = 0;
+    }
+    if (offset === asset.size) {
+      report(offset);
+      return;
+    }
+
+    const controller = new AbortController();
+    const abortUpstream = (): void => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abortUpstream, { once: true });
+    if (signal?.aborted) abortUpstream();
+    let idleTimer: NodeJS.Timeout | undefined;
+    const armIdleTimer = (): void => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(
+        () => controller.abort(new DownloadStalledError(asset.name)),
+        DOWNLOAD_IDLE_TIMEOUT_MS,
+      );
+    };
     try {
+      armIdleTimer();
+      const response = await this.fetchFollowingRedirects(
+        asset.url,
+        controller.signal,
+        ASSET_URL_HOSTS,
+        offset > 0 ? { Range: `bytes=${offset}-`, "Accept-Encoding": "identity" } : undefined,
+      );
+      if (!response.body) throw new Error(`Téléchargement d’assets refusé (HTTP ${response.status}).`);
+      // A server that ignores Range answers 200 with the whole file.
+      const resumed = offset > 0
+        && response.status === 206
+        && (response.headers.get("content-range") ?? "").startsWith(`bytes ${offset}-`);
+      if (response.status === 206 && !resumed) {
+        // A partial body for another offset is unusable: drop the part, retry without Range.
+        await response.body.cancel().catch(() => undefined);
+        await rm(partialPath, { force: true });
+        throw new DownloadStalledError(asset.name);
+      }
+      if (!resumed) offset = 0;
+      report(offset);
+
+      let received = offset;
+      const meter = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          received += chunk.byteLength;
+          if (received > asset.size) {
+            callback(new Error(`L’asset ${asset.name} dépasse la taille annoncée.`));
+            return;
+          }
+          armIdleTimer();
+          report(received);
+          callback(null, chunk);
+        },
+      });
       await pipeline(
         Readable.fromWeb(response.body as import("node:stream/web").ReadableStream),
         meter,
-        createWriteStream(temporaryPath, { flags: "wx" }),
-        { signal },
+        createWriteStream(partialPath, { flags: resumed ? "a" : "w" }),
+        { signal: controller.signal },
       );
-      if (receivedBytes !== asset.size || hash.digest("hex") !== asset.sha256) {
-        throw new Error(`L’asset ${asset.name} est corrompu (empreinte SHA-256 inattendue).`);
+      if (received !== asset.size) {
+        throw new DownloadStalledError(asset.name);
       }
-      await rename(temporaryPath, cachePath);
-      return cachePath;
     } catch (error) {
-      await rm(temporaryPath, { force: true });
+      // The server refused the Range: drop the part and start over.
+      if (error instanceof Error && error.message.includes("HTTP 416")) {
+        await rm(partialPath, { force: true });
+        throw new DownloadStalledError(asset.name);
+      }
+      // Report the stall, not the internal AbortError it caused.
+      if (controller.signal.reason instanceof DownloadStalledError && !signal?.aborted) {
+        throw controller.signal.reason;
+      }
       throw error;
+    } finally {
+      clearTimeout(idleTimer);
+      signal?.removeEventListener("abort", abortUpstream);
     }
   }
 
