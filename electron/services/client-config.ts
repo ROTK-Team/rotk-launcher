@@ -1,4 +1,5 @@
 import type { RuntimeConfig } from "./runtime-config.js";
+import type { AppLocale } from "../../shared/locale.js";
 import { serverList } from "./runtime-config.js";
 
 interface IniDirective {
@@ -93,6 +94,22 @@ export function synchronizeClientConfig(
   ];
   for (const directive of directives) synchronized = upsertIniDirective(synchronized, directive);
   return synchronized;
+}
+
+/**
+ * Game locale (`Locale/<xx_xx>_data.dat`) per launcher locale. The client reads
+ * it from `Internationalization:Locale` and defaults to en_us; it does not ask
+ * Steam for it.
+ */
+export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "fr_fr" };
+
+/** The ROTK social menu speaks en/fr, like the launcher. */
+export function synchronizeUserOptions(config: string, locale: AppLocale): string {
+  return upsertIniDirective(config, {
+    section: "UI",
+    key: "ROTKSocialLanguage",
+    value: locale,
+  });
 }
 
 export function validateLocalCreateSessionUrl(value: string): string {

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,6 +19,7 @@ vi.mock('../electron/services/gameplay-patch.js', () => ({
   applyGameplayPatchMode: async () => "up-to-date",
 }));
 vi.mock('../electron/services/client-config.js', () => ({ synchronizeClientConfig: (current: string) => current,
+  synchronizeUserOptions: (current: string) => `${current}ROTKSocialLanguage=en\n`, GAME_LOCALE: { en: 'en_us', fr: 'fr_fr' },
   validateLocalCreateSessionUrl: (url: string) => url }));
 vi.mock('../electron/services/launch-ticket.js', () => ({ assertLaunchTicketFresh: () => undefined,
   createLaunchTicket: async () => ({ ticket: 'test-only-ticket', displayName: 'FixturePlayer', steamId: '76561190000000000' }) }));
@@ -62,7 +63,7 @@ async function fixture() {
     config: { schemaVersion: 1, installation: { installId: 'fixture', root, sourceRoot: root,
       clientBuildId: 'fixture', installedAt: new Date().toISOString(), criticalHashes: {} } },
     identity: { playerKey: 'test-only-player-key' } as LaunchRequest['identity'],
-    runtime: RUNTIME_CONFIGS.test, logsRoot: join(root, 'logs'), bundledShimPath: join(root, 'bundled-shim.dll'),
+    runtime: RUNTIME_CONFIGS.test, locale: 'en', logsRoot: join(root, 'logs'), bundledShimPath: join(root, 'bundled-shim.dll'),
     bundledVivoxProxyPath: join(root, 'unused-proxy.dll'), bundledVivoxRuntimePath: join(root, 'unused-runtime.dll'),
     bundledGameplayPatchPath: join(root, 'unused-dinput8.dll'), clientPatchModeFallback: 'clean',
     diagnostics, onExit: vi.fn(),
@@ -71,6 +72,18 @@ async function fixture() {
 }
 
 describe('game lifecycle remains independent of diagnostics', () => {
+  it.runIf(process.platform === 'win32')('launches when UserOptions.ini cannot be rewritten', async () => {
+    const f = await fixture();
+    const options = join(f.request.config.installation!.root, 'UserOptions.ini');
+    await writeFile(options, '[UI]\n');
+    await chmod(options, 0o444);
+    const launched = f.launcher.launch(f.request).catch(error => error);
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    expect(await readFile(options, 'utf8')).toBe('[UI]\n');
+    await chmod(options, 0o666);
+    f.child().exit(0);
+    await launched;
+  });
   it('repairs voice once before attestation and refuses drift before spawn', async () => {
     const f = await fixture();
     f.request.attest = vi.fn(async () => {

@@ -1091,6 +1091,7 @@ function registerIpc(): void {
           config: await configStore.load(),
           identity: launchCredential,
           runtime: launchRuntime,
+          locale: currentLocale,
           logsRoot: join(app.getPath("userData"), "logs"),
           bundledShimPath: resolveBundledShimPath(),
           bundledVivoxProxyPath: resolveBundledVivoxProxyPath(),
