@@ -228,6 +228,9 @@ jobs:
       - name: Typer, tester et construire le launcher
         run: npm run build
 
+      - name: Vérifier le démarrage élevé et le sandbox Electron
+        run: node scripts/test-elevated-startup.mjs --require-administrator
+
       - name: Publier les artefacts de vérification
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

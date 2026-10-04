@@ -100,6 +100,7 @@ import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { StartupLog } from "./services/startup-log.js";
 import { describeSystemError, isSystemError } from "./services/system-error.js";
 import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
+import { startWithRequiredElevation, windowsElevation } from "./services/startup-elevation.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
@@ -1331,12 +1332,16 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+function systemLocale(): AppLocale {
+  const language = app.getLocale().toLowerCase();
+  return language.startsWith("zh") ? "zh" : language.startsWith("fr") ? "fr" : "en";
+}
+
 async function initialize(): Promise<void> {
   startupLog.mark("ready");
   // Until the window reports the player's choice, follow Windows: a startup
   // error box then reads in the right language.
-  const systemLanguage = app.getLocale().toLowerCase();
-  currentLocale = systemLanguage.startsWith("zh") ? "zh" : systemLanguage.startsWith("fr") ? "fr" : "en";
+  currentLocale = systemLocale();
   // The window comes first: a step below that stalls (a sleeping drive under
   // the installation root, a slow profile) still leaves a launcher on screen,
   // and a renderer or GPU child that cannot start is seen and logged rather
@@ -1464,9 +1469,26 @@ if (singleInstanceLock) {
   void app
     .whenReady()
     .then(async () => {
-      session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
-      session.defaultSession.setPermissionCheckHandler(() => false);
-      await initialize();
+      await startWithRequiredElevation({
+        platform: process.platform,
+        isPackaged: app.isPackaged,
+        executablePath: process.execPath,
+        argv: process.argv,
+      }, {
+        ...windowsElevation(resolveBundledDiagnosticsPath()),
+        releaseSingleInstanceLock: () => app.releaseSingleInstanceLock(),
+        initialize: async () => {
+          session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+          session.defaultSession.setPermissionCheckHandler(() => false);
+          await initialize();
+        },
+        quit: () => app.quit(),
+        mark: (event) => startupLog.mark(event),
+        reportFailure: (reason) => {
+          const copy = MAIN_COPY[systemLocale()];
+          dialog.showErrorBox(copy.startupTitle, copy.elevation[reason]);
+        },
+      });
     })
     .catch((error: unknown) => {
       startupLog.mark("startup-failed", errorMessage(error));
