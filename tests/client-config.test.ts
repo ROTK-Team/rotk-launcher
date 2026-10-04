@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clientConfigInternals,
   synchronizeClientConfig,
+  synchronizeGraphicsOptions,
 } from "../electron/services/client-config.js";
 import type { RuntimeConfig } from "../electron/services/runtime-config.js";
 
@@ -89,5 +90,19 @@ describe("ClientConfig synchronization", () => {
     expect(synchronized).toContain(`SteamGatewayUrl=${localCreateSessionUrl}`);
     expect(synchronized).not.toContain(authKey);
     expect(synchronized).not.toMatch(/^sessionid=/gim);
+  });
+});
+
+describe("UserOptions graphics synchronization", () => {
+  it("forces OverallQuality to Custom so hand-edited graphics keys survive a launch", () => {
+    // FloraQuality was edited by hand under the default preset: the client
+    // would re-apply preset 3 over it at the next launch.
+    const original = "[Rendering]\nOverallQuality=3\nFloraQuality=1\n\n[UI]\nHideNames=0\n";
+    const once = synchronizeGraphicsOptions(original);
+    expect(once).toBe("[Rendering]\nOverallQuality=-1\nFloraQuality=1\n\n[UI]\nHideNames=0\n");
+    expect(synchronizeGraphicsOptions(once)).toBe(once);
+    expect(synchronizeGraphicsOptions("[Display]\nWidth=1920\n")).toBe(
+      "[Display]\nWidth=1920\n\n[Rendering]\nOverallQuality=-1\n",
+    );
   });
 });

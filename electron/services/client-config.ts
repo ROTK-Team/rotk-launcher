@@ -120,4 +120,17 @@ export function validateLocalCreateSessionUrl(value: string): string {
   return parsed.href;
 }
 
+/**
+ * Forces `[Rendering] OverallQuality=-1` ("Custom") in the player's
+ * `UserOptions.ini` so hand-edited graphics keys stick. At start-up the
+ * client re-applies the OverallQuality preset over every graphics sub-option
+ * (Effects, Texture, Shadow, Flora, Model...) unless it is -1. The in-game
+ * menu sets -1 as soon as one sub-option changes; a hand edit leaves the
+ * default (3 = High), so the edit was reverted on the next launch. Forcing -1
+ * has no rendering effect: the menu combobox just reads "Custom".
+ */
+export function synchronizeGraphicsOptions(config: string): string {
+  return upsertIniDirective(config, { section: "Rendering", key: "OverallQuality", value: "-1" });
+}
+
 export const clientConfigInternals = { upsertIniDirective, validateLocalCreateSessionUrl };
