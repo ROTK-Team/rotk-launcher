@@ -55,16 +55,20 @@ export const TRUSTED_ATTESTATION_KEYS: Readonly<Record<string, string>> = Object
  * disagree on the expected root, rejecting every honest player. Both web tests
  * and launcher tests assert the lists match.
  *
- * Inclusion criteria — a path belongs here ONLY if:
+ * General inclusion criteria — a path belongs here only if:
  *   1. it legitimately differs between two honest installations (per-player
  *      settings, keybinds), or is rewritten on every launch by the launcher; AND
  *   2. it cannot carry gameplay content or executable code.
  *
- * No `.pack2`, no game-loaded `.exe`, and no `.dll` the game can load may ever
- * be added here (a `.original.dll` vanilla backup is the sole tolerated .dll
- * shape). The one executable exception is Daybreak's unused, independently
- * updated LaunchPad bootstrap; ROTK starts H1Z1.exe directly:
- * those are exactly what attestation exists to protect. `steam_api64.dll` and
+ * Explicit operator exception: the root-level `rotkc.dll` module may change
+ * independently and is allowed with any content, or absent. This is a path
+ * exemption, not a signature or hash verification of that module. It does not
+ * cover nested copies, similarly named files, or other DLLs.
+ *
+ * Gameplay packs and other game-loaded executables remain attested. Existing
+ * exceptions also cover vanilla `.original.dll` backups and Daybreak's unused,
+ * independently updated LaunchPad bootstrap; ROTK starts H1Z1.exe directly.
+ * `steam_api64.dll` and
  * `vivoxsdk_x64.dll` are NOT excluded — the launcher replaces them with its
  * own artifacts, so they are verified against those hashes instead (see
  * ATTESTATION_OVERRIDE_PATHS).
@@ -80,6 +84,8 @@ export const ATTESTATION_EXCLUDED_PATHS: ReadonlySet<string> = new Set([
   // Daybreak updates this unused bootstrap independently. ROTK launches
   // H1Z1.exe directly; the game executable remains attested.
   "launchpad.exe",
+  // Independently updated client module: exact root path, any hash, optional.
+  "rotkc.dll",
   // Rewritten by the launcher before every launch.
   "clientconfig.ini",
   "battleye/beclient_x64.cfg",

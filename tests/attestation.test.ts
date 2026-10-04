@@ -142,6 +142,7 @@ const CANONICAL = {
     "clientconfig.original.ini",
     "inputprofile_user.xml",
     "launchpad.exe",
+    "rotkc.dll",
     "steam_api64.original.dll",
     "steam_persona_name.txt",
     "useroptions.ini",
@@ -176,11 +177,11 @@ describe("canonical exclusion contract", () => {
     }
   });
 
-  it("never excludes gameplay content or the shim", () => {
+  it("limits executable exemptions to the declared module, bootstrap and backups", () => {
     for (const path of CANONICAL.excludedPaths) {
       expect(path).not.toMatch(/\.pack2$/);
       if (path.endsWith(".exe")) expect(path).toBe("launchpad.exe");
-      if (path.endsWith(".dll")) expect(path).toMatch(/\.original\.dll$/);
+      if (path.endsWith(".dll") && path !== "rotkc.dll") expect(path).toMatch(/\.original\.dll$/);
     }
     expect(CANONICAL.excludedPaths).not.toContain("steam_api64.dll");
     expect(isAttestationExcluded("LaunchPad.exe")).toBe(true);
@@ -188,6 +189,11 @@ describe("canonical exclusion contract", () => {
     expect(isAttestationExcluded("LaunchPad.bat")).toBe(false);
     expect(isAttestationExcluded("H1Z1.exe")).toBe(false);
     expect(isAttestationExcluded("Browser/Resources/libcef.dll")).toBe(false);
+    expect(isAttestationExcluded("rotkc.dll")).toBe(true);
+    expect(isAttestationExcluded("ROTKC.DLL")).toBe(true);
+    for (const path of ["plugins/rotkc.dll", "rotkc.dll/", "rotkc.dll/other.dll", "rotkc.dll.bak.dll", "other.dll"]) {
+      expect(isAttestationExcluded(path)).toBe(false);
+    }
   });
 });
 
