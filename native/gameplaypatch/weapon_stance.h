@@ -1,5 +1,6 @@
 /* PS3 stance v17. Runs on the game's actor thread, never a polling thread.
  * Owns only idle RVA 1659000 (15 bytes) and console call F4341D (5 bytes).
+ * ROTKConsole feeds the debug-console query; console_gate.h opens it for all.
  * Crouch/Vivox/Steam and the existing CanSprint v3 edits are independent.
  * Removing the marker disables behavior; restart removes every native hook.
  */

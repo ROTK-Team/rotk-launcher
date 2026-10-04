@@ -3,7 +3,7 @@
 Launcher 2.0.16 adds the PS3 stance and console bindings to the native DirectInput
 proxy. The matching asset pack adds the ROTK Bindings category, translated label,
 default actions and the validated male animation graph. Existing user bindings
-remain intact. Defaults are V for stance and N for the console.
+remain intact. Defaults are V for stance and F13 for the console.
 
 The existing shotgun sprint v3 byte pair remains unchanged at client RVAs
 `1046F98` and `1046FE5`. New guarded sites are actor idle `1659000` (15 bytes) and
@@ -32,3 +32,17 @@ Validation includes deterministic native rebuilds, guarded setter/input lookup,
 existing proxy tests, user-profile migration/revert tests and real Combat Training
 testing. Exact artifacts and deployment/rollback policies are recorded with the
 release preparation rather than inferred from a mutable latest feed.
+
+## Console
+
+`ROTKConsole` (ROTK Bindings tab) feeds the native debug-console query at
+`F4341D`. Retail H1Z1 only forwards that action to the UI on internal builds or
+for the SendSelf admin flag, so `console_gate.h` also turns the single `je` at
+`F823F1` into `jmp` after checking 42 bytes from `F823E9`. Server commands keep
+their own permission checks. The marker watchdog restores the byte.
+
+Launchers 2.0.16-2.0.24 bound `ROTKConsole` to N and removed N from
+`ToggleNetworkStats`. The default profile now ships it on F13 (absent from
+almost every keyboard; the settings only list actions with a key); the migration
+removes our N binding (a key the player chose stays) and gives N back to
+`ToggleNetworkStats` when it had removed it and the player has not rebound it.
