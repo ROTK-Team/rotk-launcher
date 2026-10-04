@@ -29,6 +29,13 @@ export interface InstallProgress {
   currentFile: string;
 }
 
+export interface InstallDrive {
+  /** Drive root, e.g. `D:\`. */
+  root: string;
+  freeBytes: number;
+  totalBytes: number;
+}
+
 export interface InstallSelection {
   sourceRoot: string | null;
   destinationRoot: string | null;
@@ -187,6 +194,9 @@ export interface RotkLauncherApi {
   detectSource(): Promise<OperationResult<{ sourceRoot: string | null }>>;
   selectSource(): Promise<OperationResult<{ sourceRoot: string }>>;
   selectDestination(): Promise<OperationResult<{ destinationRoot: string }>>;
+  listInstallDrives(): Promise<InstallDrive[]>;
+  /** Installs into `<drive>\Games\ROTK`. */
+  chooseInstallDrive(root: string): Promise<OperationResult<{ destinationRoot: string }>>;
   install(): Promise<OperationResult<{ installationRoot: string }>>;
   cancelInstall(): Promise<void>;
   play(): Promise<OperationResult<{ pid: number }>>;
@@ -221,6 +231,8 @@ export const IPC_CHANNELS = {
   detectSource: "launcher:detect-source",
   selectSource: "launcher:select-source",
   selectDestination: "launcher:select-destination",
+  listInstallDrives: "launcher:list-install-drives",
+  chooseInstallDrive: "launcher:choose-install-drive",
   install: "launcher:install",
   cancelInstall: "launcher:cancel-install",
   play: "launcher:play",
