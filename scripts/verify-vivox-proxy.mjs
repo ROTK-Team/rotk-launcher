@@ -3,8 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-// OPTI1 source-built release input, pinned byte for byte (see CROUCH_OPTI1_TEST.md).
-// CI requires both source builds to match this bundled DLL.
+// Bundled OPTI1 proxy, pinned byte for byte.
 const expected = "e797798683e5090760753d4d31bbd368a1d8ebae6f4f94ab61aa4efc410e3b2c";
 const proxyPath = resolve(process.argv[2] ?? "resources/patches/vivoxsdk_x64.dll");
 const [binary, sidecar] = await Promise.all([
