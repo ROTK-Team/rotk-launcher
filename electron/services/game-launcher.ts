@@ -1,7 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { copyFile, mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { promisify } from "node:util";
 import type { InstalledClientConfig, LauncherConfig } from "./config-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { serverList } from "./runtime-config.js";
@@ -147,6 +148,44 @@ export async function validateInstalledClient(installation: InstalledClientConfi
   return root;
 }
 
+// CSV rows start with the quoted image name whatever the Windows language;
+// "no task" is a localized INFO line instead.
+async function isImageRunning(imageName: string): Promise<boolean> {
+  try {
+    const { stdout } = await promisify(execFile)(
+      "tasklist",
+      ["/FI", `IMAGENAME eq ${imageName}`, "/NH", "/FO", "CSV"],
+      { windowsHide: true, timeout: 5_000 },
+    );
+    const expected = `"${imageName.toLowerCase()}"`;
+    return stdout.split("\n").some((line) => line.trim().toLowerCase().startsWith(`${expected},`));
+  } catch {
+    return false;
+  }
+}
+
+// A running exe can't be opened for writing (EBUSY). Catches a game left open
+// by a previous launcher session, which GameLauncher.isRunning() can't see.
+export async function assertExecutableNotRunning(executablePath: string, attempts = 5): Promise<void> {
+  // An antivirus scan can hold the exe for a moment too; a running game stays busy.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await (await open(executablePath, "r+")).close();
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      // A denied open says nothing about the game: ask the process list instead.
+      if ((code === "EPERM" || code === "EACCES") && await isImageRunning(basename(executablePath))) {
+        throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+      }
+      // Missing or read-only executables are reported by the regular checks.
+      if (code !== "EBUSY") return;
+      if (attempt >= attempts) throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100 * 2 ** (attempt - 1)));
+    }
+  }
+}
+
 function sanitizedEnvironment(
   identity: Pick<LaunchTicketIdentity, "displayName" | "steamId">,
 ): NodeJS.ProcessEnv {
@@ -178,6 +217,7 @@ async function prepareClient(
   // All subsequent I/O and the spawned process use the same physical root that
   // passed policy validation. This prevents a logical junction alias from
   // steering configuration and execution to a different tree.
+  await assertExecutableNotRunning(join(root, "H1Z1.exe"));
   const activeShimPath = join(root, "steam_api64.dll");
   await copyFile(request.bundledShimPath, activeShimPath);
   await assertVivoxCompatibility(root);
@@ -319,6 +359,8 @@ export class GameLauncher {
     const installation = request.config.installation;
     if (!installation) throw new Error("Installe d’abord le client ROTK.");
     const installationRoot = await validateInstalledClient(installation);
+    // Before attestation and the ticket, which are single-use.
+    await assertExecutableNotRunning(join(installationRoot, "H1Z1.exe"));
     const localLogs = join(request.logsRoot, installation.installId, "local");
     const failureLogs = join(request.logsRoot, installation.installId, "failure");
     await mkdir(localLogs, { recursive: true });
