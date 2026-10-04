@@ -164,7 +164,12 @@ const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string
   [/^L’asset (.+) dépasse la taille annoncée\.$/, (match) => `The ${match[1]} asset exceeds its declared size.`],
   [/^Hôte de téléchargement d’assets non autorisé : (.+)\.$/, (match) => `Asset download host not allowed: ${match[1]}.`],
   [/^Téléchargement d’assets refusé \(HTTP (\d+)\)\.$/, (match) => `Asset download refused (HTTP ${match[1]}).`],
-  [/^Erreur système \(([A-Z0-9_]+)\)\.$/, (match) => `System error (${match[1]}).`],
+  [/^Erreur système \(([^)]+)\)\.$/, (match) => `System error (${match[1]}).`],
+  [/^Erreur système \(([^)]+)\) : (.+)\.$/, (match) => `System error (${match[1]}): ${match[2]}.`],
+  [/^Un fichier du launcher a disparu : (.+)\. Ton antivirus l’a probablement mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher\.$/, (match) => `A launcher file is missing: ${match[1]}. Your antivirus probably quarantined it: restore it from Windows Security or reinstall the launcher.`],
+  [/^Accès refusé au fichier (.+) \(([^)]+)\) : droits insuffisants, antivirus ou fichier utilisé par un autre programme\. Réessaie, vérifie les droits du dossier ou ajoute le dossier ROTK aux exclusions de l’antivirus\.$/, (match) => `Access denied to ${match[1]} (${match[2]}): missing permissions, antivirus or file in use by another program. Try again, check the folder permissions or add the ROTK folder to your antivirus exclusions.`],
+  [/^Disque plein pendant l’écriture de (.+)\. Libère de l’espace puis réessaie\.$/, (match) => `Disk full while writing ${match[1]}. Free some space and try again.`],
+  [/^Fichier introuvable : (.+)\.$/, (match) => `File not found: ${match[1]}.`],
 ];
 
 export function localizeServiceError(message: string, locale: AppLocale): string {
@@ -174,6 +179,12 @@ export function localizeServiceError(message: string, locale: AppLocale): string
   for (const [pattern, translate] of DYNAMIC_ENGLISH_ERRORS) {
     const match = message.match(pattern);
     if (match) return translate(match);
+  }
+  // "<known message> <system cause>", built by rawErrorMessage for wrapped errors.
+  for (const [french, english] of ENGLISH_ERRORS) {
+    if (message.startsWith(`${french} `)) {
+      return `${english} ${localizeServiceError(message.slice(french.length + 1), locale)}`;
+    }
   }
   return message;
 }
