@@ -25,7 +25,6 @@ import {
 import { assertVivoxCompatibility, deployVivoxCompatibility } from "./vivox-client.js";
 import { prepareInterfaceInputProfile } from "./interface-input-profile.js";
 import { prepareWeaponStanceProfile, WEAPON_STANCE_ENABLED } from "./weapon-stance-profile.js";
-import { startDeathcommClient } from "./deathcomm-client.js";
 
 const GAME_STARTUP_STABILITY_MS = 3_000;
 
@@ -73,7 +72,6 @@ export interface LaunchRequest {
   bundledGameplayPatchPath: string;
   /** Anticheat module the Vivox proxy loads by name from the game root. */
   bundledRotkcPath: string;
-  bundledDeathcommPath?: string;
   /**
    * Mode reapplied when the server does not run attestation (development or
    * unconfigured backend). The production path always uses the signed
@@ -454,15 +452,10 @@ export class GameLauncher {
         child[stream]?.on("error", () => undefined);
       }
       diagnosticCallback(() => request.diagnostics?.onSpawned(child.pid!));
-      const stopDeathcomm = request.bundledDeathcommPath ? startDeathcommClient({
-        executable: request.bundledDeathcommPath, gamePid: child.pid,
-        gameRoot: installationRoot, voiceOrigin: request.runtime.voiceGrantOrigin, ticket: launchIdentity.ticket,
-      }) : () => {};
       let finalized = false;
       const finalize = (code: number | null, signal: NodeJS.Signals | null = null): void => {
         if (finalized) return;
         finalized = true;
-        stopDeathcomm();
         if (this.child === child) this.child = null;
         void sessionGateway.close().catch(() => undefined);
         // Preserve the local gateway/game lifecycle, but keep the launcher alive

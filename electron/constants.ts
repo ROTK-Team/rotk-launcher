@@ -27,12 +27,6 @@ export function resolveBundledDiagnosticsPath(): string {
     : join(app.getAppPath(), "resources", "diagnostics", "ROTK.Diagnostics.exe");
 }
 
-export function resolveBundledDeathcommPath(): string {
-  return app.isPackaged
-    ? join(process.resourcesPath, "deathcomm", "RotkDeathcomm.exe")
-    : join(app.getAppPath(), "resources", "deathcomm", "RotkDeathcomm.exe");
-}
-
 export function resolveBundledShimPath(): string {
   return app.isPackaged
     ? join(process.resourcesPath, "patches", "steam_api64.dll")
