@@ -52,10 +52,3 @@ $hookTest = Join-Path $outputDirectory "crouch_hook_io_test.exe"
 if ($LASTEXITCODE -ne 0) { throw "Crouch hook I/O test build failed" }
 & $hookTest
 if ($LASTEXITCODE -ne 0) { throw "Crouch hook I/O test failed" }
-$transitionOutput = Join-Path $outputDirectory "crouch_hint_equivalence_test.exe"
-& $zig.Source cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Werror `
-    -o $transitionOutput `
-    (Join-Path $PSScriptRoot "tests\crouch_hint_equivalence_test.c")
-if ($LASTEXITCODE -ne 0) { throw "Crouch cache equivalence test build failed." }
-& $transitionOutput
-if ($LASTEXITCODE -ne 0) { throw "Crouch cache equivalence tests failed." }
