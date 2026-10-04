@@ -6,7 +6,7 @@ import { LauncherFooter } from "./components/LauncherFooter";
 import { NewsCarousel } from "./components/NewsCarousel";
 import { PlayerIdentityPanel } from "./components/PlayerIdentityPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { hasLauncherUpdate } from "../shared/launcher-update";
+import { hasLauncherUpdate, launcherUpdateBlocksPlay } from "../shared/launcher-update";
 import { LauncherUpdatePrompt } from "./components/LauncherUpdatePrompt";
 import { WindowChrome } from "./components/WindowChrome";
 import { useI18n } from "./i18n";
@@ -114,7 +114,7 @@ export default function App() {
   const install = () => perform(() => window.rotk.install());
   const play = () => perform(() => window.rotk.play());
   const onPrimary = () => {
-    if (hasLauncherUpdate(snapshot.launcherUpdate) || snapshot.updateRequired) {
+    if (launcherUpdateBlocksPlay(snapshot.launcherUpdate) || snapshot.updateRequired) {
       setUpdatePromptOpen(true);
       if (!hasLauncherUpdate(snapshot.launcherUpdate)) void window.rotk.checkLauncherUpdate();
     }

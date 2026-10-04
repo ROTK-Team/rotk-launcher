@@ -29,6 +29,8 @@ export interface UpdaterLike {
 export interface LauncherUpdateOptions {
   updater: UpdaterLike | null;
   onChange: (state: LauncherUpdateSummary) => void;
+  /** Short failure code for logs; the raw message may carry signed URLs. */
+  onDownloadError?: (code: string) => void;
 }
 
 const IDLE_STATE: LauncherUpdateSummary = {
@@ -43,11 +45,13 @@ export type LauncherUpdateFailure = "unavailable" | "not-downloaded" | "no-updat
 export class LauncherUpdateService {
   private readonly updater: UpdaterLike | null;
   private readonly onChange: (state: LauncherUpdateSummary) => void;
+  private readonly onDownloadError: (code: string) => void;
   private current: LauncherUpdateSummary = { ...IDLE_STATE };
 
   constructor(options: LauncherUpdateOptions) {
     this.updater = options.updater;
     this.onChange = options.onChange;
+    this.onDownloadError = options.onDownloadError ?? (() => undefined);
     if (!this.updater) return;
 
     this.updater.autoDownload = false;
@@ -92,6 +96,7 @@ export class LauncherUpdateService {
           progressPercent: null,
           error: error.message,
         });
+        this.onDownloadError(updateErrorCode(error));
       } else if (this.current.status === "checking") {
         this.transition({ ...IDLE_STATE });
       }
@@ -153,6 +158,13 @@ export class LauncherUpdateService {
     this.current = next;
     this.onChange(this.state);
   }
+}
+
+function updateErrorCode(error: Error): string {
+  const { code, statusCode } = error as Error & { code?: unknown; statusCode?: unknown };
+  if (typeof code === "string" && /^[A-Z0-9_]{1,64}$/.test(code)) return code;
+  if (typeof statusCode === "number") return `HTTP ${statusCode}`;
+  return /^[A-Za-z]{1,64}$/.test(error.name) ? error.name : "Error";
 }
 
 function clampPercent(value: number): number {

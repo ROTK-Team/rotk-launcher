@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LauncherUpdateSummary } from "../shared/contracts.js";
-import { hasLauncherUpdate } from "../shared/launcher-update.js";
+import { hasLauncherUpdate, launcherUpdateBlocksPlay } from "../shared/launcher-update.js";
 import {
   LauncherUpdateService,
   type DownloadProgressLike,
@@ -162,7 +162,7 @@ describe("launcher self-update service", () => {
     expect(service.state).toMatchObject({ status: "update-available", progressPercent: null });
   });
 
-  it("keeps a known mandatory update across timer checks and download failures", async () => {
+  it("keeps a known update across timer checks and download failures without locking Play", async () => {
     const { updater, service } = createService();
     await service.check();
     updater.emit("update-available", { version: "2.0.24" });
@@ -173,13 +173,30 @@ describe("launcher self-update service", () => {
     expect(service.state.status).toBe("update-available");
     service.download();
     expect(hasLauncherUpdate(service.state)).toBe(true);
+    expect(launcherUpdateBlocksPlay(service.state)).toBe(true);
     updater.emit("error", new Error("offline"));
     await service.check();
     expect(service.state).toMatchObject({ status: "error", availableVersion: "2.0.24" });
+    // The banner keeps the error and Retry, but a failed download must not lock Play.
     expect(hasLauncherUpdate(service.state)).toBe(true);
+    expect(launcherUpdateBlocksPlay(service.state)).toBe(false);
     service.download();
     updater.emit("update-downloaded");
-    expect(hasLauncherUpdate(service.state)).toBe(true);
+    expect(launcherUpdateBlocksPlay(service.state)).toBe(true);
+  });
+
+  it("reports a short code, never the raw updater message, for a failed download", async () => {
+    const updater = new FakeUpdater();
+    const codes: string[] = [];
+    const service = new LauncherUpdateService({ updater, onChange: () => undefined, onDownloadError: (code) => codes.push(code) });
+    await service.check();
+    updater.emit("update-available", { version: "2.0.24" });
+    service.download();
+    const failure = Object.assign(new Error("Cannot download https://x.example/a?X-Amz-Signature=secret"), { statusCode: 403 });
+    updater.emit("error", failure);
+    service.download();
+    updater.emit("error", Object.assign(new Error("sha512 mismatch"), { code: "ERR_UPDATER_INVALID_SIGNATURE" }));
+    expect(codes).toEqual(["HTTP 403", "ERR_UPDATER_INVALID_SIGNATURE"]);
   });
 
   it("does not block launch just because the initial update check is offline", async () => {
