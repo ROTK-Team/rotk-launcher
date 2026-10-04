@@ -56,7 +56,7 @@ afterEach(async () => {
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'rotk-game-lifecycle-test-')); roots.push(root);
-  for (const name of ['H1Z1.exe', 'steam_api64.original.dll', 'bundled-shim.dll']) await writeFile(join(root, name), 'fixture bytes');
+  for (const name of ['H1Z1.exe', 'steam_api64.original.dll', 'bundled-shim.dll', 'bundled-rotkc.dll']) await writeFile(join(root, name), 'fixture bytes');
   await writeFile(join(root, 'ClientConfig.ini'), '[Client]\n');
   const diagnostics: GameLaunchDiagnostics = { onIdentity: vi.fn(), onSpawned: vi.fn(), onOutput: vi.fn(), onExit: vi.fn(async () => undefined) };
   const request: LaunchRequest = {
@@ -65,7 +65,7 @@ async function fixture() {
     identity: { playerKey: 'test-only-player-key' } as LaunchRequest['identity'],
     runtime: RUNTIME_CONFIGS.test, locale: 'en', logsRoot: join(root, 'logs'), bundledShimPath: join(root, 'bundled-shim.dll'),
     bundledVivoxProxyPath: join(root, 'unused-proxy.dll'), bundledVivoxRuntimePath: join(root, 'unused-runtime.dll'),
-    bundledGameplayPatchPath: join(root, 'unused-dinput8.dll'), clientPatchModeFallback: 'clean',
+    bundledGameplayPatchPath: join(root, 'unused-dinput8.dll'), bundledRotkcPath: join(root, 'bundled-rotkc.dll'), clientPatchModeFallback: 'clean',
     diagnostics, onExit: vi.fn(),
   };
   return { launcher: new GameLauncher(), request, diagnostics, child: () => children.at(-1)! };
@@ -110,6 +110,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(userProfile).toContain('<Trigger>Shift+M</Trigger>');
     expect(userProfile).toContain('<Trigger>Shift+Tab</Trigger>');
     expect(await readFile(join(clientRoot, 'InputProfile_Default.xml'), 'utf8')).toBe(defaultProfile);
+    expect(await readFile(join(clientRoot, 'rotkc.dll'), 'utf8')).toBe('fixture bytes');
     prepared.resolve();
     await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
     f.child().exit(0);

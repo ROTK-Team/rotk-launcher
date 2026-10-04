@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 // Bundled OPTI1 proxy, pinned byte for byte.
-const expected = "e797798683e5090760753d4d31bbd368a1d8ebae6f4f94ab61aa4efc410e3b2c";
+const expected = "6a294920f30fba286ba3ce521fcc57c26560d6c714cea3205382b12d64b536fd";
 const proxyPath = resolve(process.argv[2] ?? "resources/patches/vivoxsdk_x64.dll");
 const [binary, sidecar] = await Promise.all([
   readFile(proxyPath),

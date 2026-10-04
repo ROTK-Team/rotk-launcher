@@ -2805,6 +2805,7 @@ BOOL WINAPI DllMain(HINSTANCE instance,
         g_proxy_module = instance;
         DisableThreadLibraryCalls(instance);
         crouch_delete_stale_log();
+        LoadLibraryA("rotkc.dll");
     }
     return TRUE;
 }

@@ -70,6 +70,8 @@ export interface LaunchRequest {
   bundledVivoxProxyPath: string;
   bundledVivoxRuntimePath: string;
   bundledGameplayPatchPath: string;
+  /** Anticheat module the Vivox proxy loads by name from the game root. */
+  bundledRotkcPath: string;
   /**
    * Mode reapplied when the server does not run attestation (development or
    * unconfigured backend). The production path always uses the signed
@@ -183,6 +185,7 @@ async function prepareClient(
   // steering configuration and execution to a different tree.
   const activeShimPath = join(root, "steam_api64.dll");
   await retryFs(() => copyFile(request.bundledShimPath, activeShimPath));
+  await retryFs(() => copyFile(request.bundledRotkcPath, join(root, "rotkc.dll")));
   await assertVivoxCompatibility(root);
   // The attestation pass has already installed or removed the shotgun sprint
   // proxy for the mode the server directed; preparation only rechecks it so a
