@@ -15,7 +15,7 @@
     "dev:isolated": "npm run build:electron && concurrently -k \"vite\" \"tsc -p electron/tsconfig.json --watch --preserveWatchOutput\" \"wait-on tcp:5173 dist-electron/electron/main.js && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 ROTK_USER_DATA_DIR=.dev-data electron .\"",
     "build:electron": "tsc -p electron/tsconfig.json && esbuild electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/electron/preload.cjs",
     "build:renderer": "vite build",
-    "build": "npm run verify:presentmon && npm run build:diagnostics && npm run build:deathcomm && npm run test:deathcomm && npm run typecheck && npm run test && npm run build:electron && npm run build:renderer",
+    "build": "npm run verify:presentmon && npm run build:diagnostics && npm run typecheck && npm run test && npm run build:electron && npm run build:renderer",
     "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
     "test": "npm run test:assets:admin-panel && npm run test:assets:menu-settings && npm run test:assets:voice-volume && npm run test:native:crouch && npm run test:native:gameplay && npm run test:native:voice-rank && npm run test:native:diagnostics && vitest run",
     "test:assets:admin-panel": "node --test scripts/tests/admin-panel-assets.test.mjs",
@@ -40,9 +40,7 @@
     "build:gameplay-patch": "powershell -NoProfile -ExecutionPolicy Bypass -File native/gameplaypatch/build-gameplay-patch.ps1 -OutputPath resources/patches/dinput8.dll",
     "prepare:vivox": "npm run build:vivox && npm run verify:vivox-runtime",
     "prepare:gameplay-patch": "npm run build:gameplay-patch && npm run test:native:gameplay",
-    "prepare:native": "npm run prepare:vivox && npm run prepare:gameplay-patch && npm run build:deathcomm",
-    "build:deathcomm": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-deathcomm.ps1",
-    "test:deathcomm": "dotnet run --project native/RotkDeathcomm.Tests -c Release",
+    "prepare:native": "npm run prepare:vivox && npm run prepare:gameplay-patch",
     "verify:gameplay-patch": "node scripts/verify-gameplay-patch.mjs",
     "verify:vivox-runtime": "node scripts/verify-vivox-runtime.mjs",
     "verify:vivox-proxy": "node scripts/verify-vivox-proxy.mjs",
@@ -116,13 +114,6 @@
       "THIRD_PARTY_NOTICES.md"
     ],
     "extraResources": [
-      {
-        "from": "resources/deathcomm",
-        "to": "deathcomm",
-        "filter": [
-          "RotkDeathcomm.exe"
-        ]
-      },
       {
         "from": "resources/patches",
         "to": "patches",

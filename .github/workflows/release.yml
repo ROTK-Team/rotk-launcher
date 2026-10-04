@@ -60,11 +60,6 @@ jobs:
           # Match CI: compile from a fresh Windows object cache.
           use-cache: false
 
-      - name: Install .NET for the deathcomm helper
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
-        with:
-          dotnet-version: 10.0.x
-
       - name: Keep the Zig local cache apart from the global one
         # setup-zig points the local and global Zig caches at the same folder;
         # zig cc then loses the object it just compiled when it links
@@ -164,9 +159,8 @@ jobs:
             Get-Item -LiteralPath "release\win-unpacked\resources\patches\vivoxsdk_x64.dll"
             Get-Item -LiteralPath "release\win-unpacked\resources\patches\vivoxsdk_x64_v5.dll"
             Get-Item -LiteralPath "release\win-unpacked\resources\diagnostics\ROTK.Diagnostics.exe"
-            Get-Item -LiteralPath "release\win-unpacked\resources\deathcomm\RotkDeathcomm.exe"
           )
-          if ($targets.Count -lt 7) {
+          if ($targets.Count -lt 6) {
             throw "The installer, packaged launcher, runtime compatibility DLL or diagnostic helper is missing."
           }
           $helperPackagedHash = (Get-FileHash -LiteralPath "release\win-unpacked\resources\diagnostics\ROTK.Diagnostics.exe" -Algorithm SHA256).Hash.ToLowerInvariant()

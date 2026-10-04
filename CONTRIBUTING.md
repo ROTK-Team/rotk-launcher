@@ -11,7 +11,7 @@ Merci de contribuer au launcher. Le projet privilégie les changements limités,
 
 ## Installation locale
 
-Il faut Windows x64, Node.js 22, npm, Zig 0.15.2 pour le code natif et le SDK .NET 10 pour la deathcomm.
+Il faut Windows x64, Node.js 22, npm et Zig 0.15.2 pour le code natif.
 
 ```powershell
 npm ci

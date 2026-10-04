@@ -42,11 +42,6 @@ jobs:
           # Restored Windows object caches can reference missing .obj files.
           use-cache: false
 
-      - name: Installer .NET pour la deathcomm
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
-        with:
-          dotnet-version: 10.0.x
-
       - name: Séparer le cache Zig local du cache global
         # setup-zig points the local and global Zig caches at the same folder;
         # zig cc then loses the object it just compiled when it links
@@ -246,4 +241,3 @@ jobs:
             resources/patches/dinput8.dll.sha256
             resources/patches/vivoxsdk_x64.dll
             resources/patches/vivoxsdk_x64.dll.sha256
-            resources/deathcomm/RotkDeathcomm.exe

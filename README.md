@@ -165,7 +165,6 @@ La clé est chiffrée par Electron `safeStorage` — Windows DPAPI sur la platef
 - Windows 10 ou 11 x64 ;
 - Node.js 22 ;
 - npm 10 ou ultérieur ;
-- SDK .NET 10 pour le client deathcomm (le joueur n'a rien à installer) ;
 - [Zig 0.15.2](https://ziglang.org/download/0.15.2/) pour reconstruire les DLL natives.
 
 Lancer l’application en développement :
