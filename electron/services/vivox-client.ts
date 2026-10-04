@@ -9,7 +9,7 @@ export const VIVOX_STOCK_V4_SHA256 =
 export const VIVOX_STOCK_V5_SHA256 =
   "33a7f704eda23dda9ccbd9eba1fda2f0589211e9c61ec9d1f9c797acc624ea44";
 export const VIVOX_PROXY_SHA256 =
-  "5350449196dea51278b9c70da36ac621d4bda626bcded8c1bb3a83b07ec62c32";
+  "e797798683e5090760753d4d31bbd368a1d8ebae6f4f94ab61aa4efc410e3b2c";
 export const CROUCH_PARITY_MARKER_NAME = "rotk-crouch-parity.ini";
 
 const CROUCH_CLIENT_BUILD_ID = "h1z1-1.0.326.439939";
@@ -22,7 +22,7 @@ if (!CROUCH_CLIENT_BUILD) {
 
 export const CROUCH_PARITY_MARKER_CONTENTS = [
   "mode=patch-v2",
-  "animation=v13-perf1-ads-safe-cache256-hints-quiet-pose-only-interruptible-sine-idle400-200-move250",
+  "animation=v12-opti1-hints512-nolog-ads-safe-pose-only-js-sine-idle400-200-move250",
   "cameraScalePitch=disabled",
   `h1z1Sha256=${CROUCH_CLIENT_BUILD.executableSha256.toUpperCase()}`,
   `proxySha256=${VIVOX_PROXY_SHA256.toUpperCase()}`,

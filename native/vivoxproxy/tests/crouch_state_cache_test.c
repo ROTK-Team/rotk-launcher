@@ -36,7 +36,7 @@ static SRWLOCK g_test_cache_lock = SRWLOCK_INIT;
 static crouch_transition_state g_thread_states[CROUCH_STATE_CAPACITY];
 static volatile LONG g_thread_failures;
 static volatile LONG64 g_test_call_sequence;
-static size_t g_test_hints[CROUCH_STATE_CAPACITY];
+static size_t g_test_hints[512U];
 static HANDLE g_thread_start_event;
 
 static void *fake_network(uintptr_t value) {
@@ -55,7 +55,7 @@ static crouch_transition_state *acquire_with_sequence(
         states,
         CROUCH_STATE_CAPACITY,
         g_test_hints,
-        CROUCH_STATE_CAPACITY,
+        sizeof(g_test_hints) / sizeof(g_test_hints[0]),
         fake_network(network_id),
         generation,
         control_generation,

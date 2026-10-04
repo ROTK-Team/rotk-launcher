@@ -1,5 +1,9 @@
 # Mandatory crouch patch rollout
 
+This page describes the previous v13 release. The proposed Alpha/Bravo v12
+OPTI1 candidate and its validation gates are documented in
+[CROUCH_OPTI1_TEST.md](CROUCH_OPTI1_TEST.md).
+
 ## Scope
 
 This branch ships the ADS-safe crouch parity v13 hook inside the

@@ -85,15 +85,57 @@ static void nominal(void) {
         }
     }
 }
+typedef struct hook_actor {
+    unsigned char net[32], bins[0x400], pin[32];
+    void *pin_pointer;
+} hook_actor;
+static hook_actor actors[200];
+static uint16_t bench_capture(void *a, void *b, void *c, void *n, void *d,
+    float pose, float events, float sampled, float sync, unsigned char additive) {
+    (void)a; (void)b; (void)c; (void)n; (void)d;
+    assert(pose==0.0f && events==.21f && sampled==.32f && sync==.43f && additive==1);
+    return 123;
+}
+static double bench_hook(unsigned players) {
+    LARGE_INTEGER freq,start,end;
+    QueryPerformanceFrequency(&freq);
+    memset(g_crouch_states,0,sizeof(g_crouch_states));
+    memset(actors,0,sizeof(actors));
+    g_crouch_original_blend_trampoline=(void *)(uintptr_t)bench_capture;
+    for(unsigned i=0;i<players;++i) {
+        *(void **)(actors[i].net+8)=actors[i].bins;
+        actors[i].pin_pointer=actors[i].pin;
+        *(void **)(actors[i].bins+0x330)=&actors[i].pin_pointer;
+    }
+    *(uint32_t *)node=CROUCH_NODE_TYPE;
+    *(uint16_t *)(node+8)=CROUCH_IDLE_NODE_ID;
+    QueryPerformanceCounter(&start);
+    for(unsigned i=0;i<100000;++i) {
+        test_time=10000000+i*10;
+        assert(crouch_blend_weight_hook((void *)1,(void *)2,(void *)3,
+            actors[i%players].net,node,0,.21f,.32f,.43f,1)==123);
+    }
+    QueryPerformanceCounter(&end);
+    return (double)(end.QuadPart-start.QuadPart)*1000.0/(double)freq.QuadPart;
+}
 int main(void) {
     nominal();
     reset(0,0);
     g_crouch_blend_call_count = 0;
     tick(1,1,0); tick(501,1,0); tick(3001,0,0);
     assert(file_opens == 0);
-    g_crouch_transition_trace = TRUE;
-    reset(0,0); tick(1,1,0);
-    assert(file_opens > 0);
-    printf("PASS v12 unchanged nominal curves, %u forwarded calls, zero normal disk opens, opt-in trace\n",calls);
+    for (int i = 0; i < 1000; ++i) {
+        reset(0,0); tick(1,1,0); tick(501,1,0); tick(3001,0,0); tick(3501,0,0);
+    }
+    crouch_log("explicit diagnostic %d", 1);
+    assert(file_opens == 0);
+    printf("PASS v12 unchanged nominal curves, %u forwarded calls, zero crouch log disk opens\n",calls);
+    for(unsigned players=1;players<=200;players=players==1?50:players==50?200:201) {
+        double times[3];
+        for(unsigned j=0;j<3;++j) times[j]=bench_hook(players);
+        for(unsigned j=0;j<3;++j) for(unsigned k=j+1;k<3;++k) if(times[k]<times[j]) {double t=times[j];times[j]=times[k];times[k]=t;}
+        printf("HOOK_BENCH players=%u calls=100000 median3_ms=%.3f\n",players,times[1]);
+    }
+    assert(file_opens==0);
     return 0;
 }
