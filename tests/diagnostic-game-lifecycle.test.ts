@@ -102,11 +102,13 @@ describe('game lifecycle remains independent of diagnostics', () => {
     const clientRoot = f.request.config.installation!.root;
     const defaultProfile = '<Profile name="Default"><ActionSet name="Generic"><Action name="OpenMap" ignoreModifiers="false"><Trigger>M</Trigger></Action><Action name="ToggleInventory" ignoreModifiers="false"><Trigger>Tab</Trigger></Action></ActionSet></Profile>';
     await writeFile(join(clientRoot, 'InputProfile_Default.xml'), defaultProfile);
+    await writeFile(join(clientRoot, 'InputProfile_User.xml'), '<Profile name="User"></Profile>');
     f.diagnostics.onPreparing = vi.fn(() => prepared.promise);
     const launched = f.launcher.launch(f.request).catch(error => error);
     await vi.waitFor(() => expect(f.diagnostics.onPreparing).toHaveBeenCalledOnce());
     expect(mocks.spawn).not.toHaveBeenCalled();
     const userProfile = await readFile(join(clientRoot, 'InputProfile_User.xml'), 'utf8');
+    expect(userProfile).toContain('<Trigger>V</Trigger>');
     expect(userProfile).toContain('<Trigger>Shift+M</Trigger>');
     expect(userProfile).toContain('<Trigger>Shift+Tab</Trigger>');
     expect(await readFile(join(clientRoot, 'InputProfile_Default.xml'), 'utf8')).toBe(defaultProfile);

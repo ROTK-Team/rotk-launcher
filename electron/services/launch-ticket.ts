@@ -2,6 +2,8 @@ import { isValidLaunchTicket } from "../../shared/launch-ticket.js";
 import { isValidPlayerKey, normalizePlayerKey } from "../../shared/player-key.js";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
+const MAX_NETWORK_ATTEMPTS = 2;
+const NETWORK_RETRY_DELAY_MS = 350;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STEAM_ID_PATTERN = /^\d{17}$/;
 const DECIMAL_ID_PATTERN = /^[1-9]\d{0,18}$/;
@@ -225,6 +227,22 @@ function serviceError(status: number, value: unknown, attestationUnavailableReas
   return new Error("The ROTK account service refused the launch request");
 }
 
+function networkFailureCause(error: unknown, aborted: boolean): string {
+  if (aborted) return "timeout";
+  const systemCode = (error as { cause?: { code?: string }; code?: string })?.cause?.code
+    ?? (error as { code?: string })?.code;
+  return typeof systemCode === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(systemCode)
+    ? systemCode
+    : "NETWORK_ERROR";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, ms);
+    timeout.unref?.();
+  });
+}
+
 export async function createLaunchTicket(
   playerKey: unknown,
   endpointValue: string,
@@ -233,47 +251,64 @@ export async function createLaunchTicket(
   if (!isValidPlayerKey(playerKey)) throw new Error("Invalid ROTK player key");
   const endpoint = validateEndpoint(endpointValue);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const requestStartedAtMonotonicMs = performance.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const requestBody = JSON.stringify({
+    launcherKey: normalizePlayerKey(playerKey),
+    ...(options.launcherVersion ? { launcherVersion: options.launcherVersion } : {}),
+    ...(options.hwid && Object.keys(options.hwid).length > 0 ? { hwid: options.hwid } : {}),
+    ...(options.attestation ? { attestation: options.attestation } : {}),
+  });
 
-  try {
-    let response: Response;
+  for (let attempt = 0; attempt < MAX_NETWORK_ATTEMPTS; attempt += 1) {
+    const requestStartedAtMonotonicMs = performance.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    );
     try {
-      response = await fetchImpl(endpoint, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          launcherKey: normalizePlayerKey(playerKey),
-          ...(options.launcherVersion ? { launcherVersion: options.launcherVersion } : {}),
-          ...(options.hwid && Object.keys(options.hwid).length > 0 ? { hwid: options.hwid } : {}),
-          ...(options.attestation ? { attestation: options.attestation } : {}),
-        }),
-        cache: "no-store",
-        redirect: "error",
-        signal: controller.signal,
+      let response: Response;
+      try {
+        response = await fetchImpl(endpoint, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: requestBody,
+          cache: "no-store",
+          redirect: "error",
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (attempt === MAX_NETWORK_ATTEMPTS - 1) {
+          throw new Error(`Unable to reach the ROTK account service (${networkFailureCause(error, controller.signal.aborted)})`);
+        }
+        // Only transport failures before response headers are retried.
+        clearTimeout(timeout);
+        await delay(NETWORK_RETRY_DELAY_MS);
+        continue;
+      }
+
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        if (controller.signal.aborted) {
+          throw new Error("Unable to reach the ROTK account service (timeout)");
+        }
+        throw new Error(`Invalid response from the ROTK account service (HTTP ${response.status})`);
+      }
+      if (!response.ok) throw serviceError(response.status, payload, options.attestationUnavailableReason);
+      return parseTicketResponse(payload, {
+        requestStartedAtMonotonicMs,
+        receivedAtMonotonicMs: performance.now(),
       });
-    } catch {
-      throw new Error("Unable to reach the ROTK account service");
+    } finally {
+      clearTimeout(timeout);
     }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new Error("Invalid response from the ROTK account service");
-    }
-    if (!response.ok) throw serviceError(response.status, payload, options.attestationUnavailableReason);
-    return parseTicketResponse(payload, {
-      requestStartedAtMonotonicMs,
-      receivedAtMonotonicMs: performance.now(),
-    });
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw new Error("Unable to reach the ROTK account service");
 }
 
 export const launchTicketInternals = {
