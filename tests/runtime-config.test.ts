@@ -70,7 +70,7 @@ describe("public ROTK runtime", () => {
       "en",
     );
 
-    expect(args.some((arg) => arg.startsWith("Internationalization:Locale="))).toBe(false);
+    expect(args).toContain("Internationalization:Locale=en_us");
     expect(args).toContain(
       "server=148.113.198.176:20042;148.113.198.176:20043;148.113.198.176:20044;148.113.198.176:20045",
     );
@@ -90,7 +90,7 @@ describe("public ROTK runtime", () => {
       "fr",
     );
 
-    expect(args).toContain("Internationalization:Locale=fr_fr");
+    expect(args).toContain("Internationalization:Locale=en_us");
     expect(args).toContain(`sessionid=${launchTicket}`);
     expect(args.join(" ")).not.toContain(durableKey);
     expect(args).toContain(

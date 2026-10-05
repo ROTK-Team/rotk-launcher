@@ -97,18 +97,17 @@ export function synchronizeClientConfig(
 }
 
 /**
- * Game locale (`Locale/<xx_xx>_data.dat`) per launcher locale. The client reads
- * it from `Internationalization:Locale` and defaults to en_us; it does not ask
- * Steam for it.
+ * Temporarily keep every launcher language on the English game assets until
+ * the translated HUD has been validated. Launcher UI translations stay enabled.
  */
-export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "fr_fr", zh: "en_us" };
+export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "en_us", zh: "en_us" };
 
-/** The ROTK social menu speaks en/fr, like the launcher. */
-export function synchronizeUserOptions(config: string, locale: AppLocale): string {
+/** Keep the social menu consistent with the temporary English game locale. */
+export function synchronizeUserOptions(config: string): string {
   return upsertIniDirective(config, {
     section: "UI",
     key: "ROTKSocialLanguage",
-    value: locale === "zh" ? "en" : locale,
+    value: "en",
   });
 }
 

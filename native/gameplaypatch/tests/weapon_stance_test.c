@@ -1,5 +1,10 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+static int pressed_mouse;
+static SHORT WINAPI mouse_state(int key) {
+    return key == pressed_mouse ? (SHORT)0x8000 : 0;
+}
+#define GetAsyncKeyState mouse_state
 static DWORD WINAPI own_window(HWND window, LPDWORD process) {
     (void)window; *process = GetCurrentProcessId(); return GetCurrentThreadId();
 }
@@ -48,14 +53,9 @@ int main(void) {
         BYTE *entry=nodes[i]; unsigned bucket=stance_hash(names[i])&15;
         *(uintptr_t *)(entry+8)=(uintptr_t)names[i]; *(uint32_t *)(entry+0x10)=(uint32_t)strlen(names[i]);
         *(uintptr_t *)(entry+0x188)=inputs[bucket]; inputs[bucket]=(uintptr_t)entry;
-        assert(stance_context_action(manager,"Infantry",names[i])==entry+0x18);
-        assert(!stance_action_pressed(entry+0x18)); entry[0x130]=1;
-        assert(stance_action_pressed(stance_context_action(manager,"Infantry",names[i])));
-        assert(!stance_context_action(manager,"GroundVehicle",names[i]));
-        entry[0x130]=0;
     }
-    assert(!stance_context_action(NULL,"Infantry","Fire"));
-    /* Exercise the real actor hook with logical actions, not physical buttons. */
+    assert(!stance_action(NULL,"ToggleWeaponStance"));
+    /* Logical actions alone must not raise the weapon after the rollback. */
     static BYTE game[0x384e0], ui[0x350];
     const BYTE no_focus[]={0x31,0xc0,0xc3};
     memcpy(image+0x1c138e0,no_focus,sizeof(no_focus));
@@ -71,23 +71,18 @@ int main(void) {
     for (unsigned i=0;i<2;++i) {
         stance_initialized=TRUE; *(int *)(actor+0x9a0)=0;
         nodes[i][0x130]=1; stance_idle(actor);
-        assert(stance_u32(actor+0x9a0)==1);
+        assert(stance_u32(actor+0x9a0)==0);
         nodes[i][0x130]=0;
     }
+    const int buttons[]={VK_LBUTTON,VK_RBUTTON};
+    for (unsigned i=0;i<2;++i) {
+        *(int *)(actor+0x9a0)=0; pressed_mouse=buttons[i]; stance_idle(actor);
+        assert(stance_u32(actor+0x9a0)==1);
+    }
+    pressed_mouse=0;
     *(int *)(actor+0x9a0)=0; stance_idle(actor);
     assert(stance_u32(actor+0x9a0)==0);
-    puts("PASS real stance hook raises for remapped Infantry Fire/SecondaryFire only");
-    /* Stock console gate: exact signature, one byte, restorable, refuses drift. */
-    BYTE *gate=image+CONSOLE_GATE_SIGNATURE_RVA;
-    memcpy(gate,console_gate_signature,sizeof(console_gate_signature));
-    assert(VirtualProtect(gate,sizeof(console_gate_signature),PAGE_EXECUTE_READ,&old));
-    assert(console_gate_install(image)); assert(gate[CONSOLE_GATE_OFFSET]==CONSOLE_GATE_VALUE);
-    assert(!console_gate_install(image));
-    assert(console_gate_restore(image)); assert(!memcmp(gate,console_gate_signature,sizeof(console_gate_signature)));
-    assert(console_gate_restore(image));
-    assert(VirtualProtect(gate,sizeof(console_gate_signature),PAGE_READWRITE,&old));
-    gate[33]^=1; assert(!console_gate_install(image)); assert(gate[CONSOLE_GATE_OFFSET]==CONSOLE_GATE_STOCK);
-    puts("PASS stock console gate patches one guarded byte and restores it");
+    puts("PASS real stance hook raises for physical mouse buttons only; Infantry actions ignored");
     VirtualFree(image,0,MEM_RELEASE);
     puts("PASS: native virtual setter thunk, foreign target refusal, input registry, pressed bit and corrupt table refusal.");
     return 0;

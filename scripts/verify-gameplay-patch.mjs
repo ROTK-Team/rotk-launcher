@@ -3,8 +3,8 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const expectedHash =
-  "73d6a0fca5ee4a0aac04be49b2440fd26545444bf912fc3e69a5287824c4f230";
-const expectedBytes = 34_816;
+  "987fa5657408422d984a31f18739af4514221cf25be3d5de31e3a64edcb54649";
+const expectedBytes = 33_792;
 const builtPath = resolve(
   process.argv[2] ?? "native/gameplaypatch/dist/dinput8.dll",
 );
@@ -55,6 +55,7 @@ const requiredBinarySequences = [
     0x19, 0x85, 0xF6, 0x74, 0x15, 0x48, 0x85, 0xDB,
   ]),
   Buffer.from("DirectInput8Create\0", "ascii"),
+  Buffer.from("GetAsyncKeyState\0", "ascii"),
   Buffer.from("\\dinput8.dll\0", "utf16le"),
   Buffer.from("mode=anti-slow-v3\0", "ascii"),
   Buffer.from("patch=1046F98:8f>82,1046FE5:74>eb\0", "ascii"),
@@ -70,6 +71,10 @@ for (const sequence of requiredBinarySequences) {
 }
 
 for (const forbidden of [
+  "ROTKConsole",
+  "Infantry",
+  "Fire",
+  "SecondaryFire",
   "AddVectoredExceptionHandler",
   "SetUnhandledExceptionFilter",
   "MiniDumpWriteDump",

@@ -1,13 +1,12 @@
-/* PS3 stance v17. Runs on the game's actor thread, never a polling thread.
+/* PS3 stance v16 input restored. Runs on the game's actor thread, never a polling thread.
  * Owns only idle RVA 1659000 (15 bytes) and console call F4341D (5 bytes).
- * ROTKConsole feeds the debug-console query; console_gate.h opens it for all.
+ * The stock console query remains unchanged.
  * Crouch/Vivox/Steam and the existing CanSprint v3 edits are independent.
  * Removing the marker disables behavior; restart removes every native hook.
  */
 #include <tlhelp32.h>
 
 typedef void (*stance_idle_fn)(BYTE *);
-typedef uintptr_t (*stance_query_fn)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 static BYTE *stance_base;
 static stance_idle_fn stance_original_idle;
 static volatile LONG stance_enabled;
@@ -36,12 +35,12 @@ static BOOL stance_name(BYTE *node, const char *name) {
     return length < sizeof(text) && stance_u32(node + 0x10) == length &&
         stance_read((void *)stance_ptr(node + 8), text, length) && memcmp(text, name, length) == 0;
 }
-static BYTE *stance_context_action(BYTE *manager, const char *context_name, const char *name) {
+static BYTE *stance_action(BYTE *manager, const char *name) {
     BYTE *context; unsigned int i, j; uintptr_t count; BYTE *table, *action;
     if (!manager) return NULL;
-    context = (BYTE *)stance_ptr(manager + 0x2d8 + (stance_hash(context_name) & 1023U) * 8U);
+    context = (BYTE *)stance_ptr(manager + 0x2d8 + (stance_hash("Generic") & 1023U) * 8U);
     for (i = 0; i < 128 && context; ++i, context = (BYTE *)stance_ptr(context + 0xb8)) {
-        if (!stance_name(context, context_name)) continue;
+        if (!stance_name(context, "Generic")) continue;
         count = stance_ptr(context + 0x88);
         if (!count || count > 65536 || (count & (count - 1))) return NULL;
         table = (BYTE *)stance_ptr(context + 0x80);
@@ -52,9 +51,6 @@ static BYTE *stance_context_action(BYTE *manager, const char *context_name, cons
         return NULL;
     }
     return NULL;
-}
-static BYTE *stance_action(BYTE *manager, const char *name) {
-    return stance_context_action(manager, "Generic", name);
 }
 static BOOL stance_action_pressed(BYTE *action) {
     BYTE flags = 0;
@@ -118,10 +114,8 @@ static void stance_idle(BYTE *actor) {
     }
     manager = (BYTE *)stance_ptr(game + 0x382c8); action = stance_action(manager, "ToggleWeaponStance");
     pressed = stance_action_pressed(action);
-    /* Use the engine's Infantry actions, including remaps/gamepad triggers.
-     * A missing context must not fall back to unrelated physical mouse keys. */
-    fire = stance_action_pressed(stance_context_action(manager, "Infantry", "Fire"));
-    aim = stance_action_pressed(stance_context_action(manager, "Infantry", "SecondaryFire"));
+    fire = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    aim = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0;
     raw = (int)stance_u32(actor + 0x9a0);
     if (!stance_initialized && (raw == 1 || raw == 2)) stance_initialized = TRUE;
     if ((fire || aim) && (raw == 0 || raw == -1)) {
@@ -133,14 +127,6 @@ static void stance_idle(BYTE *actor) {
         if (stance_toggles <= 10) patch_log("ROTK stance: native binding toggled.\n");
     }
     stance_pressed = pressed;
-}
-static uintptr_t stance_console(uintptr_t manager, uintptr_t b, uintptr_t c, uintptr_t d, uintptr_t e, uintptr_t f) {
-    uintptr_t original = ((stance_query_fn)(stance_base + 0x11b81c0))(manager, b, c, d, e, f);
-    if (InterlockedCompareExchange(&stance_enabled, 0, 0)) {
-        BYTE *action = stance_action((BYTE *)manager, "ROTKConsole");
-        if (stance_action_pressed(action)) return (uintptr_t)action;
-    }
-    return original;
 }
 static void stance_jump(BYTE *out, const void *target) {
     uintptr_t address = (uintptr_t)target;
@@ -193,27 +179,25 @@ close_handles:
 }
 #include "weapon_stance_guards.h"
 static void stance_install(BYTE *base) {
-    BYTE *memory = NULL, idle_jump[15], call_jump[5]; DWORD old; int32_t displacement;
+    BYTE *memory = NULL, idle_jump[15]; DWORD old;
     SYSTEM_INFO info;
     if (!stance_guards_ready(base)) { patch_log("ROTK stance: guard mismatch; skipped.\n"); return; }
     GetSystemInfo(&info);
-    /* Keep the console CALL rel32; bridge contains an absolute tail jump. */
+    /* Keep the existing guarded allocation for the idle trampoline. */
     for (uintptr_t delta = 0x08000000; delta < 0x70000000 && !memory; delta += info.dwAllocationGranularity)
         memory = VirtualAlloc(base + delta, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!memory) { patch_log("ROTK stance: bridge allocation refused.\n"); return; }
     memcpy(memory, base + 0x1659000, 15); stance_jump(memory + 15, base + 0x165900f);
-    stance_jump(memory + 64, (void *)(uintptr_t)stance_console);
     if (!VirtualProtect(memory, 4096, PAGE_EXECUTE_READ, &old) || !FlushInstructionCache(GetCurrentProcess(), memory, 4096)) {
         VirtualFree(memory, 0, MEM_RELEASE); return;
     }
     stance_base = base; stance_original_idle = (stance_idle_fn)(uintptr_t)memory;
     memset(idle_jump, 0x90, sizeof(idle_jump)); stance_jump(idle_jump, (void *)(uintptr_t)stance_idle);
-    call_jump[0] = 0xe8; displacement = (int32_t)((memory + 64) - (base + 0xf43422)); memcpy(call_jump + 1, &displacement, 4);
-    if (!stance_commit(base + 0x1659000, memory, idle_jump, base + 0xf4341d, stance_console_call_guard, call_jump)) {
+    if (!stance_commit(base + 0x1659000, memory, idle_jump, base + 0xf4341d, stance_console_call_guard, stance_console_call_guard)) {
         /* Do not free a bridge which may have become visible if protection
          * restoration failed. Disabled wrappers safely call the native path. */
         patch_log("ROTK stance: guarded installation refused; disabled.\n"); return;
     }
     InterlockedExchange(&stance_enabled, 1);
-    patch_log("ROTK stance: native v17 idle and console installed.\n");
+    patch_log("ROTK stance: v16 mouse input restored; stock console unchanged.\n");
 }

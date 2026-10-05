@@ -76,10 +76,11 @@ afterEach(async () => {
 describe("shotgun sprint patch deployment", () => {
   it("pins the v3 and retired production artifacts exactly", () => {
     expect(GAMEPLAY_PATCH_SHA256).toBe(
-      "73d6a0fca5ee4a0aac04be49b2440fd26545444bf912fc3e69a5287824c4f230",
+      "987fa5657408422d984a31f18739af4514221cf25be3d5de31e3a64edcb54649",
     );
-    expect(GAMEPLAY_PATCH_BYTES).toBe(34_816);
+    expect(GAMEPLAY_PATCH_BYTES).toBe(33_792);
     expect(RETIRED_GAMEPLAY_PATCHES).toEqual([
+      { sha256: "73d6a0fca5ee4a0aac04be49b2440fd26545444bf912fc3e69a5287824c4f230", bytes: 34_816 },
       { sha256: "2c8c7d65f8410a2f05f58318978b44f08860c4f5647b5474a11bf70a0ebc0b3a", bytes: 34_304 },
       { sha256: "f27379c09f04db9abbeeaee56a0231fe7aeaa2e9570e670091c75a85871e67db", bytes: 33_792 },
       { sha256: "6ca1a0b1c28f8d11482a416e9f9d8b6330db253a78ed79b9301ec31198ce7845", bytes: 33_792 },
@@ -96,7 +97,7 @@ describe("shotgun sprint patch deployment", () => {
     expect(GAMEPLAY_MARKER_CONTENTS).toContain("mode=anti-slow-v3");
     expect(GAMEPLAY_MARKER_CONTENTS).toContain("patch=1046F98:8f>82,1046FE5:74>eb");
     expect(GAMEPLAY_MARKER_CONTENTS).toContain(
-      "proxySha256=73D6A0FCA5EE4A0AAC04BE49B2440FD26545444BF912FC3E69A5287824C4F230",
+      "proxySha256=987FA5657408422D984A31F18739AF4514221CF25BE3D5DE31E3A64EDCB54649",
     );
     expect(GAMEPLAY_MARKER_CONTENTS).toContain(
       "h1z1Sha256=5F5A4922B0671E4ED8FD415E753BE096EF7A17E360AE80E025F11544C8DB9261",
