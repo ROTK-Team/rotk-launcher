@@ -17,8 +17,8 @@ export function migrateStanceProfile(source: string, enabled: boolean,
   previous: StanceProfileState = { added: [], removedNetworkN: false },
 ): { text: string; state: StanceProfileState } {
   const generic = elements(source, "ActionSet").find(e => attribute(e.opening, "name") === "Generic");
-  if (!generic) throw new Error("Profil de touches invalide : Generic absent.");
-  let body = generic.body;
+  if (!generic && !/<\/Profile\s*>/.test(source)) throw new Error("Profil de touches invalide : Profile absent.");
+  let body = generic?.body ?? "";
   const state = { added: previous.added.filter(name => name !== LEGACY_CONSOLE), removedNetworkN: false };
   const find = (name: string) => elements(body, "Action").find(e => attribute(e.opening, "name") === name);
   // Drop only our N binding; the default profile supplies the unbound action and a
@@ -46,7 +46,10 @@ export function migrateStanceProfile(source: string, enabled: boolean,
     }
     state.added = [];
   }
-  return { text: source.slice(0, generic.start) + replaceBody(generic, body) + source.slice(generic.end), state };
+  const text = generic
+    ? source.slice(0, generic.start) + replaceBody(generic, body) + source.slice(generic.end)
+    : source.replace(/<\/Profile\s*>/, `<ActionSet name="Generic">${body}</ActionSet>\n$&`);
+  return { text, state };
 }
 
 export async function prepareWeaponStanceProfile(root: string, stateRoot: string, enabled = true): Promise<void> {

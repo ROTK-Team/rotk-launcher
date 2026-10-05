@@ -39,6 +39,15 @@ describe("stance binding migration and rollback", () => {
     expect(next.state).toEqual({ added: ["ToggleWeaponStance"], removedNetworkN: false });
     expect(migrateStanceProfile(next.text,true,next.state)).toEqual(next);
   });
+  it("creates Generic when an interrupted user profile omitted it", () => {
+    const partial = '<Profile name="User"><ActionSet name="Infantry"><Action name="Sprint"><Trigger>Shift</Trigger></Action></ActionSet></Profile>';
+    const next = migrateStanceProfile(partial, true);
+    expect(next.text).toContain('<ActionSet name="Generic">');
+    expect(next.text).toContain('<Action name="ToggleWeaponStance" version="1"><Trigger>V</Trigger></Action>');
+    expect(next.text).toContain('<Action name="Sprint"><Trigger>Shift</Trigger></Action>');
+    expect(next.text).not.toContain('ROTKConsole');
+    expect(next.state).toEqual({ added: ["ToggleWeaponStance"], removedNetworkN: false });
+  });
   it("preserves a custom stance shortcut", () => {
     const custom=source.replace('</ActionSet>', '<Action name="ToggleWeaponStance"><Trigger>B</Trigger></Action></ActionSet>');
     const next=migrateStanceProfile(custom,true);

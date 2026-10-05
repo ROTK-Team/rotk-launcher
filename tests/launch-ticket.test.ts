@@ -114,6 +114,81 @@ describe("ROTK launch ticket client", () => {
 
     await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl }))
       .rejects.toThrow("The ROTK launcher key was rejected");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("aborts a stalled response body without retrying after HTTP headers", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"ok":'));
+          init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason), { once: true });
+        },
+      }));
+    }) as typeof fetch;
+    try {
+      const result = expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl, timeoutMs: 100 }))
+        .rejects.toThrow("Unable to reach the ROTK account service (timeout)");
+      await vi.advanceTimersByTimeAsync(100);
+      await result;
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a header timeout once and cleans up both attempt timers", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn((_input: URL | RequestInfo, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    })) as typeof fetch;
+    try {
+      const result = expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl, timeoutMs: 100 }))
+        .rejects.toThrow("Unable to reach the ROTK account service (timeout)");
+      await vi.advanceTimersByTimeAsync(550);
+      await result;
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not expose arbitrary transport messages or retry invalid JSON", async () => {
+    const fetchImpl = vi.fn(async () => new Response("not json", { status: 502 })) as typeof fetch;
+    await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl }))
+      .rejects.toThrow("Invalid response from the ROTK account service (HTTP 502)");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+
+    const failingFetch = vi.fn(async () => { throw new Error(`request failed: ${launcherKey}`); }) as typeof fetch;
+    await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl: failingFetch }))
+      .rejects.toThrow(/^Unable to reach the ROTK account service \(NETWORK_ERROR\)$/);
+  });
+
+  it("retries one network failure before surfacing the account-service error", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET" } });
+      }
+      return jsonResponse(validResponse);
+    });
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+
+    await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl }))
+      .resolves.toMatchObject({ ticket: validResponse.ticket });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the network cause when the account service cannot be reached", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw Object.assign(new Error("fetch failed"), { cause: { code: "ENOTFOUND" } });
+    }) as unknown as typeof fetch;
+
+    await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl }))
+      .rejects.toThrow("Unable to reach the ROTK account service (ENOTFOUND)");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("names an account the service holds no game identity for", async () => {

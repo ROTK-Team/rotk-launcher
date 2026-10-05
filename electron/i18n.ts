@@ -265,7 +265,51 @@ const DYNAMIC_CHINESE_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string
   [/^This ROTK account is permanently banned\.(?: Reason: (.+))?$/, (match) => `此 ROTK 账号已被永久封禁。${match[1] ? `原因：${match[1]}` : ""}`],
 ];
 
+const ACCOUNT_CONNECTION_ERRORS = {
+  network: {
+    en: "Unable to connect to the ROTK account service. Please try again.",
+    fr: "Impossible de joindre le service de compte ROTK. Réessaie.",
+    zh: "无法连接 ROTK 账号服务，请重试。",
+  },
+  timeout: {
+    en: "The ROTK account service did not respond in time. Please try again.",
+    fr: "Le service de compte ROTK n’a pas répondu à temps. Réessaie.",
+    zh: "ROTK 账号服务响应超时，请重试。",
+  },
+  dns: {
+    en: "Unable to resolve the ROTK account server address. Please try again later.",
+    fr: "Impossible de résoudre l’adresse du serveur de compte ROTK. Réessaie plus tard.",
+    zh: "无法解析 ROTK 账号服务器地址，请稍后重试。",
+  },
+  interrupted: {
+    en: "The connection to the ROTK account service was interrupted. Please try again.",
+    fr: "La connexion au service de compte ROTK a été interrompue. Réessaie.",
+    zh: "与 ROTK 账号服务的连接已中断，请重试。",
+  },
+  certificate: {
+    en: "Unable to verify the ROTK account service certificate. Check your computer’s date and time.",
+    fr: "Impossible de vérifier le certificat du service de compte ROTK. Vérifie la date et l’heure de ton ordinateur.",
+    zh: "无法验证 ROTK 账号服务的证书，请检查电脑的日期和时间。",
+  },
+  response: {
+    en: "The ROTK account service returned an invalid response. Please try again later.",
+    fr: "Le service de compte ROTK a renvoyé une réponse invalide. Réessaie plus tard.",
+    zh: "ROTK 账号服务返回异常，请稍后重试。",
+  },
+} satisfies Record<string, Record<AppLocale, string>>;
+
 export function localizeServiceError(message: string, locale: AppLocale): string {
+  const accountError = message.match(/^(Unable to reach|Invalid response from) the ROTK account service(?: \((timeout|[A-Z][A-Z0-9_]{0,63}|HTTP [1-5]\d{2})\))?$/);
+  if (accountError) {
+    const code = accountError[2];
+    let kind: keyof typeof ACCOUNT_CONNECTION_ERRORS = "network";
+    if (accountError[1] === "Invalid response from") kind = "response";
+    else if (["timeout", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"].includes(code)) kind = "timeout";
+    else if (["ENOTFOUND", "EAI_AGAIN"].includes(code)) kind = "dns";
+    else if (["ECONNRESET", "EPIPE", "UND_ERR_SOCKET"].includes(code)) kind = "interrupted";
+    else if (["CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID", "DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "ERR_TLS_CERT_ALTNAME_INVALID"].includes(code)) kind = "certificate";
+    return ACCOUNT_CONNECTION_ERRORS[kind][locale] + (code ? ` (${code})` : "");
+  }
   if (locale === "fr") return FRENCH_ERRORS.get(message) ?? message;
   if (locale === "zh") {
     const exact = CHINESE_ERRORS.get(message);

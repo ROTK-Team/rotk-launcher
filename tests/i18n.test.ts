@@ -1,8 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { localizeServiceError } from "../electron/i18n";
-import { normalizeAppLocale } from "../shared/locale";
+import { APP_LOCALES, normalizeAppLocale } from "../shared/locale";
 
 describe("launcher locales", () => {
+  it.each(APP_LOCALES)("localizes account diagnostics while preserving technical codes in %s", (locale) => {
+    const samples = [
+      ["Unable to reach", "ENOTFOUND"],
+      ["Unable to reach", "timeout"],
+      ["Unable to reach", "ECONNRESET"],
+      ["Unable to reach", "CERT_HAS_EXPIRED"],
+      ["Unable to reach", "NETWORK_ERROR"],
+      ["Invalid response from", "HTTP 502"],
+    ];
+    for (const [prefix, code] of samples) {
+      const raw = `${prefix} the ROTK account service (${code})`;
+      const translated = localizeServiceError(raw, locale);
+      expect(translated).not.toBe(raw);
+      expect(translated.endsWith(`(${code})`)).toBe(true);
+      if (locale === "fr") expect(translated).toMatch(/ROTK.*(?:Réessaie|Vérifie)/);
+      if (locale === "zh") expect(translated).toContain("请");
+    }
+    expect(localizeServiceError("Unable to reach the ROTK account service", locale))
+      .not.toBe("Unable to reach the ROTK account service");
+  });
+
   it("defaults unknown or missing preferences to English", () => {
     expect(normalizeAppLocale(undefined)).toBe("en");
     expect(normalizeAppLocale("de")).toBe("en");
