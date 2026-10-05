@@ -6,13 +6,12 @@ import { elements, attribute, replaceBody } from "./interface-input-profile.js";
 
 export interface StanceProfileState { added: string[]; removedNetworkN: boolean; }
 const defaults = { ToggleWeaponStance: "V" };
-/** Older launchers bound this console action to N and took N from ToggleNetworkStats.
- * The default profile now ships it on F13, so players pick their own key. */
+/** Retired custom console action; no replacement shortcut is installed. */
 const LEGACY_CONSOLE = "ROTKConsole";
 /** Pinned per release; the prepared rollback build sets this to false. */
 export const WEAPON_STANCE_ENABLED = true;
 
-/** Keep player bindings, undo only our legacy console N and leave ToggleDebugConsole unmodified. */
+/** Retire the custom console without resetting any other player bindings. */
 export function migrateStanceProfile(source: string, enabled: boolean,
   previous: StanceProfileState = { added: [], removedNetworkN: false },
 ): { text: string; state: StanceProfileState } {
@@ -21,12 +20,10 @@ export function migrateStanceProfile(source: string, enabled: boolean,
   let body = generic?.body ?? "";
   const state = { added: previous.added.filter(name => name !== LEGACY_CONSOLE), removedNetworkN: false };
   const find = (name: string) => elements(body, "Action").find(e => attribute(e.opening, "name") === name);
-  // Drop only our N binding; the default profile supplies the unbound action and a
-  // key the player chose stays.
-  const legacy = find(LEGACY_CONSOLE);
-  if (legacy && previous.added.includes(LEGACY_CONSOLE)
-    && elements(legacy.body, "Trigger").map(t => t.body.trim()).join() === "N")
-    body = body.slice(0, legacy.start) + body.slice(legacy.end);
+  for (const action of elements(body, "Action").reverse()) {
+    if (attribute(action.opening, "name") === LEGACY_CONSOLE)
+      body = body.slice(0, action.start) + body.slice(action.end);
+  }
   const network = find("ToggleNetworkStats");
   // Give back only the N we removed; a later rebind of the action stays.
   if (previous.removedNetworkN && network && elements(network.body, "Trigger").length === 0) {

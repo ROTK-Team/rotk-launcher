@@ -63,7 +63,7 @@ export interface LaunchRequest {
   config: LauncherConfig;
   identity: PlayerIdentity;
   runtime: RuntimeConfig;
-  /** Launcher UI language; the game and the ROTK social menu follow it. */
+  /** Launcher UI language; the game temporarily remains in English. */
   locale: AppLocale;
   logsRoot: string;
   bundledShimPath: string;
@@ -210,7 +210,7 @@ async function prepareClient(
   await writeFile(configPath, synchronized, "ascii");
   await writeFile(join(root, "steam_persona_name.txt"), `${launchIdentity.displayName}\n`, "utf8");
 
-  await updateUserOptions(root, (options) => synchronizeUserOptions(options, request.locale));
+  await updateUserOptions(root, synchronizeUserOptions);
 
   const battleyePath = join(root, "BattlEye", "BEClient_x64.cfg");
   if (existsSync(battleyePath)) {
@@ -264,8 +264,8 @@ function buildLaunchArguments(
     `CommandQueue:cb_uri=${runtime.gatewayOrigin}/`,
     `CommandQueue:eula_uri=${runtime.gatewayOrigin}/`,
     `LaunchTelemetry:Url=${runtime.gatewayOrigin}/h1z1xx/live/`,
-    // English is the client default: leave a hand-set ClientConfig locale alone.
-    ...(locale === "en" ? [] : [`Internationalization:Locale=${GAME_LOCALE[locale]}`]),
+    // Override only this process, preserving any saved ClientConfig language.
+    `Internationalization:Locale=${GAME_LOCALE[locale]}`,
     "Logging:ConsoleLogLevel=999",
     "Logging:FileLogLevel=999",
     "Logging:LocalLogLevel=999",

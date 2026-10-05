@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "73D6A0FCA5EE4A0AAC04BE49B2440FD26545444BF912FC3E69A5287824C4F230"
-$expectedBytes = 34816
+$expectedHash = "987FA5657408422D984A31F18739AF4514221CF25BE3D5DE31E3A64EDCB54649"
+$expectedBytes = 33792
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()

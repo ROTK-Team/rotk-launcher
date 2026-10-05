@@ -24,18 +24,27 @@ const authKey = "0123456789abcdef0123456789abcdef";
 const localCreateSessionUrl = "http://127.0.0.1:49152/rest/auth/session/create";
 
 describe("UserOptions synchronization", () => {
-  it("makes the social menu language follow the launcher locale", () => {
-    const original = "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=en\n";
-    expect(synchronizeUserOptions(original, "fr")).toBe(
-      "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=fr\n",
+  it("keeps the social menu in English without resetting unrelated options", () => {
+    const original = "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=fr\n";
+    const synchronized = synchronizeUserOptions(original);
+    expect(synchronized).toBe(
+      "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=en\n",
     );
-    expect(synchronizeUserOptions("[Display]\nWidth=1920\n", "en")).toBe(
+    expect(synchronizeUserOptions(synchronized)).toBe(synchronized);
+    expect(synchronizeUserOptions("[Display]\nWidth=1920\n")).toBe(
       "[Display]\nWidth=1920\n\n[UI]\nROTKSocialLanguage=en\n",
     );
   });
 });
 
 describe("ClientConfig synchronization", () => {
+  it.each(["en_us", "fr_fr", "de_de", "zh_cn"])("preserves the saved %s language during the temporary fallback", (locale) => {
+    const original = `[Internationalization]\r\nLocale=${locale}\r\n`;
+    const result = synchronizeClientConfig(original, runtime, localCreateSessionUrl);
+    expect(result).toContain(original);
+    expect(synchronizeClientConfig(result, runtime, localCreateSessionUrl)).toBe(result);
+  });
+
   it("is idempotent and removes stale duplicate directives", () => {
     const original = [
       "sessionid=ffffffffffffffffffffffffffffffff",

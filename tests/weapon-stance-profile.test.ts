@@ -53,7 +53,7 @@ describe("stance binding migration and rollback", () => {
     const next=migrateStanceProfile(custom,true);
     expect(next.text).toBe(custom); expect(next.state.added).toEqual([]);
   });
-  it("unbinds the legacy console N, keeps a chosen console key and gives N back", () => {
+  it("retires the custom console action and restores only an owned network shortcut", () => {
     const legacy=source.replace('<Action name="ToggleNetworkStats"><Trigger>N</Trigger></Action>','<Action name="ToggleNetworkStats"></Action>')
       .replace('</ActionSet>', '<Action name="ToggleWeaponStance" version="1"><Trigger>V</Trigger></Action><Action name="ROTKConsole" version="1"><Trigger>N</Trigger></Action></ActionSet>');
     const state={ added: ["ToggleWeaponStance", "ROTKConsole"], removedNetworkN: true };
@@ -65,7 +65,18 @@ describe("stance binding migration and rollback", () => {
     const rebound=legacy.replace('<Action name="ToggleNetworkStats"></Action>','<Action name="ToggleNetworkStats"><Trigger>F5</Trigger></Action>');
     const kept=migrateStanceProfile(rebound,true,state).text;
     expect(kept).toContain('<Trigger>F5</Trigger>'); expect(kept).not.toContain('<Trigger>N</Trigger>');    const custom=legacy.replace('<Action name="ROTKConsole" version="1"><Trigger>N</Trigger></Action>','<Action name="ROTKConsole" version="1"><Trigger>F6</Trigger></Action>');
-    expect(migrateStanceProfile(custom,true,state).text).toContain('<Action name="ROTKConsole" version="1"><Trigger>F6</Trigger></Action>');
+    expect(migrateStanceProfile(custom,true,state).text).not.toContain('name="ROTKConsole"');
+  });
+  it.each(['N', 'F13', 'F6', 'Tilde', 'Kanji', 'Alt_Right+E', ''])
+  ("removes only the retired console action with key %s", key => {
+    const custom = source.replace('</ActionSet>', `<Action name="ROTKConsole" version="2"><Trigger>${key}</Trigger></Action><Action name="ToggleWeaponStance"><Trigger>B</Trigger></Action></ActionSet>`);
+    const next = migrateStanceProfile(custom, true);
+    expect(next.text).not.toContain('name="ROTKConsole"');
+    expect(next.text).toContain('<Action name="ToggleWeaponStance"><Trigger>B</Trigger></Action>');
+    expect(next.text).toContain('<Action name="ToggleDebugConsole" unbindable="true"><Trigger>Tilde</Trigger></Action>');
+    expect(next.text).toContain('<Action name="ToggleNetworkStats"><Trigger>N</Trigger></Action>');
+    expect(next.text).toContain('<Action name="Sprint"><Trigger>Shift</Trigger></Action>');
+    expect(migrateStanceProfile(next.text, true, next.state)).toEqual(next);
   });
   it("rolls back only owned actions", () => {
     const installed=migrateStanceProfile(source,true);
