@@ -63,7 +63,7 @@ import { collectTpmProof } from "./services/tpm-identity.js";
 import { collectTpmAnchor, enrolTpmAnchor } from "./services/tpm-anchor.js";
 import { tpmBindingMessage } from "../shared/attestation.js";
 import { classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
-import { locateSteamClient } from "./services/steam-locator.js";
+import { H1Z1_STEAM_APP_ID, locateSteamClient } from "./services/steam-locator.js";
 import {
   runtimeConfigFor,
   runtimeConfigList,
@@ -977,6 +977,18 @@ function registerIpc(): void {
         phase = "error";
         await broadcastSnapshot();
         return result;
+      }
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.openSteamInstall,
+    trustedHandler(async (): Promise<OperationResult> => {
+      try {
+        await shell.openExternal(`steam://install/${H1Z1_STEAM_APP_ID}`);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: MAIN_COPY[currentLocale].steamUnavailable };
       }
     }),
   );

@@ -145,6 +145,8 @@ export interface Copy {
     detectedBadge: string;
     recommendedBadge: string;
     subfolderHint: string;
+    noClientFound: string;
+    installWithSteam: string;
     choose: string;
     cancelCopy: string;
     createInstall: string;
@@ -332,6 +334,8 @@ const COPY: Record<AppLocale, Copy> = {
       detectedBadge: "AUTO-DETECTED",
       recommendedBadge: "RECOMMENDED",
       subfolderHint: "A ROTK subfolder is created automatically in the chosen location — no need to create it yourself.",
+      noClientFound: "No H1Z1 client was found. Install it with Steam (listed as Z1 Battle Royale), then come back here.",
+      installWithSteam: "INSTALL H1Z1 WITH STEAM",
       choose: "CHOOSE",
       cancelCopy: "CANCEL",
       createInstall: "CREATE SEPARATE COPY",
@@ -540,6 +544,8 @@ const COPY: Record<AppLocale, Copy> = {
       detectedBadge: "DÉTECTÉ AUTO",
       recommendedBadge: "RECOMMANDÉ",
       subfolderHint: "Un sous-dossier ROTK est créé automatiquement dans l’emplacement choisi — inutile de le créer toi-même.",
+      noClientFound: "Aucun client H1Z1 trouvé. Installe-le avec Steam (sous le nom Z1 Battle Royale), puis reviens ici.",
+      installWithSteam: "INSTALLER H1Z1 AVEC STEAM",
       choose: "CHOISIR",
       cancelCopy: "ANNULER",
       createInstall: "CRÉER UNE COPIE SÉPARÉE",
@@ -748,6 +754,8 @@ const COPY: Record<AppLocale, Copy> = {
       detectedBadge: "自动检测",
       recommendedBadge: "推荐",
       subfolderHint: "会在所选位置自动创建 ROTK 子文件夹，无需手动创建。",
+      noClientFound: "未找到 H1Z1 游戏文件。请先通过 Steam 安装（名称为 Z1 Battle Royale），然后返回这里。",
+      installWithSteam: "通过 STEAM 安装 H1Z1",
       choose: "选择",
       cancelCopy: "取消",
       createInstall: "创建独立副本",

@@ -139,6 +139,51 @@ describe("Steam client discovery", () => {
     expect(located).toBeNull();
   });
 
+  it("uses the folder named by the Steam app manifest", async () => {
+    const located = await locateSteamClient(
+      dependencies({
+        registrySteamPath: STEAM_ROOT,
+        existingDirectories: [STEAM_ROOT],
+        vdfByPath: {
+          [join(STEAM_ROOT, "steamapps", "appmanifest_433850.acf")]:
+            '"AppState"\n{\n\t"appid"\t\t"433850"\n\t"StateFlags"\t\t"4"\n\t"installdir"\t\t"Z1BR Renamed"\n}',
+        },
+        validClients: [join(STEAM_ROOT, "steamapps", "common", "Z1BR Renamed")],
+      }),
+    );
+    expect(located).toBe(normalize(join(STEAM_ROOT, "steamapps", "common", "Z1BR Renamed")));
+  });
+
+  it("skips a library whose app manifest is not fully installed", async () => {
+    const located = await locateSteamClient(
+      dependencies({
+        registrySteamPath: STEAM_ROOT,
+        existingDirectories: [STEAM_ROOT],
+        vdfByPath: {
+          [join(STEAM_ROOT, "steamapps", "appmanifest_433850.acf")]:
+            '"AppState"\n{\n\t"StateFlags"\t\t"1026"\n\t"installdir"\t\t"H1Z1"\n}',
+        },
+        validClients: [join(STEAM_ROOT, "steamapps", "common", "H1Z1")],
+      }),
+    );
+    expect(located).toBeNull();
+  });
+
+  it("ignores a manifest installdir that is not a plain folder name", async () => {
+    const located = await locateSteamClient(
+      dependencies({
+        registrySteamPath: STEAM_ROOT,
+        existingDirectories: [STEAM_ROOT],
+        vdfByPath: {
+          [join(STEAM_ROOT, "steamapps", "appmanifest_433850.acf")]:
+            '"AppState"\n{\n\t"StateFlags"\t\t"4"\n\t"installdir"\t\t"..\\Elsewhere"\n}',
+        },
+        validClients: [join(STEAM_ROOT, "steamapps", "Elsewhere")],
+      }),
+    );
+    expect(located).toBeNull();
+  });
+
   it("returns null when no candidate passes the client validation", async () => {
     const located = await locateSteamClient(
       dependencies({
