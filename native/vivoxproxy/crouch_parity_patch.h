@@ -5,8 +5,9 @@
  * Runtime-only crouch parity probe/patch support.
  *
  * The feature is deliberately gated by rotk-crouch-parity.ini next to the
- * proxy.  It never edits H1Z1.exe on disk.  Every runtime mutation must first
- * match the exact BR1315 NodeDef/code signatures documented here.
+ * proxy.  It never edits H1Z1.exe on disk.  Runtime mutations target the
+ * pinned BR1315 image (timestamp/size below); target code is not compared
+ * with its original bytes.
  */
 
 #include <math.h>
@@ -266,9 +267,7 @@ static BOOL crouch_validate_h1z1_image(uintptr_t *image_base) {
     return TRUE;
 }
 
-static BOOL crouch_bytes_match(const void *address,
-                               const uint8_t *expected,
-                               size_t length) {
+static BOOL crouch_code_readable(const void *address, size_t length) {
     MEMORY_BASIC_INFORMATION region;
     uintptr_t start = (uintptr_t)address;
     uintptr_t region_end;
@@ -279,10 +278,7 @@ static BOOL crouch_bytes_match(const void *address,
         return FALSE;
     }
     region_end = (uintptr_t)region.BaseAddress + (uintptr_t)region.RegionSize;
-    if (start > region_end || length > (size_t)(region_end - start)) {
-        return FALSE;
-    }
-    return memcmp(address, expected, length) == 0;
+    return start <= region_end && length <= (size_t)(region_end - start);
 }
 
 static void crouch_build_absolute_jump(uint8_t *buffer,
@@ -847,29 +843,16 @@ static void crouch_scale_pitch_direct_hook(void *camera,
 }
 
 static int crouch_install_runtime_patch(void) {
-    static const uint8_t blend_signature[32] = {
-        0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x18, 0x57,
-        0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57,
-        0x48, 0x83, 0xec, 0x50, 0x80, 0xbc, 0x24, 0xc8,
-        0x00, 0x00, 0x00, 0x00, 0x49, 0x8b, 0xd8, 0xf3
-    };
-    static const uint8_t scale_pitch_signature[16] = {
-        0x48, 0x8b, 0x05, 0x81, 0x65, 0x4a, 0x03, 0x48,
-        0x8b, 0xd1, 0x45, 0x33, 0xc9, 0x0f, 0x28, 0xd1
-    };
     uint8_t *blend_target = (uint8_t *)(void *)(
         g_crouch_image_base + CROUCH_BLEND_WEIGHT_RVA);
     uint8_t *scale_pitch_target = (uint8_t *)(void *)(
         g_crouch_image_base + CROUCH_SCALE_PITCH_RVA);
+    uint8_t scale_pitch_saved[16];
     void *trampoline = NULL;
 
-    if (!crouch_bytes_match(
-            blend_target, blend_signature, sizeof(blend_signature)) ||
+    if (!crouch_code_readable(blend_target, 16U) ||
         (g_crouch_enable_camera &&
-         !crouch_bytes_match(
-             scale_pitch_target,
-             scale_pitch_signature,
-             sizeof(scale_pitch_signature)))) {
+         !crouch_code_readable(scale_pitch_target, sizeof(scale_pitch_saved)))) {
         return 0;
     }
     if (!QueryPerformanceFrequency(&g_crouch_qpc_frequency) ||
@@ -885,6 +868,7 @@ static int crouch_install_runtime_patch(void) {
     }
     g_crouch_original_blend_trampoline = trampoline;
     if (g_crouch_enable_camera) {
+        memcpy(scale_pitch_saved, scale_pitch_target, sizeof(scale_pitch_saved));
         if (!crouch_commit_jump(
                 scale_pitch_target,
                 16U,
@@ -904,8 +888,8 @@ static int crouch_install_runtime_patch(void) {
         if (g_crouch_enable_camera) {
             (void)crouch_write_code(
                 scale_pitch_target,
-                scale_pitch_signature,
-                sizeof(scale_pitch_signature));
+                scale_pitch_saved,
+                sizeof(scale_pitch_saved));
         }
         g_crouch_original_blend_trampoline = NULL;
         VirtualFree(trampoline, 0U, MEM_RELEASE);

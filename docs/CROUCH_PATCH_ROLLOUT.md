@@ -19,9 +19,10 @@ The supported client is pinned to:
 - Vivox+crouch proxy SHA-256:
   `8AB1F2379C61B81391492EDB84875610FFBE4D3A8D97A180C73355D989AC27A2`.
 
-The native hook also validates the BR1315 PE timestamp, image size and target
-machine-code signatures before modifying memory. An unknown client build is
-rejected by the launcher before any client file is changed.
+The native hook also validates the BR1315 PE timestamp and image size before
+modifying memory; target code is not compared with its original bytes. An
+unknown client build is rejected by the launcher before any client file is
+changed.
 
 ## Enforced client state
 

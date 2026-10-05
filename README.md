@@ -65,8 +65,8 @@ isolé, avant l’attestation et une seconde fois juste avant le démarrage du j
 Le lancement échoue si cet état ne peut pas être garanti.
 
 Le hook ne modifie pas `H1Z1.exe` sur disque. Il ne s’active qu’en mémoire sur
-le build BR1315 `1.0.326.439939`, après validation du SHA-256 du fichier, de
-l’en-tête PE et des signatures machine ciblées. Le hook caméra expérimental
+le build BR1315 `1.0.326.439939`, après validation du SHA-256 du fichier et de
+l’en-tête PE. Le hook caméra expérimental
 reste désactivé : seul le poids de pose crouch validé est remplacé afin de
 préserver les événements Morpheme utilisés par l’ADS.
 
