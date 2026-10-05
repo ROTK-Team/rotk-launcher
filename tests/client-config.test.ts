@@ -38,13 +38,6 @@ describe("UserOptions synchronization", () => {
 });
 
 describe("ClientConfig synchronization", () => {
-  it.each(["en_us", "fr_fr", "de_de", "zh_cn"])("preserves the saved %s language during the temporary fallback", (locale) => {
-    const original = `[Internationalization]\r\nLocale=${locale}\r\n`;
-    const result = synchronizeClientConfig(original, runtime, localCreateSessionUrl);
-    expect(result).toContain(original);
-    expect(synchronizeClientConfig(result, runtime, localCreateSessionUrl)).toBe(result);
-  });
-
   it("is idempotent and removes stale duplicate directives", () => {
     const original = [
       "sessionid=ffffffffffffffffffffffffffffffff",

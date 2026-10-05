@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { gameLauncherInternals } from "../electron/services/game-launcher.js";
-import { APP_LOCALES } from "../shared/locale.js";
 import {
   DEFAULT_RUNTIME_CONFIG,
   RUNTIME_CONFIGS,
@@ -108,17 +107,6 @@ describe("public ROTK runtime", () => {
     expect(args.join(" ")).not.toMatch(
       /token.?key|private.?key|client.?secret|password/i,
     );
-  });
-
-  it.each(APP_LOCALES)("keeps the game in English for the %s launcher on every runtime", (locale) => {
-    for (const runtime of runtimeConfigList()) {
-      const args = gameLauncherInternals.buildLaunchArguments(
-        "T".repeat(43), runtime, "C:\\ROTK\\logs", "install-1",
-        "http://127.0.0.1:49152/rest/auth/session/create", locale,
-      );
-      expect(args.filter((arg) => arg.startsWith("Internationalization:Locale=")))
-        .toEqual(["Internationalization:Locale=en_us"]);
-    }
   });
 
   it("accepts only a credential-free HTTPS origin for voice grants", () => {

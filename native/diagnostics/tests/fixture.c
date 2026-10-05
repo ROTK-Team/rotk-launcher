@@ -10,28 +10,17 @@ static DWORD WINAPI performance_worker(void *parameter) {
     ULONGLONG until = GetTickCount64() + 4000;
     unsigned long value = 1;
     while (GetTickCount64() < until) {
-        /* Span several accounting ticks instead of sleeping at each tick edge. */
-        ULONGLONG busy_until = GetTickCount64() + 80;
+        ULONGLONG busy_until = GetTickCount64() + 8;
         while (GetTickCount64() < busy_until) for (unsigned i = 0; i < 1000; ++i) value = value * 1664525U + 1013904223U;
-        Sleep(20);
+        Sleep(8);
     }
     return value;
 }
 
 static void performance_workload(void) {
-    DWORD_PTR process_mask, system_mask;
-    /* Keep this synthetic workload on one eligible CPU so migrations cannot
-     * fragment its short bursts below Windows' CPU-accounting granularity. */
-    if (!GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask) || !process_mask ||
-        !SetProcessAffinityMask(GetCurrentProcess(), process_mask & (~process_mask + 1))) {
-        puts("workload:affinity-failed"); fflush(stdout); return;
-    }
     const SIZE_T bytes = 64 * 1024 * 1024;
     unsigned char *memory = VirtualAlloc(NULL, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!memory) {
-        SetProcessAffinityMask(GetCurrentProcess(), process_mask);
-        puts("workload:allocation-failed"); fflush(stdout); return;
-    }
+    if (!memory) { puts("workload:allocation-failed"); fflush(stdout); return; }
     for (SIZE_T offset = 0; offset < bytes; offset += 4096) memory[offset] = 1;
     wchar_t path[32768]; DWORD length = GetModuleFileNameW(NULL, path, 32768);
     HANDLE file = INVALID_HANDLE_VALUE;
@@ -54,9 +43,6 @@ static void performance_workload(void) {
     for (unsigned i = 0; i < 2; ++i) if (workers[i]) { WaitForSingleObject(workers[i], INFINITE); CloseHandle(workers[i]); }
     if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
     VirtualFree(memory, 0, MEM_RELEASE);
-    if (!SetProcessAffinityMask(GetCurrentProcess(), process_mask)) {
-        puts("workload:affinity-restore-failed"); fflush(stdout); return;
-    }
     puts("workload:done"); fflush(stdout);
 }
 

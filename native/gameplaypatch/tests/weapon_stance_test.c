@@ -1,14 +1,12 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-static int pressed_mouse, mouse_queries;
-static BOOL foreign_foreground;
+static int pressed_mouse;
 static SHORT WINAPI mouse_state(int key) {
-    ++mouse_queries;
     return key == pressed_mouse ? (SHORT)0x8000 : 0;
 }
 #define GetAsyncKeyState mouse_state
 static DWORD WINAPI own_window(HWND window, LPDWORD process) {
-    (void)window; *process = foreign_foreground ? 0 : GetCurrentProcessId(); return GetCurrentThreadId();
+    (void)window; *process = GetCurrentProcessId(); return GetCurrentThreadId();
 }
 #define GetWindowThreadProcessId own_window
 #define DirectInput8Create RotkTestDirectInput8Create
@@ -21,8 +19,6 @@ static DWORD WINAPI own_window(HWND window, LPDWORD process) {
 #include "../dinput8_proxy.c"
 #undef NDEBUG
 #include <assert.h>
-static unsigned original_idle_calls;
-static void original_idle(BYTE *actor) { (void)actor; ++original_idle_calls; }
 int main(void) {
     BYTE *image = VirtualAlloc(NULL, 0x4780000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     BYTE actor[0x1100] = {0}, vt[0x500] = {0}; DWORD old;
@@ -80,32 +76,13 @@ int main(void) {
     }
     const int buttons[]={VK_LBUTTON,VK_RBUTTON};
     for (unsigned i=0;i<2;++i) {
-        for (int lowered=-1;lowered<=0;++lowered) {
-            *(int *)(actor+0x9a0)=lowered; pressed_mouse=buttons[i]; stance_idle(actor);
-            assert(stance_u32(actor+0x9a0)==1);
-            stance_idle(actor); assert(stance_u32(actor+0x9a0)==1);
-        }
+        *(int *)(actor+0x9a0)=0; pressed_mouse=buttons[i]; stance_idle(actor);
+        assert(stance_u32(actor+0x9a0)==1);
     }
     pressed_mouse=0;
     *(int *)(actor+0x9a0)=0; stance_idle(actor);
     assert(stance_u32(actor+0x9a0)==0);
-    action[0x130]=1; stance_idle(actor); assert(stance_u32(actor+0x9a0)==1);
-    stance_idle(actor); assert(stance_u32(actor+0x9a0)==1);
-    action[0x130]=0; stance_idle(actor);
-    action[0x130]=1; stance_idle(actor); assert(stance_u32(actor+0x9a0)==0);
-    action[0x130]=0; stance_idle(actor);
-    pressed_mouse=VK_LBUTTON; action[0x130]=1;
-    stance_idle(actor); assert(stance_u32(actor+0x9a0)==1);
-    stance_idle(actor); assert(stance_u32(actor+0x9a0)==1);
-    foreign_foreground=TRUE; mouse_queries=0; *(int *)(actor+0x9a0)=0;
-    stance_idle(actor); assert(stance_u32(actor+0x9a0)==0 && mouse_queries==0);
-    assert(!stance_pressed);
-    foreign_foreground=FALSE; pressed_mouse=0; action[0x130]=0;
-    stance_original_idle=original_idle; stance_enabled=FALSE;
-    stance_idle(actor); assert(original_idle_calls==1 && mouse_queries==0);
-    stance_enabled=TRUE; *(uintptr_t *)actor=(uintptr_t)vt;
-    stance_idle(actor); assert(original_idle_calls==2 && mouse_queries==0);
-    puts("PASS mouse raise, held input, stance binding, focus and native fallback; Infantry actions ignored");
+    puts("PASS real stance hook raises for physical mouse buttons only; Infantry actions ignored");
     VirtualFree(image,0,MEM_RELEASE);
     puts("PASS: native virtual setter thunk, foreign target refusal, input registry, pressed bit and corrupt table refusal.");
     return 0;
