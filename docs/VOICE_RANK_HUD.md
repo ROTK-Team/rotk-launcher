@@ -6,10 +6,12 @@ zero erases the badge, including the row's fallback after leaving visual range.
 
 The existing Vivox compatibility proxy now preserves Voice.Identity as the HUD
 rank source. At the first `vx_get_message`, after client unpacking and outside
-the loader phase, it checks the complete 106-byte getter region and changes
-only two branch opcodes. Page permissions are restored and the instruction
-cache is flushed. The runtime log records installation or unsupported code;
-unknown signatures leave the client untouched and voice audio continues.
+the loader phase, it changes only two branch opcodes in the getter. The client
+build is pinned by the launcher, so the getter is not compared with its
+original bytes; the patch is skipped only when both branches are already
+installed. Page permissions are restored and the instruction cache is flushed.
+The runtime log records installation, or an unsupported host whose image or
+memory does not hold the getter; voice audio continues either way.
 The executable on disk, actor state, killfeed, crouch and microphone logic are
 unchanged. The server companion loads the display badge only in public Solo
 and its waiting lobby. Practice, Hosted and caster modes remain unranked;
@@ -27,9 +29,10 @@ npx vitest run tests/vivox-client.test.ts tests/native-vivox-runtime.test.ts
 npm run typecheck
 ```
 
-The native C test checks every signature byte, refuses a partially changed
-getter, verifies only two bytes change, checks idempotence, original page
-protection and unsupported-host initialization. Its ignored output
+The native C test installs the patch whatever the other 104 getter bytes
+hold, completes a partially changed getter, verifies only two bytes change,
+checks idempotence, original page protection and unsupported-host
+initialization. Its ignored output
 `native/vivoxproxy/dist/tests/voice_rank_patch_test.exe.patched-code.bin` can be
 passed to the server's `prove-native-voice-ranks1315.py --hud-patch` harness.
 That harness executes the original client x64, reproduces the loss first, then

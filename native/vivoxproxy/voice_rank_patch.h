@@ -6,45 +6,26 @@
  * local/lightweight actor's zero. Only the two conditional branches change;
  * names, audio, actor state and the kill-feed data source are untouched.
  * Executed at the first Vivox poll, after the client has unpacked its code.
+ * The launcher pins the client build, so the getter is not compared with its
+ * original bytes: only the two branch opcodes are read and written.
  */
 #define VOICE_RANK_RVA 0x01ae9d4eU
 #define VOICE_RANK_TIER_BRANCH 29U
 #define VOICE_RANK_SUBTIER_BRANCH 82U
-static const unsigned char voice_rank_original[] = {
-    0x48,0x8b,0x47,0x10,0x48,0x89,0x44,0x24,0x20,0x48,0x8d,0x54,0x24,0x20,0x48,0x8b,
-    0x0d,0x2d,0x35,0xc8,0x02,0xe8,0x1b,0x7c,0x51,0xfe,0x48,0x85,0xc0,0x74,0x0d,0x33,
-    0xd2,0x48,0x8b,0xc8,0xe8,0x68,0x60,0x52,0xfe,0x89,0x47,0x78,0x44,0x8b,0x47,0x78,
-    0xe9,0xd0,0xfe,0xff,0xff,0x48,0x8b,0x47,0x10,0x48,0x89,0x44,0x24,0x28,0x48,0x8d,
-    0x54,0x24,0x28,0x48,0x8b,0x0d,0xf8,0x34,0xc8,0x02,0xe8,0xe6,0x7b,0x51,0xfe,0x48,
-    0x85,0xc0,0x74,0x0d,0x33,0xd2,0x48,0x8b,0xc8,0xe8,0x33,0xcb,0x5a,0xfe,0x89,0x47,
-    0x7c,0x44,0x8b,0x47,0x7c,0xe9,0x9b,0xfe,0xff,0xff
-};
+#define VOICE_RANK_SPAN (VOICE_RANK_SUBTIER_BRANCH + 1U)
 
-/* 0: original, 1: already installed, -1: unknown (including partial patches). */
-static int voice_rank_code_state(const unsigned char *code) {
-    unsigned char normalized[sizeof(voice_rank_original)];
-    int installed = code[VOICE_RANK_TIER_BRANCH] == 0xeb &&
-                    code[VOICE_RANK_SUBTIER_BRANCH] == 0xeb;
-    memcpy(normalized, code, sizeof(normalized));
-    if (installed) {
-        normalized[VOICE_RANK_TIER_BRANCH] = 0x74;
-        normalized[VOICE_RANK_SUBTIER_BRANCH] = 0x74;
-    }
-    return memcmp(normalized, voice_rank_original, sizeof(normalized)) == 0
-        ? installed : -1;
-}
-
+/* 1: installed (now or already), -2: protection/cache failure. */
 static int voice_rank_patch_code(unsigned char *code) {
     DWORD old_protection, ignored;
-    int state = voice_rank_code_state(code);
-    if (state != 0) return state;
-    if (!VirtualProtect(code, sizeof(voice_rank_original), PAGE_EXECUTE_READWRITE,
+    if (code[VOICE_RANK_TIER_BRANCH] == 0xeb &&
+        code[VOICE_RANK_SUBTIER_BRANCH] == 0xeb) return 1;
+    if (!VirtualProtect(code, VOICE_RANK_SPAN, PAGE_EXECUTE_READWRITE,
                         &old_protection)) return -2;
     code[VOICE_RANK_TIER_BRANCH] = 0xeb;
     code[VOICE_RANK_SUBTIER_BRANCH] = 0xeb;
     BOOL flushed = FlushInstructionCache(GetCurrentProcess(), code,
-                                         sizeof(voice_rank_original));
-    BOOL restored = VirtualProtect(code, sizeof(voice_rank_original),
+                                         VOICE_RANK_SPAN);
+    BOOL restored = VirtualProtect(code, VOICE_RANK_SPAN,
                                     old_protection, &ignored);
     return flushed && restored ? 1 : -2;
 }
@@ -63,7 +44,7 @@ static BOOL CALLBACK voice_rank_initialize(PINIT_ONCE once, PVOID parameter,
             if (nt->Signature == IMAGE_NT_SIGNATURE &&
                 nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
                 nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC &&
-                nt->OptionalHeader.SizeOfImage >= VOICE_RANK_RVA + sizeof(voice_rank_original)) {
+                nt->OptionalHeader.SizeOfImage >= VOICE_RANK_RVA + VOICE_RANK_SPAN) {
                 unsigned char *code = base + VOICE_RANK_RVA;
                 if (VirtualQuery(code, &memory, sizeof(memory)) == sizeof(memory) &&
                     memory.State == MEM_COMMIT && memory.Type == MEM_IMAGE &&
@@ -71,7 +52,7 @@ static BOOL CALLBACK voice_rank_initialize(PINIT_ONCE once, PVOID parameter,
                     (memory.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
                                        PAGE_EXECUTE_WRITECOPY)) &&
                     (uintptr_t)memory.BaseAddress + memory.RegionSize >=
-                        (uintptr_t)code + sizeof(voice_rank_original)) {
+                        (uintptr_t)code + VOICE_RANK_SPAN) {
                     result = voice_rank_patch_code(code);
                 }
             }
