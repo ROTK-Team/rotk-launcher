@@ -86,8 +86,11 @@ export interface LaunchRequest {
   attest?: () => Promise<AttestationOutcome>;
   /** This launcher's version, sent so the server's update gate can act. */
   launcherVersion?: string;
-  /** Raw hardware fingerprint; the server hashes it (see machine-identity.ts). */
-  hwid?: Record<string, string>;
+  /**
+   * Raw hardware fingerprint for a launch that could not attest (an attested
+   * launch already carries one). Only called when needed: it runs PowerShell.
+   */
+  fallbackHwid?: () => Promise<Record<string, string>>;
   /** Best-effort telemetry only. Diagnostic failures never control the game lifecycle. */
   diagnostics?: GameLaunchDiagnostics;
   onExit(exitCode: number | null): void;
@@ -112,16 +115,18 @@ function diagnosticCallback(callback: (() => void) | undefined): void {
  * enforced refusal can name the real cause. The version and HWID ride along
  * regardless, so the update gate and HWID capture work even with no attestation.
  */
-function ticketRequestOptions(
+async function ticketRequestOptions(
   request: LaunchRequest,
   outcome: AttestationOutcome,
-): { attestation?: unknown; attestationUnavailableReason?: string; launcherVersion?: string; hwid?: Record<string, string> } {
+): Promise<{ attestation?: unknown; attestationUnavailableReason?: string; launcherVersion?: string; hwid?: Record<string, string> }> {
   const base: { launcherVersion?: string; hwid?: Record<string, string> } = {};
   if (request.launcherVersion) base.launcherVersion = request.launcherVersion;
   // An attested launch answers the slots its challenge named, and its TPM proof
   // is bound to that exact vector; the fingerprint read before the launch is
   // the fallback for a launch that could not attest.
-  const hwid = outcome.status === "attested" && outcome.hwid !== undefined ? outcome.hwid : request.hwid;
+  const hwid = outcome.status === "attested" && outcome.hwid !== undefined
+    ? outcome.hwid
+    : await request.fallbackHwid?.().catch(() => ({}));
   if (hwid && Object.keys(hwid).length > 0) base.hwid = hwid;
   if (outcome.status === "attested") return { ...base, attestation: outcome.block };
   if (outcome.status === "unavailable") {
@@ -375,7 +380,7 @@ export class GameLauncher {
     let launchIdentity = await createLaunchTicket(
       request.identity.playerKey,
       request.runtime.launchTicketUrl,
-      ticketRequestOptions(request, outcome),
+      await ticketRequestOptions(request, outcome),
     );
     let sessionGateway = await startLocalSessionGateway(launchIdentity.ticket);
 
@@ -407,7 +412,7 @@ export class GameLauncher {
         launchIdentity = await createLaunchTicket(
           request.identity.playerKey,
           request.runtime.launchTicketUrl,
-          ticketRequestOptions(request, refreshed),
+          await ticketRequestOptions(request, refreshed),
         );
         sessionGateway = await startLocalSessionGateway(launchIdentity.ticket);
         await prepareClient(
