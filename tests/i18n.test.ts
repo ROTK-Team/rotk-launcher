@@ -24,6 +24,22 @@ describe("launcher locales", () => {
       .not.toBe("Unable to reach the ROTK account service");
   });
 
+  it.each(APP_LOCALES)("blames the clock only for certificate dates in %s", (locale) => {
+    const clockHint = { en: "date and time", fr: "la date et l’heure", zh: "日期和时间" }[locale];
+    const scanningHint = { en: "HTTPS scanning", fr: "l’analyse HTTPS", zh: "HTTPS 扫描" }[locale];
+    const localize = (code: string) => localizeServiceError(`Unable to reach the ROTK account service (${code})`, locale);
+    for (const code of ["CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID"]) {
+      expect(localize(code)).toContain(clockHint);
+      expect(localize(code)).not.toContain(scanningHint);
+      expect(localize(code).endsWith(`(${code})`)).toBe(true);
+    }
+    for (const code of ["SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "DEPTH_ZERO_SELF_SIGNED_CERT", "ERR_TLS_CERT_ALTNAME_INVALID"]) {
+      expect(localize(code)).toContain(scanningHint);
+      expect(localize(code)).not.toContain(clockHint);
+      expect(localize(code).endsWith(`(${code})`)).toBe(true);
+    }
+  });
+
   it("defaults unknown or missing preferences to English", () => {
     expect(normalizeAppLocale(undefined)).toBe("en");
     expect(normalizeAppLocale("de")).toBe("en");

@@ -291,6 +291,11 @@ const ACCOUNT_CONNECTION_ERRORS = {
     fr: "Impossible de vérifier le certificat du service de compte ROTK. Vérifie la date et l’heure de ton ordinateur.",
     zh: "无法验证 ROTK 账号服务的证书，请检查电脑的日期和时间。",
   },
+  interception: {
+    en: "Unable to verify the ROTK account service certificate. Your antivirus or a proxy may be inspecting secure connections: turn off HTTPS scanning for the launcher or check your proxy settings.",
+    fr: "Impossible de vérifier le certificat du service de compte ROTK. Ton antivirus ou un proxy inspecte peut-être les connexions sécurisées : désactive l’analyse HTTPS pour le launcher ou vérifie tes paramètres de proxy.",
+    zh: "无法验证 ROTK 账号服务的证书。杀毒软件或代理可能正在检查加密连接，请为启动器关闭 HTTPS 扫描，或检查代理设置。",
+  },
   response: {
     en: "The ROTK account service returned an invalid response. Please try again later.",
     fr: "Le service de compte ROTK a renvoyé une réponse invalide. Réessaie plus tard.",
@@ -307,7 +312,10 @@ export function localizeServiceError(message: string, locale: AppLocale): string
     else if (["timeout", "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"].includes(code)) kind = "timeout";
     else if (["ENOTFOUND", "EAI_AGAIN"].includes(code)) kind = "dns";
     else if (["ECONNRESET", "EPIPE", "UND_ERR_SOCKET"].includes(code)) kind = "interrupted";
-    else if (["CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID", "DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "ERR_TLS_CERT_ALTNAME_INVALID"].includes(code)) kind = "certificate";
+    else if (["CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID"].includes(code)) kind = "certificate";
+    // Node trusts only its bundled roots, so an antivirus or proxy that
+    // re-signs HTTPS fails here; the clock only affects the dates above.
+    else if (["DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "ERR_TLS_CERT_ALTNAME_INVALID"].includes(code)) kind = "interception";
     return ACCOUNT_CONNECTION_ERRORS[kind][locale] + (code ? ` (${code})` : "");
   }
   if (locale === "fr") return FRENCH_ERRORS.get(message) ?? message;
