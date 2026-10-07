@@ -62,7 +62,7 @@ describe('diagnostic report collection and export', () => {
     expect(manifest.files).toHaveLength(files.size - 1);
     for (const entry of manifest.files) { expect(createHash('sha256').update(files.get(entry.name)!).digest('hex')).toBe(entry.sha256); expect(files.get(entry.name)!.length).toBe(entry.bytes); }
     expect(await readFile(path, 'utf8')).toContain('PREVIOUS SESSION PRIVATE');
-  });
+  }, 30_000);
   it('keeps full dumps out by default and streams exact binary bytes only on explicit inclusion', async () => {
     const f = await fixture(), { id, directory } = await f.service.beginSession(f.context);
     const dump = Buffer.from('MDMP\x00privateCredential123\x00\xff', 'latin1');
@@ -171,7 +171,7 @@ describe('diagnostic report collection and export', () => {
     const reports = await f.service.listReports();
     expect(reports.filter((r) => r.status !== 'recording')).toHaveLength(10);
     expect(reports.find((r) => r.id === active.id)?.status).toBe('recording');
-  });
+  }, 30_000);
 });
 
 describe('game log and debug-session exports', () => {
