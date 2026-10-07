@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, stat } from "node:fs/promises";
-import { join, basename, dirname, resolve, sep } from "node:path";
+import { join, basename, dirname, parse, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -1183,6 +1183,7 @@ function registerIpc(): void {
       if (gameLauncher.isRunning() || phase === "launching" || phase === "running") {
         return { ok: false, error: MAIN_COPY[currentLocale].update.gameRunning };
       }
+      if (installAbortController) return { ok: false, error: MAIN_COPY[currentLocale].installationInProgress };
       const failure = launcherUpdate.install();
       if (!failure) return { ok: true };
       return { ok: false, error: MAIN_COPY[currentLocale].update[failure] };
@@ -1384,12 +1385,16 @@ async function initialize(): Promise<void> {
   assetSyncPackVersion = assetState?.packVersion ?? null;
   assetSyncLastAt = assetState?.syncedAt ?? null;
   if (config.installation) {
+    phase = "ready";
     try {
       await validateInstalledClient(config.installation);
-      phase = "ready";
     } catch (error) {
-      phase = "error";
       lastErrorRaw = rawErrorMessage(error);
+      // A drive not mounted yet or a locked file can clear up: Play checks
+      // again. A damaged installation sends the player to the setup panel.
+      const driveReady = await stat(parse(config.installation.root).root).then(() => true, () => false);
+      const systemError = typeof (error as NodeJS.ErrnoException | null)?.code === "string";
+      if (driveReady && !systemError) phase = "error";
     }
   }
   startupLog.mark("installation-checked", `phase=${phase}`);
@@ -1504,7 +1509,6 @@ process.on("uncaughtException", (error) => {
   startupLog.mark("uncaught-exception", error.message);
   void diagnostics?.recordLauncherError("launcher_uncaught_exception", error).catch(() => undefined);
   lastErrorRaw = `Erreur launcher ${randomUUID().slice(0, 8)} : ${error.message}`;
-  phase = "error";
   void broadcastSnapshot();
 });
 
