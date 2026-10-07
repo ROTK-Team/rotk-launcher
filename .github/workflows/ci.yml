@@ -29,6 +29,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Vérifier la réutilisation des installers préparés
+        run: python -m unittest discover -s scripts -p 'test_reuse_release.py' -v
+
       - name: Installer Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
