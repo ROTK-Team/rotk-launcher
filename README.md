@@ -55,6 +55,20 @@ Une installation terminée est mémorisée dans `%APPDATA%\ROTK Launcher\config.
 
 La branche `new-server` cible le serveur GAME 2 ROTK `162.19.94.95` et ses listeners login `20042` à `20045`. Le futur manifeste runtime HTTPS signé remplacera cette configuration bornée sans exposer d’arguments arbitraires au renderer.
 
+## Présence Discord
+
+Pendant une session lancée depuis le launcher, Discord peut afficher
+**ROTK: Return Of the Kill**, le logo actuel, le temps de jeu et les boutons
+**Website** (`https://rotk.app`) et **Discord** (`https://discord.gg/JTr9NHTmCU`).
+L'application Discord de bureau doit être ouverte et le joueur doit autoriser
+le partage de son activité dans Discord. Aucun compte lié ni token n'est requis.
+La présence s'arrête avec le processus du jeu, reste active si seule la fenêtre
+du launcher est fermée, et se reconnecte si Discord démarre ou redémarre ensuite.
+Une panne de Discord n'empêche jamais le lancement du jeu.
+
+L'application Discord publique est `1557698200842805348`. Le nom, le logo HTTPS
+et les deux liens sont définis dans `electron/services/discord-presence.ts`.
+
 ## Patch crouch obligatoire
 
 Le launcher 1.4.2 déploie le hook crouch ADS-safe dans son proxy
