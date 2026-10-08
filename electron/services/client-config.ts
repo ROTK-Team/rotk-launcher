@@ -96,13 +96,10 @@ export function synchronizeClientConfig(
   return synchronized;
 }
 
-/**
- * Temporarily keep every launcher language on the English game assets until
- * the translated HUD has been validated. Launcher UI translations stay enabled.
- */
-export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "en_us", zh: "en_us" };
+/** Match the Chinese launcher option to the published Chinese game locale. */
+export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "en_us", zh: "zh_cn" };
 
-/** Keep the social menu consistent with the temporary English game locale. */
+/** Keep the custom social menu in English until its translations are validated. */
 export function synchronizeUserOptions(config: string): string {
   return upsertIniDirective(config, {
     section: "UI",
