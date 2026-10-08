@@ -9,3 +9,8 @@ $test = Join-Path $dist 'menu-duo-test.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Native menu test compilation failed' }
 & $test
 if ($LASTEXITCODE -ne 0) { throw 'Native menu test failed' }
+$trioTest = Join-Path $dist 'menu-trio-test.exe'
+& $zig cc -target x86_64-windows-gnu -O2 -DWIN32_LEAN_AND_MEAN -o $trioTest (Join-Path $PSScriptRoot 'tests/menu_trio_test.c')
+if ($LASTEXITCODE -ne 0) { throw 'Native Trio menu test compilation failed' }
+& $trioTest
+if ($LASTEXITCODE -ne 0) { throw 'Native Trio menu test failed' }

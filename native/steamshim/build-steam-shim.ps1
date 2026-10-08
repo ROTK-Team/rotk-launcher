@@ -143,7 +143,12 @@ finally {
     $env:TMP = $previousTmp
 
     if (Test-Path -LiteralPath $tmpDir) {
-        Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        $resolvedTemp = [System.IO.Path]::GetFullPath($tmpDir)
+        $resolvedRoot = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+        if (-not $resolvedTemp.StartsWith("$resolvedRoot\.zig-tmp-", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsafe shim build cleanup path: $resolvedTemp"
+        }
+        Remove-Item -LiteralPath $resolvedTemp -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 

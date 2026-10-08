@@ -29,6 +29,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Vérifier la réutilisation des installers préparés
+        run: python -m unittest discover -s scripts -p 'test_reuse_release.py' -v
+
       - name: Installer Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -94,7 +97,7 @@ jobs:
           }
 
           $gameplayHash = (Get-FileHash -LiteralPath $allowedGameplayDll -Algorithm SHA256).Hash
-          if ($gameplayHash -ne "987FA5657408422D984A31F18739AF4514221CF25BE3D5DE31E3A64EDCB54649") {
+          if ($gameplayHash -ne "314041801EA331358CB73FD2FCE3DD1C71EDBB19A5B2654F285014AB5260E41F") {
             throw "Unexpected shotgun sprint proxy SHA-256: $gameplayHash"
           }
           $gameplaySidecar = ((Get-Content -LiteralPath "$allowedGameplayDll.sha256" -Raw) -split "\s+")[0]

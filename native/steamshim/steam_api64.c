@@ -1059,8 +1059,9 @@ static uintptr_t steam_matchmaking_get_lobby_member_data(
     }
     if (is_fake_or_self_steam_id(member_steam_id)) {
         value = lookup_fake_lobby_value(key);
-    } else if (g_menu_duo_member && member_steam_id == g_menu_duo_member) {
-        value = menu_duo_member_value(key);
+    } else {
+        MenuTeamMember *member = menu_team_find(member_steam_id);
+        if (member) value = menu_team_member_value(member, key);
     }
 
     log_line(
@@ -1119,9 +1120,9 @@ static uintptr_t generic_interface_method(DummyObject *self, int index, uintptr_
             (void *)a2,
             (void *)a3,
             (void *)a4,
-            g_menu_duo_member ? 2 : 1
+            menu_team_count()
         );
-        return g_menu_duo_member ? 2 : 1;
+        return menu_team_count();
     }
     if (strcmp(name, "SteamMatchMaking009") == 0 && index == 15) {
         log_line(
@@ -1160,9 +1161,8 @@ static uintptr_t generic_interface_method(DummyObject *self, int index, uintptr_
             extra = a4;
         }
 
-        if (member_index == 1 && g_menu_duo_member) {
-            result = g_menu_duo_member;
-        } else if (member_index == 0 || (!g_menu_duo_member && member_index < 8)) {
+        result = menu_team_member_at(member_index);
+        if (!result && menu_team_count() == 1 && member_index < 8) {
             result = g_fake_steam_id;
         }
 
@@ -2350,7 +2350,8 @@ static uintptr_t steamfriends_get_friend_persona_name(DummyObject *self, uintptr
     (void)self; (void)a2; (void)a3; (void)a4;
     uint64_t normalized_steam_id = normalize_steam_id_argument(steam_id);
     const char *name = is_fake_or_self_steam_id(normalized_steam_id) ? get_active_fake_persona_name() : g_fake_empty;
-    if (g_menu_duo_member && normalized_steam_id == g_menu_duo_member) name = g_menu_duo_name;
+    MenuTeamMember *menu_member = menu_team_find(normalized_steam_id);
+    if (menu_member) name = menu_member->name;
     log_line("SteamFriends::GetFriendPersonaName(steam_id=%llu) -> %s", (unsigned long long)normalized_steam_id, name[0] ? name : "<empty>");
     return (uintptr_t)name;
 }
