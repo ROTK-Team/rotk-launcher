@@ -72,6 +72,33 @@ async function fixture() {
 }
 
 describe('game lifecycle remains independent of diagnostics', () => {
+  it('starts presence only after stable startup and clears it before diagnostic collection finishes', async () => {
+    const f = await fixture(), collection = deferred();
+    f.request.presence = { start: vi.fn(), stop: vi.fn() };
+    vi.mocked(f.diagnostics.onExit).mockReturnValue(collection.promise);
+    const launched = f.launcher.launch(f.request);
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    expect(f.request.presence.start).not.toHaveBeenCalled();
+    expect(await launched).toBe(4242);
+    expect(f.request.presence.start).toHaveBeenCalledWith(4242);
+    f.child().exit(0);
+    expect(f.request.presence.stop).toHaveBeenCalledOnce();
+    expect(f.request.onExit).not.toHaveBeenCalled();
+    collection.resolve();
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce());
+  });
+
+  it('never publishes presence for a startup crash and tolerates a broken presence hook', async () => {
+    const f = await fixture();
+    f.request.presence = { start: vi.fn(), stop: vi.fn(() => { throw new Error('Discord unavailable'); }) };
+    const launched = f.launcher.launch(f.request).catch(error => error);
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled());
+    f.child().exit(-1073741819);
+    expect((await launched).message).toContain('0xC0000005');
+    expect(f.request.presence.start).not.toHaveBeenCalled();
+    expect(f.request.presence.stop).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce());
+  });
   it.runIf(process.platform === 'win32')('launches when UserOptions.ini cannot be rewritten', async () => {
     const f = await fixture();
     const options = join(f.request.config.installation!.root, 'UserOptions.ini');

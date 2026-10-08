@@ -51,6 +51,7 @@ import {
   resolveBundledDiagnosticsPath,
 } from "./constants.js";
 import { ConfigStore } from "./services/config-store.js";
+import { DiscordPresence } from "./services/discord-presence.js";
 import { adoptExistingClient, installClient } from "./services/installer.js";
 import {
   GameLauncher,
@@ -167,6 +168,7 @@ const servicesReady = new Promise<void>((resolve) => {
   resolveServicesReady = resolve;
 });
 const gameLauncher = new GameLauncher();
+const discordPresence = new DiscordPresence();
 const LAUNCHER_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000;
 // The window is shown at the latest this long after its creation, painted or not.
 const WINDOW_SHOW_DEADLINE_MS = 5_000;
@@ -1106,6 +1108,7 @@ function registerIpc(): void {
           attest: () => attestInstallation(launchCredential.playerKey, launchRuntime),
           launcherVersion: app.getVersion(),
           diagnostics: diagnosticLaunch?.hooks,
+          presence: discordPresence,
           // Best-effort hardware fingerprint; the server hashes it. A failure
           // must never block a launch, so it degrades to no HWID signal.
           hwid: await collectHwid().catch(() => ({})),
@@ -1498,6 +1501,7 @@ if (singleInstanceLock) {
     }
     app.quit();
   });
+  app.on("will-quit", () => discordPresence.stop());
 }
 
 process.on("uncaughtException", (error) => {

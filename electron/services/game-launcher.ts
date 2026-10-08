@@ -90,6 +90,8 @@ export interface LaunchRequest {
   hwid?: Record<string, string>;
   /** Best-effort telemetry only. Diagnostic failures never control the game lifecycle. */
   diagnostics?: GameLaunchDiagnostics;
+  /** Optional local presence; failures never control the game lifecycle. */
+  presence?: { start(pid: number): void; stop(): void };
   onExit(exitCode: number | null): void;
 }
 
@@ -456,6 +458,7 @@ export class GameLauncher {
       const finalize = (code: number | null, signal: NodeJS.Signals | null = null): void => {
         if (finalized) return;
         finalized = true;
+        try { request.presence?.stop(); } catch { /* Presence is optional. */ }
         if (this.child === child) this.child = null;
         void sessionGateway.close().catch(() => undefined);
         // Preserve the local gateway/game lifecycle, but keep the launcher alive
@@ -470,6 +473,9 @@ export class GameLauncher {
       // 1.4.0: H1Z1 exited with 0xc00000fd immediately after spawn, while the
       // renderer had already switched to the running state.
       await waitForStableStartup(child);
+      if (!finalized) {
+        try { request.presence?.start(child.pid); } catch { /* Presence is optional. */ }
+      }
       child.unref();
       return child.pid;
     } catch (error) {
