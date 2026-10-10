@@ -206,8 +206,7 @@ jobs:
         run: |
           npm run build:vivox
           if ($LASTEXITCODE -ne 0) { throw "Vivox release input validation failed." }
-          # The supplied 2.0.24 release input is independent of these sources.
-          # Both reference builds must still reproduce the prior reference hash.
+          # Both source builds must reproduce the bundled no-reply proxy.
           npm run build:vivox:source
           if ($LASTEXITCODE -ne 0) { throw "Reference Vivox build failed." }
           $reference = Join-Path $env:GITHUB_WORKSPACE "native\vivoxproxy\dist\vivoxsdk_x64.dll"
@@ -216,9 +215,11 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File native/vivoxproxy/build-v5-compat.ps1 -OutputPath $alternateProxy
           if ($LASTEXITCODE -ne 0) { throw "Second reference Vivox build failed." }
           $alternateHash = (Get-FileHash -LiteralPath $alternateProxy -Algorithm SHA256).Hash
-          if ($hash -ne $alternateHash -or $hash -ne "D74662295AF61D152A1869B2925D403AE984827BB55268CC20025D07EC9DABD5") {
+          if ($hash -ne $alternateHash -or $hash -ne "D83131DE5AC79FFA9C7263C443A57B51784C58552A18EA0CCC0C46BCC3752062") {
             throw "The reference Vivox source build changed: $hash / $alternateHash"
           }
+          $bundledHash = (Get-FileHash -LiteralPath "resources\patches\vivoxsdk_x64.dll" -Algorithm SHA256).Hash
+          if ($hash -ne $bundledHash) { throw "Vivox source and bundled proxy differ." }
           # Prove neither source build overwrote the release input or sidecar.
           npm run verify:vivox-proxy
           if ($LASTEXITCODE -ne 0) { throw "Supplied Vivox release input changed." }
