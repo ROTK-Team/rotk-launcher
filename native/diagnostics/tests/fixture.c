@@ -2,16 +2,25 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 static volatile unsigned long sink;
+
+static uint64_t worker_cpu_time(void) {
+    FILETIME created, exited, kernel, user;
+    if (!GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user)) ExitProcess(2);
+    return (((uint64_t)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime)
+        + (((uint64_t)user.dwHighDateTime << 32) | user.dwLowDateTime);
+}
 
 static DWORD WINAPI performance_worker(void *parameter) {
     (void)parameter;
     ULONGLONG until = GetTickCount64() + 4000;
     unsigned long value = 1;
     while (GetTickCount64() < until) {
-        ULONGLONG busy_until = GetTickCount64() + 8;
-        while (GetTickCount64() < busy_until) for (unsigned i = 0; i < 1000; ++i) value = value * 1664525U + 1013904223U;
+        /* Debugger stops and scheduler waits must not consume the CPU workload. */
+        uint64_t busy_until = worker_cpu_time() + 80000;
+        while (worker_cpu_time() < busy_until) for (unsigned i = 0; i < 1000; ++i) value = value * 1664525U + 1013904223U;
         Sleep(8);
     }
     return value;

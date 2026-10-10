@@ -115,6 +115,13 @@ int main(void) {
         HANDLE server=CreateThread(NULL,0,server_thread,NULL,0,NULL);
         HANDLE issuer=CreateThread(NULL,0,request_thread,NULL,0,NULL);
         assert(server && issuer && WaitForSingleObject(received,3000)==WAIT_OBJECT_0);
+#if !defined(EXPECT_NETWORK_LOCK)
+        /* Login now invalidates the previous group's suppression state. */
+        AcquireSRWLockExclusive(&g_voice_lock);
+        strcpy(g_compat_sessiongroup_handle,"test-group");
+        InterlockedExchange(&g_suppress_sessiongroup_added,1);
+        ReleaseSRWLockExclusive(&g_voice_lock);
+#endif
         HANDLE messages=CreateThread(NULL,0,messages_thread,NULL,0,NULL); assert(messages);
         DWORD progress=WaitForSingleObject(message_done,300);
         assert(WaitForSingleObject(issue_done,0)==WAIT_TIMEOUT); /* issue remains synchronous */

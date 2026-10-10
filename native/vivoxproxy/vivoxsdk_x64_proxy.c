@@ -32,6 +32,8 @@ static rotk_volume_destroy_fn g_volume_destroy;
 
 #define REQUEST_TYPE_OFFSET 0x18U
 #define REQUEST_LOGIN 0x83U
+#define REQUEST_ACCOUNT_LOGIN 0x03U
+#define REQUEST_ACCOUNT_LOGOUT 0x04U
 #define REQUEST_SESSIONGROUP_CREATE 0x06U
 #define REQUEST_SESSION 0x10U
 #define REQUEST_SESSIONGROUP_ADD 0x08U
@@ -315,6 +317,12 @@ static vx_free_fn g_free;
 static voice_config g_config;
 static char g_account[GRANT_ACCOUNT_MAX + 1U];
 static char g_account_handle[HUD_HANDLE_BYTES];
+static uint64_t g_login_epoch = 1U;
+typedef struct compat_group_request {
+    void *request;
+    uint64_t epoch;
+} compat_group_request;
+static compat_group_request g_group_requests[128];
 static char g_compat_sessiongroup_handle[HUD_HANDLE_BYTES];
 static volatile LONG g_suppress_sessiongroup_added;
 static volatile LONG g_trace_flags;
@@ -322,6 +330,7 @@ static volatile LONG g_message_trace_count;
 static volatile LONG g_participant_display_restored;
 static volatile LONG g_notification_response_compat;
 static volatile LONG g_remote_speaking_observed;
+static volatile LONG g_grant_trace_count;
 
 static SRWLOCK g_hud_lock = SRWLOCK_INIT;
 static HANDLE g_hud_pipe = INVALID_HANDLE_VALUE;
@@ -331,6 +340,7 @@ static size_t g_hud_receive_bytes;
 static char g_hud_sessiongroup_handle[HUD_HANDLE_BYTES];
 static char g_hud_session_handle[HUD_HANDLE_BYTES];
 static BOOL g_hud_session_ready;
+static BOOL g_hud_prefer_sdk;
 static hud_speaker g_hud_speakers[HUD_SPEAKER_LIMIT];
 static hud_synthetic_event *g_hud_pending_head;
 static hud_synthetic_event *g_hud_pending_tail;
@@ -905,7 +915,8 @@ static BOOL fetch_grant(voice_action action, const WCHAR *channel, voice_grant *
     DWORD disabled_features = WINHTTP_DISABLE_REDIRECTS;
     DWORD read_bytes;
     size_t wire_bytes = 0U;
-    ULONGLONG deadline = GetTickCount64() + VOICE_TIMEOUT_MS;
+    ULONGLONG began = GetTickCount64();
+    ULONGLONG deadline = began + VOICE_TIMEOUT_MS;
     BOOL result = FALSE;
     int written;
 
@@ -1017,6 +1028,16 @@ static BOOL fetch_grant(voice_action action, const WCHAR *channel, voice_grant *
     }
 
 cleanup:
+    if (InterlockedIncrement(&g_grant_trace_count) <= 16L) {
+        char line[192];
+        DWORD error = !result && status == 0U ? GetLastError() : 0U;
+        (void)snprintf(line, sizeof(line),
+            "[rotk-vivoxproxy] grant: action=%u http=%lu elapsed_ms=%llu valid=%u winhttp_error=%lu",
+            (unsigned)action, (unsigned long)status,
+            (unsigned long long)(GetTickCount64() - began), (unsigned)result,
+            (unsigned long)error);
+        proxy_trace_line(line);
+    }
     if (request != NULL) {
         WinHttpCloseHandle(request);
     }
@@ -1204,6 +1225,42 @@ static void write_pointer(void *request,
  * sessiongroup_add_session request can create the group implicitly, so expose
  * the legacy success shape to the game and let that supported request proceed.
  */
+static uint64_t compat_group_epoch(void *request) {
+    uint64_t epoch = 0U;
+    AcquireSRWLockExclusive(&g_voice_lock);
+    for (size_t i = 0; i < 128U; ++i) {
+        if (g_group_requests[i].request == request && request != NULL) {
+            if (g_group_requests[i].epoch == g_login_epoch) epoch = g_login_epoch;
+            break;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_voice_lock);
+    return epoch;
+}
+static BOOL compat_track_group(void *request) {
+    BOOL tracked = FALSE;
+    AcquireSRWLockExclusive(&g_voice_lock);
+    for (size_t i = 0; i < 128U; ++i) {
+        if (g_group_requests[i].request == NULL) {
+            g_group_requests[i].request = request;
+            g_group_requests[i].epoch = g_login_epoch;
+            tracked = TRUE;
+            break;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_voice_lock);
+    return tracked;
+}
+static void compat_forget_group(void *request) {
+    AcquireSRWLockExclusive(&g_voice_lock);
+    for (size_t i = 0; i < 128U; ++i) {
+        if (g_group_requests[i].request == request && request != NULL) {
+            memset(&g_group_requests[i], 0, sizeof(g_group_requests[i]));
+            break;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_voice_lock);
+}
 static BOOL compat_sessiongroup_create_response(void *message) {
 #if defined(ROTK_VIVOX_V5_COMPAT)
     uint32_t message_type;
@@ -1243,6 +1300,9 @@ static BOOL compat_sessiongroup_create_response(void *message) {
     memcpy(&request,
            (uint8_t *)message + RESPONSE_REQUEST_OFFSET,
            sizeof(request));
+    if (compat_group_epoch(request) == 0U) {
+        return FALSE;
+    }
     if (request_is_accessible(
             request,
             SESSIONGROUP_CREATE_HANDLE_OFFSET + sizeof(requested_handle),
@@ -1597,6 +1657,28 @@ static void hud_clear_pending_locked(void) {
     g_hud_pending_tail = NULL;
     g_hud_pending_count = 0U;
 }
+static void compat_begin_login_epoch(void) {
+    /* Keep the HUD -> voice lock order used by group-event publication. */
+    AcquireSRWLockExclusive(&g_hud_lock);
+    AcquireSRWLockExclusive(&g_voice_lock);
+    ++g_login_epoch;
+    if (g_login_epoch == 0U) ++g_login_epoch;
+    SecureZeroMemory(g_account, sizeof(g_account));
+    SecureZeroMemory(g_account_handle, sizeof(g_account_handle));
+    SecureZeroMemory(g_compat_sessiongroup_handle, sizeof(g_compat_sessiongroup_handle));
+    InterlockedExchange(&g_suppress_sessiongroup_added, 0L);
+    ReleaseSRWLockExclusive(&g_voice_lock);
+    hud_clear_pending_locked();
+    memset(g_hud_speakers, 0, sizeof(g_hud_speakers));
+    g_hud_session_ready = FALSE;
+    g_hud_prefer_sdk = FALSE;
+    g_hud_session_handle[0] = '\0';
+    g_hud_sessiongroup_handle[0] = '\0';
+    ReleaseSRWLockExclusive(&g_hud_lock);
+    InterlockedExchange(&g_message_trace_count, 0L);
+    InterlockedExchange(&g_remote_speaking_observed, 0L);
+    InterlockedExchange(&g_grant_trace_count, 0L);
+}
 
 static BOOL hud_discard_oldest_update_locked(void) {
     hud_synthetic_event *previous = NULL;
@@ -1626,6 +1708,28 @@ static BOOL hud_discard_oldest_update_locked(void) {
 static BOOL hud_queue_event_locked(hud_synthetic_event *event) {
     if (event == NULL) {
         return FALSE;
+    }
+    if (event->event.base.type == VIVOX_EVENT_PARTICIPANT_UPDATED) {
+        hud_synthetic_event *previous = NULL;
+        hud_synthetic_event *current = g_hud_pending_head;
+        const rotk_vx_evt_participant_updated *update = &event->event.participant_updated;
+        while (current != NULL) {
+            const rotk_vx_evt_participant_updated *pending = &current->event.participant_updated;
+            if (current->event.base.type == VIVOX_EVENT_PARTICIPANT_UPDATED &&
+                update->session_handle != NULL && pending->session_handle != NULL &&
+                update->participant_uri != NULL && pending->participant_uri != NULL &&
+                strcmp(update->session_handle, pending->session_handle) == 0 &&
+                strcmp(update->participant_uri, pending->participant_uri) == 0) {
+                if (previous == NULL) g_hud_pending_head = current->next;
+                else previous->next = current->next;
+                if (g_hud_pending_tail == current) g_hud_pending_tail = previous;
+                --g_hud_pending_count;
+                hud_free_event(current);
+                break;
+            }
+            previous = current;
+            current = current->next;
+        }
     }
     if (g_hud_pending_count >= HUD_EVENT_QUEUE_LIMIT &&
         !hud_discard_oldest_update_locked()) {
@@ -1697,6 +1801,7 @@ static void compat_queue_sessiongroup_added(void *message) {
     size_t account_bytes = 0U;
     size_t alias_bytes = 0U;
     size_t string_bytes;
+    uint64_t epoch;
     uint32_t request_type;
     int32_t sessiongroup_type = 0;
     hud_synthetic_event *node;
@@ -1716,6 +1821,8 @@ static void compat_queue_sessiongroup_added(void *message) {
     memcpy(&request,
            (uint8_t *)message + RESPONSE_REQUEST_OFFSET,
            sizeof(request));
+    epoch = compat_group_epoch(request);
+    if (epoch == 0U) return;
     if (!request_is_accessible(request, 0x58U, FALSE)) {
         proxy_trace_once(
             TRACE_SESSIONGROUP_EVENT_BAD_REQUEST,
@@ -1761,11 +1868,6 @@ static void compat_queue_sessiongroup_added(void *message) {
         alias_username = NULL;
         alias_bytes = 0U;
     }
-    AcquireSRWLockExclusive(&g_voice_lock);
-    memcpy(g_account_handle,
-           account_handle,
-           account_bytes + 1U);
-    ReleaseSRWLockExclusive(&g_voice_lock);
     string_bytes =
         sessiongroup_bytes + 1U +
         account_bytes + 1U +
@@ -1793,19 +1895,26 @@ static void compat_queue_sessiongroup_added(void *message) {
             : hud_copy_event_string(&cursor, alias_username);
 
     AcquireSRWLockExclusive(&g_hud_lock);
+    AcquireSRWLockExclusive(&g_voice_lock);
+    if (epoch != g_login_epoch) {
+        ReleaseSRWLockExclusive(&g_voice_lock);
+        ReleaseSRWLockExclusive(&g_hud_lock);
+        hud_free_event(node);
+        return;
+    }
     if (hud_queue_event_locked(node)) {
-        AcquireSRWLockExclusive(&g_voice_lock);
+        memcpy(g_account_handle, account_handle, account_bytes + 1U);
         memcpy(g_compat_sessiongroup_handle,
                sessiongroup_handle,
                sessiongroup_bytes + 1U);
         InterlockedExchange(
             &g_suppress_sessiongroup_added,
             1L);
-        ReleaseSRWLockExclusive(&g_voice_lock);
         proxy_trace_once(
             TRACE_SESSIONGROUP_EVENT,
             "[rotk-vivoxproxy] compat: legacy sessiongroup event queued");
     }
+    ReleaseSRWLockExclusive(&g_voice_lock);
     ReleaseSRWLockExclusive(&g_hud_lock);
 #else
     (void)message;
@@ -2537,8 +2646,9 @@ int __cdecl vx_get_message(void **message) {
     AcquireSRWLockExclusive(&g_hud_lock);
     hud_pump_pipe_locked();
     hud_emit_waiting_speakers_locked();
-    synthetic = hud_pop_event_locked();
+    synthetic = g_hud_prefer_sdk ? NULL : hud_pop_event_locked();
     if (synthetic != NULL) {
+        g_hud_prefer_sdk = TRUE;
         *message = (void *)&synthetic->event;
         ReleaseSRWLockExclusive(&g_hud_lock);
         return 0;
@@ -2547,7 +2657,19 @@ int __cdecl vx_get_message(void **message) {
 
     for (;;) {
         result = g_get_message(message);
-        if (result != 0 || *message == NULL) {
+        if (result != 0) {
+            return result;
+        }
+        if (*message == NULL) {
+            AcquireSRWLockExclusive(&g_hud_lock);
+            synthetic = hud_pop_event_locked();
+            if (synthetic != NULL) {
+                g_hud_prefer_sdk = TRUE;
+                *message = (void *)&synthetic->event;
+            } else {
+                g_hud_prefer_sdk = FALSE;
+            }
+            ReleaseSRWLockExclusive(&g_hud_lock);
             return result;
         }
         trace_vivox_message(*message);
@@ -2571,7 +2693,18 @@ int __cdecl vx_get_message(void **message) {
         if (compat_sessiongroup_create_response(*message)) {
             compat_queue_sessiongroup_added(*message);
         }
+        if (request_is_accessible(*message, 0x40U, FALSE)) {
+            uint32_t kind, type;
+            memcpy(&kind, *message, sizeof(kind));
+            memcpy(&type, (uint8_t *)*message + REQUEST_TYPE_OFFSET, sizeof(type));
+            if (kind == VIVOX_MESSAGE_RESPONSE && type == REQUEST_SESSIONGROUP_CREATE) {
+                void *request = NULL;
+                memcpy(&request, (uint8_t *)*message + RESPONSE_REQUEST_OFFSET, sizeof(request));
+                compat_forget_group(request);
+            }
+        }
         AcquireSRWLockExclusive(&g_hud_lock);
+        g_hud_prefer_sdk = FALSE;
         hud_cache_session_from_message_locked(*message);
         ReleaseSRWLockExclusive(&g_hud_lock);
         return result;
@@ -2666,6 +2799,16 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
     memcpy(&request_type,
            (uint8_t *)request + REQUEST_TYPE_OFFSET,
            sizeof(request_type));
+    if (request_type == REQUEST_LOGIN || request_type == REQUEST_ACCOUNT_LOGIN ||
+        request_type == REQUEST_ACCOUNT_LOGOUT) {
+        compat_begin_login_epoch();
+    }
+    if (request_type == REQUEST_SESSIONGROUP_CREATE) {
+        (void)compat_track_group(request);
+        result = g_issue_request(request, request_count);
+        if (result != 0) compat_forget_group(request);
+        return result;
+    }
 #if defined(ROTK_VIVOX_V5_COMPAT)
     if (request_type == REQUEST_SESSION_SET_3D_POSITION &&
         request_is_accessible(request, POSITION_REQUEST_BYTES, TRUE)) {
@@ -2801,10 +2944,20 @@ int __cdecl vx_uninitialize(void) {
         g_original_module == NULL || g_free == NULL) return VOICE_ERROR;
     uninitialize = (uninitialize_fn)(uintptr_t)GetProcAddress(g_original_module, "vx_uninitialize");
     if (uninitialize == NULL) return VOICE_ERROR;
+    compat_begin_login_epoch();
     AcquireSRWLockExclusive(&g_volume_lock);
     if (g_volume_destroy != NULL) rotk_volume_clear(&g_volume_pending, g_volume_destroy);
     ReleaseSRWLockExclusive(&g_volume_lock);
-    return uninitialize();
+    int result = uninitialize();
+    if (result == 0) {
+        AcquireSRWLockExclusive(&g_voice_lock);
+        memset(g_group_requests, 0, sizeof(g_group_requests));
+        ReleaseSRWLockExclusive(&g_voice_lock);
+        AcquireSRWLockExclusive(&g_hud_lock);
+        hud_close_pipe_locked(TRUE);
+        ReleaseSRWLockExclusive(&g_hud_lock);
+    }
+    return result;
 }
 #endif
 

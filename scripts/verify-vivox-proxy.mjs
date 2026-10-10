@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-// Bundled position no-reply proxy, pinned byte for byte.
-const expected = "d83131de5ac79ffa9c7263c443a57b51784c58552a18ea0ccc0c46bcc3752062";
+// Bundled voice reliability proxy, pinned byte for byte.
+const expected = "b73d261d20f2e338f43aca0023554a4b8c543220ce00579ac70598d996ee1005";
 const proxyPath = resolve(process.argv[2] ?? "resources/patches/vivoxsdk_x64.dll");
 const [binary, sidecar] = await Promise.all([
   readFile(proxyPath),
   readFile(`${proxyPath}.sha256`, "utf8"),
 ]);
-assert.equal(binary.length, 68096, "Unexpected Vivox proxy size");
+assert.equal(binary.length, 70144, "Unexpected Vivox proxy size");
 assert.equal(createHash("sha256").update(binary).digest("hex"), expected,
   "The supplied Vivox release proxy has changed");
 assert.equal(sidecar.trim().split(/\s+/u)[0], expected,
