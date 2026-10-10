@@ -52,6 +52,12 @@ static int __cdecl issue_stub(void *request, int *count) {
     assert(!strcmp(token, "new-token"));
     assert(sdk_response == NULL); sdk_response = voice_error_response(request, type); assert(sdk_response);
     int32_t success = 0; memcpy((char *)sdk_response + RESPONSE_RETURN_CODE_OFFSET, &success, 4U);
+    if (scenario == 11 && type == REQUEST_SESSION) {
+        write_pointer(sdk_response, 0x40U, g_strdup("test-group")); write_pointer(sdk_response, 0x48U, g_strdup("sdk-room-42"));
+    }
+    if (scenario == 11 && type == REQUEST_SESSIONGROUP_ADD) {
+        char *handle = NULL; read_pointer(request, SESSIONGROUP_SESSION_HANDLE_OFFSET, &handle); assert(!strcmp(handle, "sdk-room-42"));
+    }
     ++sdk_calls; *count = 1; return 0;
 }
 static int __cdecl get_stub(void **message) {
@@ -64,7 +70,7 @@ static void send_all(SOCKET client, const void *data, size_t size) {
 }
 static DWORD WINAPI serve(void *unused) {
     (void)unused;
-    unsigned expected = scenario == 1 ? 3U : scenario == 6 ? 2U : scenario == 9 ? 4U : 1U;
+    unsigned expected = scenario == 1 ? 3U : scenario == 6 || scenario == 11 ? 2U : scenario == 9 ? 4U : 1U;
     for (unsigned attempt = 0; attempt < expected; ++attempt) {
         SOCKET client = accept(listener, NULL, NULL); assert(client != INVALID_SOCKET);
         char input[2048]; assert(recv(client, input, sizeof(input), 0) > 0);
@@ -145,7 +151,7 @@ int main(int argc, char **argv) {
     assert(LOAD(voice_destroy_fn, "destroy_resp")(message) == 0);
     g_config.valid = TRUE; g_config.secure = FALSE; wcscpy(g_config.host, L"127.0.0.1"); wcscpy(g_config.session_id, L"test-only");
     application_thread = GetCurrentThreadId();
-    for (scenario = 0; scenario < 11; ++scenario) {
+    for (scenario = 0; scenario < 12; ++scenario) {
         compat_begin_login_epoch(); voice_async_reset_login_signature(); strcpy(g_account, ".a.");
         strcpy(g_account_handle, ".a.");
         struct sockaddr_in address = {0}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -168,7 +174,7 @@ int main(int argc, char **argv) {
         SetEvent(release_response);
         assert(WaitForSingleObject(notified, 6000U) == WAIT_OBJECT_0);
         assert(vx_get_message(&message) == 0 && message);
-        BOOL success = scenario == 0 || scenario == 1 || scenario == 4 || scenario == 6;
+        BOOL success = scenario == 0 || scenario == 1 || scenario == 4 || scenario == 6 || scenario == 11;
         destroy_completion(message, request, success); assert(sdk_calls == calls + (success ? 1 : 0));
         if (scenario == 6) {
             observe_xml_event("<Event type=\"MediaStreamUpdatedEvent\"><SessionGroupHandle>test-group</SessionGroupHandle><SessionHandle>sip:confctl-g-test.group@domain</SessionHandle><StatusCode>503</StatusCode><State>1</State></Event>", 20U);
@@ -197,7 +203,21 @@ int main(int argc, char **argv) {
             observe_xml_event("<Event type=\"MediaStreamUpdatedEvent\"><SessionGroupHandle>test-group</SessionGroupHandle><SessionHandle>sip:confctl-g-test.group@domain</SessionHandle><StatusCode>503</StatusCode><State>1</State></Event>", 20U);
             voice_async_rejoin(); assert(sdk_calls == calls + 2);
         }
-        assert(WaitForSingleObject(server, 1000U) == WAIT_OBJECT_0); assert(attempts == (scenario == 1 ? 3 : scenario == 6 ? 2 : scenario == 9 ? 4 : 1));
+        if (scenario == 11) {
+            assert(!strcmp(g_voice_rooms[0].handle, "sdk-room-42"));
+            void *event = NULL; char *error = NULL;
+            assert(parse_event("<Event type=\"SessionAddedEvent\"><SessionGroupHandle>test-group</SessionGroupHandle><SessionHandle>sdk-room-42</SessionHandle></Event>", &event, &error) == 24);
+            voice_async_observe_event(event); char *uri = NULL; read_pointer(event, 0x38U, &uri);
+            assert(uri && !strcmp(uri, "sip:confctl-g-test.group@domain")); assert(destroy_event(event) == 0);
+            observe_xml_event("<Event type=\"MediaStreamUpdatedEvent\"><SessionGroupHandle>test-group</SessionGroupHandle><SessionHandle>sdk-room-42</SessionHandle><StatusCode>503</StatusCode><State>1</State></Event>", 20U);
+            observe_xml_event("<Event type=\"SessionRemovedEvent\"><SessionGroupHandle>test-group</SessionGroupHandle><SessionHandle>sdk-room-42</SessionHandle></Event>", 25U);
+            assert(WaitForSingleObject(notified, 12000U) == WAIT_OBJECT_0);
+            assert(vx_get_message(&message) == 0 && message == NULL);
+            assert(WaitForSingleObject(notified, 6000U) == WAIT_OBJECT_0);
+            assert(vx_get_message(&message) == 0 && message == NULL);
+            assert(sdk_calls == calls + 2);
+        }
+        assert(WaitForSingleObject(server, 1000U) == WAIT_OBJECT_0); assert(attempts == (scenario == 1 ? 3 : scenario == 6 || scenario == 11 ? 2 : scenario == 9 ? 4 : 1));
         if (scenario == 4) {
             void *duplicate = request_new(TRUE); assert(vx_issue_request3(duplicate, &count) == VOICE_ERROR); assert(g_async_destroy_request(duplicate) == 0);
         }

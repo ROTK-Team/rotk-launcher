@@ -32,6 +32,8 @@ fresh authorized grant. Each desired room has at most two media rejoin episodes.
 Explicit departure and authorization failure prevent rejoin. Team and proximity
 rooms have separate state. Internal responses are consumed without inventing a
 second completion for the game's original request.
+Session.Create handles returned by the SDK retain their per-room URI mapping;
+rejoin preserves that exact handle as well as the legacy URI-based join handle.
 
 Session receive mute and volume are retained during rejoin. Connector microphone
 and speaker mute, capture/render device selection and transmission requests are

@@ -30,6 +30,7 @@ typedef struct voice_job {
     ULONGLONG until, next;
     void *request, *failure;
     WCHAR channel[64];
+    char retained_handle[HUD_HANDLE_BYTES];
     voice_grant grant;
 } voice_job;
 static SRWLOCK g_async_lock = SRWLOCK_INIT;
@@ -300,6 +301,7 @@ static int voice_async_enqueue(void *request, uint32_t type, int *count, uint64_
             room->epoch = epoch; room->generation = ++g_room_generation; wcscpy(room->channel, channel);
         }
         job->generation = room->generation;
+        if (job->internal) memcpy(job->retained_handle, room->handle, sizeof(job->retained_handle));
         char *group = NULL; size_t length;
         read_pointer(request, type == REQUEST_SESSIONGROUP_ADD ? 0x30U : 0x78U, &group);
         if (bounded_string(group, HUD_HANDLE_BYTES - 1U, &length)) memcpy(room->group, group, length + 1U);
@@ -375,6 +377,15 @@ static void *voice_async_poll(void) {
         else if (work.type == REQUEST_SESSION) mutated = mutate_join(work.request, SESSION_REQUEST_BYTES, SESSION_URI_OFFSET, SESSION_TOKEN_OFFSET, &work.grant);
         else mutated = mutate_sessiongroup_context(work.request, &work.grant) &&
             mutate_join(work.request, SESSIONGROUP_REQUEST_BYTES, SESSIONGROUP_URI_OFFSET, SESSIONGROUP_TOKEN_OFFSET, &work.grant);
+        if (mutated && work.internal && work.retained_handle[0] != '\0') {
+            char *handle = g_strdup(work.retained_handle), *canonical = NULL;
+            if (handle == NULL) mutated = FALSE;
+            else {
+                read_pointer(work.request, SESSIONGROUP_SESSION_HANDLE_OFFSET, &canonical);
+                write_pointer(work.request, SESSIONGROUP_SESSION_HANDLE_OFFSET, handle);
+                if (canonical != NULL) g_free(canonical);
+            }
+        }
     }
     ReleaseSRWLockExclusive(&g_voice_lock);
     void *none = NULL;
@@ -487,7 +498,7 @@ static void voice_async_observe_event(void *message) {
         if (!request_is_accessible(message, 0x50U, FALSE)) return;
         memcpy(&status, (char *)message + 0x38U, 4U); memcpy(&state, (char *)message + 0x48U, 4U);
     }
-    voice_room restore = {0}; BOOL restore_pending = FALSE;
+    voice_room restore = {0}; BOOL restore_pending = FALSE; char restored_channel[64] = {0};
     AcquireSRWLockExclusive(&g_async_lock);
     for (unsigned i = 0; i < VOICE_ROOM_LIMIT; ++i) {
         voice_room *room = &g_voice_rooms[i]; char channel[64];
@@ -501,6 +512,7 @@ static void voice_async_observe_event(void *message) {
             (strcmp(handle, room->handle) != 0 && strcmp(handle, channel) != 0)) continue;
         if (type == 24U) {
             memcpy(room->handle, handle, handle_bytes + 1U);
+            memcpy(restored_channel, channel, sizeof(restored_channel));
             if (room->restore_audio) { restore = *room; restore_pending = TRUE; room->restore_audio = FALSE; }
         }
         if (type == 20U && state == 2) { room->media_failed = FALSE; room->removed = FALSE; }
@@ -520,6 +532,15 @@ static void voice_async_observe_event(void *message) {
         break;
     }
     ReleaseSRWLockExclusive(&g_async_lock);
+    if (restored_channel[0] != '\0') {
+        char *uri = NULL; size_t bytes; read_pointer(message, 0x38U, &uri);
+        if (uri == NULL || (bounded_string(uri, GRANT_CHANNEL_MAX, &bytes) && bytes == 0U)) {
+            char *replacement = g_strdup(restored_channel);
+            if (replacement != NULL) {
+                write_pointer(message, 0x38U, replacement); if (uri != NULL) g_free(uri);
+            }
+        }
+    }
     if (restore_pending) voice_restore_audio(&restore);
 }
 static void voice_async_rejoin(void) {
