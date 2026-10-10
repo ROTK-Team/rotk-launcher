@@ -113,6 +113,8 @@ export default function App() {
   const selectDestination = () => perform(() => window.rotk.selectDestination());
   const install = () => perform(() => window.rotk.install());
   const play = () => perform(() => window.rotk.play());
+  const error = snapshot.error ?? transientError;
+  const notice = error ? null : snapshot.notice;
   const onPrimary = () => {
     if (hasLauncherUpdate(snapshot.launcherUpdate) || snapshot.updateRequired) {
       setUpdatePromptOpen(true);
@@ -130,13 +132,14 @@ export default function App() {
       <WindowChrome appVersion={snapshot.appVersion} />
       <NewsCarousel updates={snapshot.updates} />
       <GlobalActivityCenter snapshot={snapshot} />
-      {(transientError || snapshot.error) && (
-        <div className="error-toast" role="alert">
-          <strong>{copy.app.operationInterrupted}</strong>
-          <span>{snapshot.error ?? transientError}</span>
+      {(error || notice) && (
+        <div className="error-toast" role={error ? "alert" : "status"}>
+          <strong>{error ? copy.app.operationInterrupted : copy.app.notice}</strong>
+          <span>{error ?? notice}</span>
           <button type="button" aria-label={copy.app.closeError} onClick={() => {
             setTransientError(null);
-            void window.rotk.dismissError();
+            // A renderer-only error must not dismiss the notice behind it.
+            if (snapshot.error || notice) void window.rotk.dismissError();
           }}>×</button>
         </div>
       )}

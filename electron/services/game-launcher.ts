@@ -24,6 +24,7 @@ import {
 } from "./gameplay-patch.js";
 import { assertVivoxCompatibility, deployVivoxCompatibility } from "./vivox-client.js";
 import { prepareInterfaceInputProfile } from "./interface-input-profile.js";
+import { recoverInputProfile, type InputProfileRecovery } from "./input-profile-recovery.js";
 import { prepareWeaponStanceProfile, WEAPON_STANCE_ENABLED } from "./weapon-stance-profile.js";
 
 const GAME_STARTUP_STABILITY_MS = 3_000;
@@ -92,6 +93,8 @@ export interface LaunchRequest {
   diagnostics?: GameLaunchDiagnostics;
   /** Optional local presence; failures never control the game lifecycle. */
   presence?: { start(pid: number): void; stop(): void };
+  /** A damaged InputProfile_User.xml was set aside so the launch could go on. */
+  onInputProfileRecovered?(recovery: InputProfileRecovery): void;
   onExit(exitCode: number | null): void;
 }
 
@@ -194,12 +197,12 @@ async function prepareClient(
   // concurrent drift cannot ride into the process.
   await assertGameplayPatchState(root, clientPatchMode);
 
-  await prepareWeaponStanceProfile(root,
-    join(request.logsRoot, request.config.installation!.installId, "input-profile"), WEAPON_STANCE_ENABLED);
-  await prepareInterfaceInputProfile(
-    root,
-    join(request.logsRoot, request.config.installation!.installId, "input-profile"),
-  );
+  const inputProfileState = join(request.logsRoot, request.config.installation!.installId, "input-profile");
+  // Both steps below refuse a profile the game left truncated: recover it first.
+  const recovery = await recoverInputProfile(root, inputProfileState);
+  if (recovery) request.onInputProfileRecovered?.(recovery);
+  await prepareWeaponStanceProfile(root, inputProfileState, WEAPON_STANCE_ENABLED);
+  await prepareInterfaceInputProfile(root, inputProfileState);
 
   const configPath = join(root, "ClientConfig.ini");
   const configBackupPath = join(root, "ClientConfig.original.ini");
