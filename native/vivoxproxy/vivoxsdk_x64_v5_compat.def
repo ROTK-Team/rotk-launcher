@@ -7,7 +7,7 @@ EXPORTS
     vx_free_sdk_handle
     vx_get_default_config3=vivoxsdk_x64_v5.vx_get_default_config3
     vx_get_message
-    vx_initialize3=vivoxsdk_x64_v5.vx_initialize3
+    vx_initialize3
     vx_issue_request3
     vx_uninitialize
     vx_req_account_anonymous_login_create=vivoxsdk_x64_v5.vx_req_account_anonymous_login_create
