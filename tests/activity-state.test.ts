@@ -61,6 +61,7 @@ function snapshot(overrides: Partial<LauncherSnapshot> = {}): LauncherSnapshot {
     integrityCheck: null,
     progress: null,
     error: null,
+    notice: null,
     gamePid: null,
     updateRequired: false,
     canPlay: true,

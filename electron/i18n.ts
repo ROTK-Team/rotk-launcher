@@ -50,6 +50,12 @@ export const MAIN_COPY = {
       busy: "An asset synchronization is already in progress.",
       disabled: "Asset synchronization is disabled in the launcher settings.",
     },
+    inputProfile: {
+      restored: (path: string) =>
+        `Your H1Z1 key bindings file (InputProfile_User.xml) was damaged. ROTK restored its last working version and kept the damaged file here: ${path}`,
+      reset: (path: string) =>
+        `Your H1Z1 key bindings file (InputProfile_User.xml) was damaged and no working version had been saved yet, so H1Z1 uses the default key bindings. The damaged file was kept here: ${path}`,
+    },
   },
   fr: {
     unexpectedError: "Une erreur inattendue est survenue.",
@@ -100,6 +106,12 @@ export const MAIN_COPY = {
       busy: "Une synchronisation des assets est déjà en cours.",
       disabled: "La synchronisation des assets est désactivée dans les réglages du launcher.",
     },
+    inputProfile: {
+      restored: (path: string) =>
+        `Ton profil de touches H1Z1 (InputProfile_User.xml) était endommagé. ROTK a restauré sa dernière version valide et a gardé le fichier endommagé ici : ${path}`,
+      reset: (path: string) =>
+        `Ton profil de touches H1Z1 (InputProfile_User.xml) était endommagé et aucune version valide n’avait encore été sauvegardée : H1Z1 utilise donc les touches par défaut. Le fichier endommagé a été gardé ici : ${path}`,
+    },
   },
   zh: {
     unexpectedError: "出现了意外错误。",
@@ -149,6 +161,12 @@ export const MAIN_COPY = {
     assets: {
       busy: "资源正在同步中。",
       disabled: "资源同步已在启动器设置中关闭。",
+    },
+    inputProfile: {
+      restored: (path: string) =>
+        `按键配置文件（InputProfile_User.xml）已损坏。已恢复上次可用的按键设置。损坏的文件保存在：${path}`,
+      reset: (path: string) =>
+        `按键配置文件（InputProfile_User.xml）已损坏，且没有可用的备份，已改用默认按键。损坏的文件保存在：${path}`,
     },
   },
 } as const;

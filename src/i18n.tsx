@@ -32,6 +32,7 @@ export interface Copy {
     initializing: string;
     operationFailed: string;
     operationInterrupted: string;
+    notice: string;
     closeError: string;
   };
   news: {
@@ -210,6 +211,7 @@ const COPY: Record<AppLocale, Copy> = {
       initializing: "INITIALIZING LAUNCHER",
       operationFailed: "The operation failed.",
       operationInterrupted: "OPERATION INTERRUPTED",
+      notice: "NOTICE",
       closeError: "Close",
     },
     news: {
@@ -418,6 +420,7 @@ const COPY: Record<AppLocale, Copy> = {
       initializing: "INITIALISATION DU LAUNCHER",
       operationFailed: "L’opération a échoué.",
       operationInterrupted: "OPÉRATION INTERROMPUE",
+      notice: "INFORMATION",
       closeError: "Fermer",
     },
     news: {
@@ -626,6 +629,7 @@ const COPY: Record<AppLocale, Copy> = {
       initializing: "正在初始化启动器",
       operationFailed: "操作失败。",
       operationInterrupted: "操作已中断",
+      notice: "提示",
       closeError: "关闭",
     },
     news: {

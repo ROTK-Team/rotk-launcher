@@ -147,6 +147,8 @@ export interface LauncherSnapshot {
   integrityCheck: IntegrityCheckSummary | null;
   progress: InstallProgress | null;
   error: string | null;
+  /** Something the launcher repaired on its own that the player should know. */
+  notice: string | null;
   gamePid: number | null;
   /** The server refused a launch for an out-of-date launcher; Play is blocked
    *  until a newer version is installed. */
