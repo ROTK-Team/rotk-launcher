@@ -642,6 +642,7 @@ static BOOL install_patch_pair(BYTE *image_base) {
 #include "weapon_stance.h"
 #include "respawn_address.h"
 #include "trio_reboot_camera.h"
+#include "spectator_nameplate_color.h"
 
 static DWORD WINAPI watchdog_worker(LPVOID parameter) {
     (void)parameter;
@@ -652,6 +653,9 @@ static DWORD WINAPI watchdog_worker(LPVOID parameter) {
         }
         InterlockedExchange(&stance_enabled, 0);
         InterlockedExchange(&reboot_enabled, 0);
+        if (!nameplate_restore()) {
+            patch_log("ROTK spectator names: original formatter restore refused.\n");
+        }
         if (restore_patch_pair(g_image_base)) {
             patch_log(
                 "ROTK shotgun sprint: marker removed; stock bytes restored.\n");
@@ -716,6 +720,7 @@ static DWORD WINAPI patch_worker(LPVOID parameter) {
             "(0x1046F98:8f>82, 0x1046FE5:74>eb).\n");
         stance_install(image_base);
         reboot_install(image_base);
+        nameplate_install(image_base);
         start_watchdog(image_base);
     } else {
         patch_log(
