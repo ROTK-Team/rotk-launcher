@@ -109,6 +109,20 @@ describe("public ROTK runtime", () => {
     );
   });
 
+  it("launches the game with the Chinese locale when Chinese is selected", () => {
+    const args = gameLauncherInternals.buildLaunchArguments(
+      "T".repeat(43),
+      DEFAULT_RUNTIME_CONFIG,
+      "C:\\ROTK\\logs",
+      "install-1",
+      "http://127.0.0.1:49152/rest/auth/session/create",
+      "zh",
+    );
+
+    expect(args).toContain("Internationalization:Locale=zh_cn");
+    expect(args).not.toContain("Internationalization:Locale=en_us");
+  });
+
   it("accepts only a credential-free HTTPS origin for voice grants", () => {
     expect(
       gameLauncherInternals.validateVoiceGrantOrigin("https://voice.rotk.app"),

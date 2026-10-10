@@ -63,7 +63,7 @@ export interface LaunchRequest {
   config: LauncherConfig;
   identity: PlayerIdentity;
   runtime: RuntimeConfig;
-  /** Launcher UI language; the game temporarily remains in English. */
+  /** Launcher UI language, also used to select the game's launch locale. */
   locale: AppLocale;
   logsRoot: string;
   bundledShimPath: string;
