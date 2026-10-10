@@ -112,8 +112,9 @@ export function addTitleBackdrop(source) {
     changed.subarray(0, at), tag(32, shape), tag(26, Buffer.from("060100feff00", "hex")), changed.subarray(at),
   ]);
   const header = Buffer.from(source.subarray(0, 8));
-  // Preserve all exporter padding beyond the retail declared length too.
-  header.writeUInt32LE(updated.length + 8, 4);
+  // Like retail, the declared length ends at the End tag; exporter padding stays after it.
+  const end = tags.at(-1);
+  header.writeUInt32LE(8 + end.body + end.size + updated.length - body.length, 4);
   return Buffer.concat([header, zlib.deflateSync(updated)]);
 }
 

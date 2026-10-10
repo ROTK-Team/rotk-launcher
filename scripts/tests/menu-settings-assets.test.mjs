@@ -17,17 +17,18 @@ function tag(code, bytes = Buffer.alloc(0)) {
   return Buffer.concat([header, bytes]);
 }
 
-function syntheticPanel() {
+function syntheticPanel(padding = Buffer.from("synthetic exporter padding")) {
   // Invented GFX root with a script marker and exporter padding, no game assets.
   const frame = Buffer.from([8, 0, 0, 24, 1, 0]);
   const placement = tag(26, Buffer.from("2601002a00006d5f7669657700", "hex"));
   const script = tag(82, Buffer.from("synthetic native-bindings marker"));
   const beforeFrame = Buffer.concat([frame, script, placement]);
-  const padding = Buffer.from("synthetic exporter padding");
   const body = Buffer.concat([beforeFrame, tag(1), tag(0), padding]);
   const header = Buffer.from("4346580900000000", "hex");
-  header.writeUInt32LE(body.length + 8 - padding.length, 4);
-  return { source: Buffer.concat([header, zlib.deflateSync(body)]), body,
+  // Like retail movies, the declared length ends at the End tag, before the padding.
+  const declared = body.length + 8 - padding.length;
+  header.writeUInt32LE(declared, 4);
+  return { source: Buffer.concat([header, zlib.deflateSync(body)]), body, declared,
     placement: frame.length + script.length + 6, insertion: beforeFrame.length };
 }
 
@@ -64,9 +65,9 @@ test("backdrop moves only the root depth and preserves scripts, frame bounds and
   const f = syntheticPanel();
   const patched = addTitleBackdrop(f.source);
   const body = zlib.inflateSync(patched.subarray(8));
-  assert.equal(patched.readUInt32LE(4), body.length + 8);
-  assert.equal(body.readUInt16LE(f.placement + 1), 2);
   const added = body.length - f.body.length;
+  assert.equal(patched.readUInt32LE(4), f.declared + added, "declared length grows by the inserted tags only");
+  assert.equal(body.readUInt16LE(f.placement + 1), 2);
   assert.equal(body.readUInt16LE(f.insertion) >>> 6, 32, "first insertion defines the backdrop");
   const shapeSize = body.readUInt32LE(f.insertion + 2);
   assert.equal(body.readUInt16LE(f.insertion + 6), 65534, "backdrop character");
@@ -76,6 +77,16 @@ test("backdrop moves only the root depth and preserves scripts, frame bounds and
   restored.writeUInt16LE(1, f.placement + 1);
   assert(restored.equals(f.body), "all original bytes survive, apart from the root depth");
   assert.throws(() => addTitleBackdrop(patched), /root timeline/, "double application is refused");
+});
+
+test("declared length ends at the End tag and leaves exporter padding outside it", () => {
+  for (const padding of [Buffer.from("synthetic exporter padding"), Buffer.alloc(0)]) {
+    const patched = addTitleBackdrop(syntheticPanel(padding).source);
+    const body = zlib.inflateSync(patched.subarray(8));
+    const end = patched.readUInt32LE(4) - 8;
+    assert(body.subarray(end - 6, end).equals(tag(0)), "declared length stops right after the End tag");
+    assert(body.subarray(end).equals(padding), "exporter padding is kept after the declared length");
+  }
 });
 
 test("rejects unsupported GFX roots and truncated tags", () => {

@@ -60,7 +60,7 @@ from one run with hashes from another.
 
 ## Validate and publish
 
-`npm run test:assets:menu-settings` runs eight synthetic regression tests and is
+`npm run test:assets:menu-settings` runs nine synthetic regression tests and is
 included in `npm test`. They check title/depth edits without changing script or
 padding bytes, preservation of unrelated catalog/data bytes, corrupt input
 refusal, manifest ownership/version guards and the real launcher's install,
