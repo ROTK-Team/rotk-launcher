@@ -787,8 +787,8 @@ static DWORD remaining_timeout(ULONGLONG deadline) {
         return 0U;
     }
     remaining = deadline - now;
-    return remaining > VOICE_TIMEOUT_MS
-        ? VOICE_TIMEOUT_MS
+    return remaining > MAXDWORD
+        ? MAXDWORD
         : (DWORD)remaining;
 }
 
@@ -897,7 +897,8 @@ static BOOL parse_grant(const uint8_t *wire,
     return TRUE;
 }
 
-static BOOL fetch_grant(voice_action action, const WCHAR *channel, voice_grant *grant) {
+static BOOL fetch_grant_result(voice_action action, const WCHAR *channel, voice_grant *grant,
+                               DWORD budget, DWORD *http_status, DWORD *retry_after) {
     static const WCHAR user_agent[] = L"ROTK-VivoxProxy/1";
     static const WCHAR login_path[] = L"/voice/v1/login";
     static const WCHAR join_path[] = L"/voice/v1/join";
@@ -916,7 +917,7 @@ static BOOL fetch_grant(voice_action action, const WCHAR *channel, voice_grant *
     DWORD read_bytes;
     size_t wire_bytes = 0U;
     ULONGLONG began = GetTickCount64();
-    ULONGLONG deadline = began + VOICE_TIMEOUT_MS;
+    ULONGLONG deadline = began + budget;
     BOOL result = FALSE;
     int written;
 
@@ -1028,6 +1029,18 @@ static BOOL fetch_grant(voice_action action, const WCHAR *channel, voice_grant *
     }
 
 cleanup:
+    if (http_status != NULL) *http_status = status;
+    if (retry_after != NULL) {
+        WCHAR retry[32] = {0}; DWORD bytes = sizeof(retry);
+        *retry_after = 0U;
+        if (request != NULL && WinHttpQueryHeaders(request, WINHTTP_QUERY_RETRY_AFTER,
+                WINHTTP_HEADER_NAME_BY_INDEX, retry, &bytes, WINHTTP_NO_HEADER_INDEX)) {
+            DWORD seconds = 0U; size_t i = 0U;
+            for (; retry[i] >= L'0' && retry[i] <= L'9'; ++i)
+                seconds = seconds > 20U ? 21U : seconds * 10U + (DWORD)(retry[i] - L'0');
+            if (i != 0U && retry[i] == L'\0') *retry_after = seconds > 20U ? 20001U : seconds * 1000U;
+        }
+    }
     if (InterlockedIncrement(&g_grant_trace_count) <= 16L) {
         char line[192];
         DWORD error = !result && status == 0U ? GetLastError() : 0U;
@@ -1054,6 +1067,10 @@ cleanup:
         SecureZeroMemory(grant, sizeof(*grant));
     }
     return result;
+}
+
+static BOOL fetch_grant(voice_action action, const WCHAR *channel, voice_grant *grant) {
+    return fetch_grant_result(action, channel, grant, VOICE_TIMEOUT_MS, NULL, NULL);
 }
 
 static BOOL protection_is_writable(DWORD protection) {
@@ -1635,6 +1652,13 @@ static voice_action action_for_type(uint32_t request_type) {
     return VOICE_ACTION_NONE;
 }
 
+#if defined(ROTK_VIVOX_V5_COMPAT)
+#include "voice_async.h"
+#define ISSUE_SDK voice_sdk_issue
+#else
+#define ISSUE_SDK g_issue_request
+#endif
+
 static void hud_free_event(hud_synthetic_event *event) {
     if (event != NULL) {
         size_t allocation_bytes =
@@ -1678,6 +1702,9 @@ static void compat_begin_login_epoch(void) {
     InterlockedExchange(&g_message_trace_count, 0L);
     InterlockedExchange(&g_remote_speaking_observed, 0L);
     InterlockedExchange(&g_grant_trace_count, 0L);
+#if defined(ROTK_VIVOX_V5_COMPAT)
+    voice_async_new_login();
+#endif
 }
 
 static BOOL hud_discard_oldest_update_locked(void) {
@@ -2643,6 +2670,11 @@ int __cdecl vx_get_message(void **message) {
         return VOICE_ERROR;
     }
     *message = NULL;
+#if defined(ROTK_VIVOX_V5_COMPAT)
+    voice_async_rejoin();
+    void *completion = voice_async_poll();
+    if (completion != NULL) { *message = completion; return 0; }
+#endif
     AcquireSRWLockExclusive(&g_hud_lock);
     hud_pump_pipe_locked();
     hud_emit_waiting_speakers_locked();
@@ -2673,6 +2705,12 @@ int __cdecl vx_get_message(void **message) {
             return result;
         }
         trace_vivox_message(*message);
+#if defined(ROTK_VIVOX_V5_COMPAT)
+        if (voice_async_observe_response(*message)) {
+            g_async_destroy_response(*message); *message = NULL; continue;
+        }
+        voice_async_observe_event(*message);
+#endif
 #if defined(ROTK_VIVOX_V5_COMPAT)
         if (request_is_accessible(*message, ROTK_VOLUME_RESPONSE_BYTES, TRUE)) {
             AcquireSRWLockExclusive(&g_volume_lock);
@@ -2750,7 +2788,7 @@ int __cdecl destroy_evt(void *event) {
 static int issue_original_with_trace(void *request,
                                      int *request_count,
                                      BOOL fallback) {
-    int result = g_issue_request(request, request_count);
+    int result = ISSUE_SDK(request, request_count);
 
     if (fallback) {
         proxy_trace_once(
@@ -2799,13 +2837,19 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
     memcpy(&request_type,
            (uint8_t *)request + REQUEST_TYPE_OFFSET,
            sizeof(request_type));
+#if defined(ROTK_VIVOX_V5_COMPAT)
+    voice_async_retire(request, request_type);
+    if (request_type == REQUEST_LOGIN && voice_async_duplicate_login(request)) return VOICE_ERROR;
+    if (request_type == REQUEST_ACCOUNT_LOGIN || request_type == REQUEST_ACCOUNT_LOGOUT || request_type == 2U)
+        voice_async_reset_login_signature();
+#endif
     if (request_type == REQUEST_LOGIN || request_type == REQUEST_ACCOUNT_LOGIN ||
         request_type == REQUEST_ACCOUNT_LOGOUT) {
         compat_begin_login_epoch();
     }
     if (request_type == REQUEST_SESSIONGROUP_CREATE) {
         (void)compat_track_group(request);
-        result = g_issue_request(request, request_count);
+        result = ISSUE_SDK(request, request_count);
         if (result != 0) compat_forget_group(request);
         return result;
     }
@@ -2828,7 +2872,7 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
         if (create != NULL && g_volume_destroy != NULL)
             replacement = rotk_volume_prepare(&g_volume_pending, request, create, g_volume_destroy, g_strdup);
         if (replacement != NULL) {
-            result = g_issue_request(replacement, request_count);
+            result = ISSUE_SDK(replacement, request_count);
             if (result != 0) rotk_volume_cancel(&g_volume_pending, replacement, g_volume_destroy);
             ReleaseSRWLockExclusive(&g_volume_lock);
             return result;
@@ -2838,12 +2882,17 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
 #endif
     if (request_type ==
         REQUEST_SESSION_SEND_NOTIFICATION) {
-        return g_issue_request(request, request_count);
+        return ISSUE_SDK(request, request_count);
     }
     action = action_for_type(request_type);
     if (action == VOICE_ACTION_NONE) {
-        return g_issue_request(request, request_count);
+        return ISSUE_SDK(request, request_count);
     }
+#if defined(ROTK_VIVOX_V5_COMPAT)
+    if (InitOnceExecuteOnce(&g_config_once, initialize_config, NULL, NULL) && g_config.valid) {
+        return voice_async_enqueue(request, request_type, request_count, 0U);
+    }
+#endif
     if (request_type == REQUEST_LOGIN) {
         proxy_trace_once(
             TRACE_ISSUE_LOGIN,
@@ -2944,12 +2993,16 @@ int __cdecl vx_uninitialize(void) {
         g_original_module == NULL || g_free == NULL) return VOICE_ERROR;
     uninitialize = (uninitialize_fn)(uintptr_t)GetProcAddress(g_original_module, "vx_uninitialize");
     if (uninitialize == NULL) return VOICE_ERROR;
+    InterlockedExchange(&g_voice_uninitializing, 1L);
+    voice_async_stop();
+    voice_async_discard_pending();
     compat_begin_login_epoch();
     AcquireSRWLockExclusive(&g_volume_lock);
     if (g_volume_destroy != NULL) rotk_volume_clear(&g_volume_pending, g_volume_destroy);
     ReleaseSRWLockExclusive(&g_volume_lock);
     int result = uninitialize();
     if (result == 0) {
+        voice_async_clear();
         AcquireSRWLockExclusive(&g_voice_lock);
         memset(g_group_requests, 0, sizeof(g_group_requests));
         ReleaseSRWLockExclusive(&g_voice_lock);
@@ -2957,6 +3010,7 @@ int __cdecl vx_uninitialize(void) {
         hud_close_pipe_locked(TRUE);
         ReleaseSRWLockExclusive(&g_hud_lock);
     }
+    else InterlockedExchange(&g_voice_uninitializing, 0L);
     return result;
 }
 #endif

@@ -9,6 +9,10 @@ foreach ($test in @("duo_group_voice_test", "session_uri_test", "grant_lock_test
     $output = Join-Path $outputDirectory "$test.exe"
     & $zig.Source cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Werror -o $output (Join-Path $PSScriptRoot "tests\$test.c") -lwinhttp -lshell32 -lws2_32
     if ($LASTEXITCODE -ne 0) { throw "$test build failed" }
-    & $output
+    if ($test -eq "grant_lock_test") {
+        & $output (Join-Path $PSScriptRoot "..\..\resources\patches\vivoxsdk_x64_v5.dll")
+    } else {
+        & $output
+    }
     if ($LASTEXITCODE -ne 0) { throw "$test failed ($LASTEXITCODE)" }
 }
