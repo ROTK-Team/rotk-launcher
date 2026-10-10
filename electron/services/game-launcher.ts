@@ -23,6 +23,7 @@ import {
   type GameplayPatchMode,
 } from "./gameplay-patch.js";
 import { assertVivoxCompatibility, deployVivoxCompatibility } from "./vivox-client.js";
+import { assertSteamShim, deploySteamShim } from "./steam-shim.js";
 import { prepareInterfaceInputProfile } from "./interface-input-profile.js";
 import { prepareWeaponStanceProfile, WEAPON_STANCE_ENABLED } from "./weapon-stance-profile.js";
 
@@ -185,8 +186,7 @@ async function prepareClient(
   // All subsequent I/O and the spawned process use the same physical root that
   // passed policy validation. This prevents a logical junction alias from
   // steering configuration and execution to a different tree.
-  const activeShimPath = join(root, "steam_api64.dll");
-  await retryFs(() => copyFile(request.bundledShimPath, activeShimPath));
+  await assertSteamShim(root, request.bundledShimPath);
   await retryFs(() => copyFile(request.bundledRotkcPath, join(root, "rotkc.dll")));
   await assertVivoxCompatibility(root);
   // The attestation pass has already installed or removed the shotgun sprint
@@ -365,6 +365,10 @@ export class GameLauncher {
       request.bundledVivoxProxyPath,
       request.bundledVivoxRuntimePath,
     );
+    // Attestation expects the bundled shim's hash, so a shim shipped by a
+    // launcher update must land before it measures; otherwise the first
+    // launch after that update reports a mismatch for every honest player.
+    await deploySteamShim(installationRoot, request.bundledShimPath);
 
     // Integrity attestation runs before the ticket exists: the whole point is
     // that a tampered installation never obtains one.

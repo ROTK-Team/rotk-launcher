@@ -77,6 +77,15 @@ describe("launcher locales", () => {
         "en",
       ),
     ).toBe("An unknown dinput8.dll is present in the ROTK client. Remove it or import a clean client again.");
+    expect(
+      localizeServiceError("Le shim Steam ROTK n'a pas été copié correctement.", "en"),
+    ).toBe("The ROTK Steam shim was not copied correctly.");
+    expect(
+      localizeServiceError(
+        "Le shim Steam ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.",
+        "en",
+      ),
+    ).toBe("The bundled ROTK Steam shim is missing or modified. Your antivirus may have quarantined it: restore it from Windows Security or reinstall the launcher.");
   });
 
   it("localizes internal English errors for the French interface", () => {

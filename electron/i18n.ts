@@ -192,6 +192,8 @@ const ENGLISH_ERRORS = new Map<string, string>([
   ["La sauvegarde du SDK Vivox historique est invalide.", "The legacy Vivox SDK backup is invalid."],
   ["Le proxy vocal ROTK n'a pas été copié correctement.", "The ROTK voice proxy was not copied correctly."],
   ["Le patch crouch ROTK obligatoire n'a pas été activé correctement.", "The mandatory ROTK crouch patch was not activated correctly."],
+  ["Le shim Steam ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.", "The bundled ROTK Steam shim is missing or modified. Your antivirus may have quarantined it: restore it from Windows Security or reinstall the launcher."],
+  ["Le shim Steam ROTK n'a pas été copié correctement.", "The ROTK Steam shim was not copied correctly."],
   ["Le flux d’assets ROTK est indisponible. Vérifie ta connexion puis réessaie.", "The ROTK asset feed is unavailable. Check your connection and try again."],
   ["Trop de redirections pendant le téléchargement des assets.", "Too many redirects while downloading assets."],
   ["Téléchargement d’assets refusé (redirection invalide).", "Asset download refused (invalid redirect)."],
