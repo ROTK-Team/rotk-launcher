@@ -10,7 +10,8 @@ static DWORD WINAPI performance_worker(void *parameter) {
     ULONGLONG until = GetTickCount64() + 4000;
     unsigned long value = 1;
     while (GetTickCount64() < until) {
-        ULONGLONG busy_until = GetTickCount64() + 8;
+        /* Bursts must exceed one 15.6 ms clock tick, otherwise GetProcessTimes misses them. */
+        ULONGLONG busy_until = GetTickCount64() + 50;
         while (GetTickCount64() < busy_until) for (unsigned i = 0; i < 1000; ++i) value = value * 1664525U + 1013904223U;
         Sleep(8);
     }

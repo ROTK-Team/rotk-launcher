@@ -76,7 +76,8 @@ try {
     if ($firstHash -cne $secondHash) {
         throw "Non-reproducible shotgun sprint proxy build: $firstHash != $secondHash"
     }
-    Set-Content -LiteralPath "$output.sha256" -Value "$firstHash *dinput8.dll" -Encoding ascii
+    # LF and no BOM, like the committed sidecar; Set-Content would write CRLF.
+    [System.IO.File]::WriteAllText("$output.sha256", "$firstHash *dinput8.dll`n", [System.Text.Encoding]::ASCII)
 } finally {
     if (Test-Path -LiteralPath $verificationRoot) {
         $resolved = [System.IO.Path]::GetFullPath($verificationRoot)
