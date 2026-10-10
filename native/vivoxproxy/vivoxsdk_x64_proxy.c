@@ -36,6 +36,10 @@ static rotk_volume_destroy_fn g_volume_destroy;
 #define REQUEST_SESSION 0x10U
 #define REQUEST_SESSIONGROUP_ADD 0x08U
 #define REQUEST_SESSION_SEND_NOTIFICATION 0x4bU
+#define REQUEST_SESSION_SET_3D_POSITION 0x1cU
+#define POSITION_REQUEST_BYTES 0x130U
+#define POSITION_DISPOSITION_OFFSET 0x12cU
+#define POSITION_NO_REPLY_REQUIRED 1U
 #define LOGIN_REQUEST_BYTES 0x90U
 #define SESSION_REQUEST_BYTES 0x90U
 #define SESSIONGROUP_REQUEST_BYTES 0x80U
@@ -2663,6 +2667,13 @@ int __cdecl vx_issue_request3(void *request, int *request_count) {
            (uint8_t *)request + REQUEST_TYPE_OFFSET,
            sizeof(request_type));
 #if defined(ROTK_VIVOX_V5_COMPAT)
+    if (request_type == REQUEST_SESSION_SET_3D_POSITION &&
+        request_is_accessible(request, POSITION_REQUEST_BYTES, TRUE)) {
+        /* Vivox's no-reply disposition skips success replies but retains errors. */
+        uint32_t disposition = POSITION_NO_REPLY_REQUIRED;
+        memcpy((uint8_t *)request + POSITION_DISPOSITION_OFFSET,
+               &disposition, sizeof(disposition));
+    }
     if (rotk_volume_is_legacy(request_type) &&
         request_is_accessible(request, ROTK_VOLUME_REQUEST_BYTES, TRUE)) {
         rotk_volume_create_fn create = (rotk_volume_create_fn)(uintptr_t)GetProcAddress(
