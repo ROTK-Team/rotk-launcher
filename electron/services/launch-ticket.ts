@@ -4,6 +4,9 @@ import { isValidPlayerKey, normalizePlayerKey } from "../../shared/player-key.js
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_NETWORK_ATTEMPTS = 2;
 const NETWORK_RETRY_DELAY_MS = 350;
+// Failures Node reports before any connection exists: the request, and the
+// single-use attestation it carries, never reached the account service.
+const UNSENT_REQUEST_CAUSES = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH"]);
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STEAM_ID_PATTERN = /^\d{17}$/;
 const DECIMAL_ID_PATTERN = /^[1-9]\d{0,18}$/;
@@ -280,8 +283,14 @@ export async function createLaunchTicket(
           signal: controller.signal,
         });
       } catch (error) {
-        if (attempt === MAX_NETWORK_ATTEMPTS - 1) {
-          throw new Error(`Unable to reach the ROTK account service (${networkFailureCause(error, controller.signal.aborted)})`);
+        const cause = networkFailureCause(error, controller.signal.aborted);
+        // After a timeout or a reset, the service may already have consumed the
+        // single-use attestation challenge: a replay could then be refused as
+        // modified game files instead of reported as the network error it is.
+        // With an attestation, only a request that never left is retried.
+        const replayable = !options.attestation || UNSENT_REQUEST_CAUSES.has(cause);
+        if (attempt === MAX_NETWORK_ATTEMPTS - 1 || !replayable) {
+          throw new Error(`Unable to reach the ROTK account service (${cause})`);
         }
         // Only transport failures before response headers are retried.
         clearTimeout(timeout);
