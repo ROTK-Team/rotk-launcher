@@ -53,7 +53,7 @@ static void protect_rx(BYTE *memory, SIZE_T size) {
 }
 
 static void write_caller(BYTE *entry, BYTE *formatter) {
-    const BYTE begin[] = {0x48,0x83,0xec,0x28,0x45,0x33,0xc0};
+    const BYTE begin[] = {0x48,0x83,0xec,0x28};
     const BYTE finish[] = {0x90,0x48,0x83,0xc4,0x28,0xc3};
     int32_t relative;
     memcpy(entry, begin, sizeof(begin));
@@ -65,18 +65,22 @@ static void write_caller(BYTE *entry, BYTE *formatter) {
 }
 
 static void exercise_solid_filter(void) {
-    const SIZE_T image_size = 0x1b6d000;
+    const SIZE_T image_size = 0x1b6f000;
     BYTE *image = VirtualAlloc(NULL, image_size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     assert(image != NULL);
     memset(image, 0x90, image_size);
     BYTE *word = image + NAMEPLATE_COLOR_WORD_RVA;
-    BYTE *formatter = word - 4;
+    BYTE *formatter;
     BYTE *rich = image + NAMEPLATE_WORD_RVA - 16;
+    BYTE *plain = image + NAMEPLATE_PLAIN_RETURN_RVA - 24;
+    BYTE *player = image + NAMEPLATE_PLAYER_RETURN_RVA - 24;
+    BYTE *object = image + 0x5000;
     BYTE *other = image + 0x3000;
     BYTE *relay = image + 0x4000;
-    const BYTE stack[] = {0x48,0x83,0xec,0x38};
+    const BYTE stack[] = {0x48,0x83,0xec,0x38,0x44,0x89,0xc2};
     const BYTE finish[] = {0x48,0x83,0xc4,0x38,0xc3};
-    const BYTE return_filters[] = {0x8b,0x41,0x40,0xc3};
+    const BYTE return_filters[] = {0x89,0x51,0x04,0x8b,0x41,0x40,0xc3};
+    formatter = word - sizeof(stack);
     memcpy(formatter, stack, sizeof(stack));
     word[0] = 0xe8;
     int32_t relative;
@@ -86,18 +90,28 @@ static void exercise_solid_filter(void) {
     memcpy(word + 5, finish, sizeof(finish));
     memcpy(image + 0x1ed21, return_filters, sizeof(return_filters));
     write_caller(rich, formatter);
+    write_caller(plain, formatter);
+    const BYTE plain_stack[] = {0x48,0x81,0xec,0xa8,0,0,0};
+    const BYTE plain_finish[] = {0x90,0x48,0x81,0xc4,0xa8,0,0,0,0xc3};
+    memcpy(plain, plain_stack, sizeof(plain_stack));
+    memcpy(plain + 24, plain_finish, sizeof(plain_finish));
+    write_caller(player, plain);
+    write_caller(object, plain);
     write_caller(other, formatter);
     BYTE replacement[8];
     assert(nameplate_build_solid_relay(relay, (uintptr_t)relay, image, replacement));
     protect_rx(image, image_size);
-    typedef uint32_t (*filter_fn)(BYTE *);
+    typedef uint32_t (*filter_fn)(BYTE *, void *, uint32_t);
     filter_fn rich_call = (filter_fn)(uintptr_t)rich;
+    filter_fn plain_call = (filter_fn)(uintptr_t)player;
+    filter_fn object_call = (filter_fn)(uintptr_t)object;
     filter_fn other_call = (filter_fn)(uintptr_t)other;
     BYTE format[72] = {0};
     uint32_t filters = 3;
     memcpy(format + 0x40, &filters, sizeof(filters));
-    assert(rich_call(format) == 3);
-    assert(other_call(format) == 3);
+    assert(rich_call(format, NULL, UINT32_MAX) == 3);
+    assert(other_call(format, NULL, UINT32_MAX) == 3);
+    assert(plain_call(format, NULL, UINT32_MAX) == 3);
 
     nameplate_image = image;
     memcpy(&nameplate_stock_word, image + NAMEPLATE_WORD_RVA, 8);
@@ -105,11 +119,23 @@ static void exercise_solid_filter(void) {
     memcpy(&nameplate_color_stock_word, word, 8);
     memcpy(&nameplate_color_relay_word, replacement, 8);
     assert(nameplate_exchange(word, nameplate_color_stock_word, nameplate_color_relay_word));
-    assert(rich_call(format) == 0);
-    memcpy(format + 0x40, &filters, sizeof(filters));
-    assert(other_call(format) == 3);
+    assert(rich_call(format, NULL, UINT32_MAX) == 0);
+    /* Every pair of teammates stays solid for each receiving Trio member;
+     * preserve the native RGB and fade alpha, including a selected color. */
+    const uint32_t colors[] = {0xff66b7ff,0xffffb347,0xff65d69a,0xaa66b7ff,0};
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); ++i) {
+        memcpy(format + 0x40, &filters, sizeof(filters));
+        assert(plain_call(format, NULL, colors[i]) == 0);
+        uint32_t actual;
+        memcpy(&actual, format + 4, sizeof(actual));
+        assert(actual == colors[i]);
+        memcpy(format + 0x40, &filters, sizeof(filters));
+        assert(other_call(format, NULL, colors[i]) == 3);
+        assert(object_call(format, NULL, colors[i]) == 3);
+    }
     assert(nameplate_restore());
-    assert(rich_call(format) == 3);
+    assert(rich_call(format, NULL, UINT32_MAX) == 3);
+    assert(plain_call(format, NULL, UINT32_MAX) == 3);
     nameplate_image = NULL;
     assert(VirtualFree(image, 0, MEM_RELEASE));
 }
@@ -213,16 +239,24 @@ int main(void) {
 
     /* Full unpacked signatures must match, including the selected color path.
      * This is a private allocation, never the executable module or a client. */
-    BYTE *image = VirtualAlloc(NULL, 0x1b6d000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    BYTE *image = VirtualAlloc(NULL, 0x1b6f000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     assert(image != NULL);
     memcpy(image + 0x1b6aa00, nameplate_prologue, sizeof(nameplate_prologue));
+    memcpy(image + 0x1b6b580, nameplate_plain_prologue, sizeof(nameplate_plain_prologue));
+    memcpy(image + 0x1b6b5b8, nameplate_plain_guard, sizeof(nameplate_plain_guard));
+    memcpy(image + 0x1b6e6f0, nameplate_player_guard, sizeof(nameplate_player_guard));
     memcpy(image + NAMEPLATE_GUARD_RVA, nameplate_guard, sizeof(nameplate_guard));
     memcpy(image + 0x1b6c4a0, nameplate_format_guard, sizeof(nameplate_format_guard));
     memcpy(image + 0x1b6c4e0, nameplate_format_tail, sizeof(nameplate_format_tail));
     memcpy(image + NAMEPLATE_FORMAT_RVA, nameplate_format_thunk, sizeof(nameplate_format_thunk));
     protect_rx(image + NAMEPLATE_GUARD_RVA, sizeof(nameplate_guard));
+    protect_rx(image + 0x1b6b5b8, sizeof(nameplate_plain_guard));
     assert(nameplate_signatures_ready(image));
     DWORD previous;
+    assert(VirtualProtect(image + 0x1b6b5b8, sizeof(nameplate_plain_guard), PAGE_EXECUTE_READWRITE, &previous));
+    image[0x1b6b5b8 + sizeof(nameplate_plain_guard) - 1] ^= 1U;
+    assert(!nameplate_signatures_ready(image));
+    image[0x1b6b5b8 + sizeof(nameplate_plain_guard) - 1] ^= 1U;
     assert(VirtualProtect(image + NAMEPLATE_GUARD_RVA, sizeof(nameplate_guard), PAGE_EXECUTE_READWRITE, &previous));
     assert(nameplate_signatures_ready(image));
     assert(VirtualProtect(image + NAMEPLATE_GUARD_RVA, sizeof(nameplate_guard), PAGE_READWRITE, &previous));
@@ -235,7 +269,7 @@ int main(void) {
     nameplate_relay = NULL;
     assert(VirtualFree(memory, 0, MEM_RELEASE));
     exercise_solid_filter();
-    printf("PASS spectator names: opaque relay, caller-scoped solid filter, original CALL/return, guards, RX and cache failure rollback, marker rollback and %lld concurrent calls.\n",
+    printf("PASS spectator and free-look names: native team colors, player-only solid filter, original CALL/return, guards, RX and cache failure rollback, marker rollback and %lld concurrent calls.\n",
            (long long)fixture_calls);
     return 0;
 }

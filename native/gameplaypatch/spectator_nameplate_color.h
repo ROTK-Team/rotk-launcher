@@ -13,7 +13,22 @@
 #define NAMEPLATE_RELAY_SIZE 9U
 #define NAMEPLATE_COLOR_WORD_RVA UINT32_C(0x1b6c4f0)
 #define NAMEPLATE_SOLID_RELAY_OFFSET 32U
-#define NAMEPLATE_SOLID_RELAY_SIZE 29U
+#define NAMEPLATE_SOLID_RELAY_SIZE 66U
+#define NAMEPLATE_PLAIN_RETURN_RVA UINT32_C(0x1b6b5c9)
+#define NAMEPLATE_PLAYER_RETURN_RVA UINT32_C(0x1b6e704)
+
+static const BYTE nameplate_plain_prologue[] = {
+    0x48,0x8b,0xc4,0x57,0x48,0x81,0xec,0xa0,0x00,0x00,0x00,0x48,0xc7,0x40,0x88,0xfe,
+    0xff,0xff,0xff,0x48,0x89,0x58,0x08,0x0f,0x29,0x70,0xe8,0x0f,0x29,0x78,0xd8
+};
+static const BYTE nameplate_plain_guard[] = {
+    0x44,0x8b,0x84,0x24,0xd0,0x00,0x00,0x00,0x48,0x8d,0x50,0x90,0xe8,0x17,0x7a,0x49,
+    0xfe,0x90,0xc7,0x44,0x24,0x28,0xff,0xff,0xff,0xff
+};
+static const BYTE nameplate_player_guard[] = {
+    0x89,0x44,0x24,0x20,0x41,0x0f,0x28,0xd1,0x48,0x8d,0x57,0x70,0x48,0x8b,0xce,0xe8,
+    0x46,0xb1,0x4e,0xfe
+};
 
 static const BYTE nameplate_prologue[] = {
     0x48,0x8b,0xc4,0x55,0x41,0x55,0x41,0x57,0x48,0x8d,0xa8,0x68,0xfe,0xff,0xff,
@@ -67,8 +82,9 @@ static BOOL nameplate_build_relay(BYTE *relay, uintptr_t relay_address,
     return TRUE;
 }
 
-/* The rich nameplate's copied DrawText format has a colorized outline filter.
+/* Rich spectator and plain free-look names share a colorized outline filter.
  * Remove it only from this temporary format, before color multiplication.
+ * Plain names keep the native team color and alpha supplied by their caller.
  * Other formatter callers and the shared font definition keep their filters.
  * Both relays are leaves; the original CALL and EH return addresses stay intact.
  */
@@ -76,21 +92,37 @@ static BOOL nameplate_build_solid_relay(BYTE *relay, uintptr_t relay_address,
                                       BYTE *base, BYTE *word) {
     int32_t branch, call;
     uintptr_t expected_caller = (uintptr_t)(base + NAMEPLATE_WORD_RVA + 8U);
+    uintptr_t plain_caller = (uintptr_t)(base + NAMEPLATE_PLAIN_RETURN_RVA);
+    uintptr_t player_caller = (uintptr_t)(base + NAMEPLATE_PLAYER_RETURN_RVA);
     if (!nameplate_relative((uintptr_t)(base + 0x1ed21),
             relay_address + NAMEPLATE_SOLID_RELAY_SIZE, &branch) ||
         !nameplate_relative(relay_address,
             (uintptr_t)(base + NAMEPLATE_COLOR_WORD_RVA + 5U), &call)) return FALSE;
-    const BYTE prefix[] = {0x48,0xb8}; /* MOV RAX, rich CALL return address */
-    const BYTE body[] = {
+    const BYTE prefix[] = {0x48,0xb8}; /* MOV RAX, guarded CALL return address */
+    const BYTE rich_check[] = {
         0x48,0x39,0x44,0x24,0x40, /* CMP [RSP+40h],RAX: formatter caller */
+        0x74,0x25,               /* JE: remove the rich name's filter */
+        0x48,0xb8               /* MOV RAX, plain CALL return address */
+    };
+    const BYTE plain_check[] = {
+        0x48,0x39,0x44,0x24,0x40, /* CMP [RSP+40h],RAX: formatter caller */
+        0x75,0x1b,               /* JNE: leave other callers unchanged */
+        0x48,0xb8               /* MOV RAX, Player renderer return */
+    };
+    const BYTE player_check[] = {
+        0x48,0x39,0x84,0x24,0xf0,0,0,0, /* plain frame + formatter frame */
         0x75,0x07,               /* JNE: leave other callers unchanged */
         0xc7,0x41,0x40,0,0,0,0, /* copied filter count = 0, retain allocation */
         0xe9
     };
     memcpy(relay, prefix, sizeof(prefix));
     memcpy(relay + 2U, &expected_caller, sizeof(expected_caller));
-    memcpy(relay + 10U, body, sizeof(body));
-    memcpy(relay + 25U, &branch, sizeof(branch));
+    memcpy(relay + 10U, rich_check, sizeof(rich_check));
+    memcpy(relay + 19U, &plain_caller, sizeof(plain_caller));
+    memcpy(relay + 27U, plain_check, sizeof(plain_check));
+    memcpy(relay + 36U, &player_caller, sizeof(player_caller));
+    memcpy(relay + 44U, player_check, sizeof(player_check));
+    memcpy(relay + 62U, &branch, sizeof(branch));
     memcpy(word, base + NAMEPLATE_COLOR_WORD_RVA, 8U);
     memcpy(word + 1U, &call, sizeof(call));
     return TRUE;
@@ -129,10 +161,14 @@ static BOOL nameplate_exchange(BYTE *word, uint64_t expected, uint64_t replaceme
 
 static BOOL nameplate_signatures_ready(const BYTE *base) {
     return exact_bytes(base + 0x1b6aa00, nameplate_prologue, sizeof(nameplate_prologue)) &&
+        exact_bytes(base + 0x1b6b580, nameplate_plain_prologue, sizeof(nameplate_plain_prologue)) &&
+        exact_bytes(base + 0x1b6b5b8, nameplate_plain_guard, sizeof(nameplate_plain_guard)) &&
+        exact_bytes(base + 0x1b6e6f0, nameplate_player_guard, sizeof(nameplate_player_guard)) &&
         exact_bytes(base + NAMEPLATE_GUARD_RVA, nameplate_guard, sizeof(nameplate_guard)) &&
         exact_bytes(base + 0x1b6c4a0, nameplate_format_guard, sizeof(nameplate_format_guard)) &&
         exact_bytes(base + 0x1b6c4e0, nameplate_format_tail, sizeof(nameplate_format_tail)) &&
         exact_bytes(base + NAMEPLATE_FORMAT_RVA, nameplate_format_thunk, sizeof(nameplate_format_thunk)) &&
+        executable_committed_range(base + 0x1b6b5b8, sizeof(nameplate_plain_guard), FALSE) &&
         executable_committed_range(base + NAMEPLATE_GUARD_RVA, sizeof(nameplate_guard), FALSE);
 }
 
@@ -190,7 +226,7 @@ static void nameplate_install(BYTE *base) {
     if (nameplate_exchange(base + NAMEPLATE_COLOR_WORD_RVA,
             nameplate_color_stock_word, nameplate_color_relay_word) &&
         nameplate_exchange(base + NAMEPLATE_WORD_RVA, nameplate_stock_word, nameplate_relay_word)) {
-        patch_log("ROTK spectator names: solid nameplate text installed; selected color preserved.\n");
+        patch_log("ROTK names: solid spectator and free-look text installed; native colors preserved.\n");
     } else {
         (void)nameplate_restore();
         patch_log("ROTK spectator names: guarded formatter installation refused.\n");
