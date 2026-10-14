@@ -1470,9 +1470,17 @@ function createWindow(): BrowserWindow {
     startupLog.mark("render-process-gone", `${details.reason} exitCode=${details.exitCode}`);
     if (details.reason === "clean-exit" || rendererFailureReported) return;
     rendererFailureReported = true;
-    void diagnostics?.recordLauncherError("launcher_renderer_gone", new Error(details.reason)).catch(() => undefined);
+    const failure = new Error(`${details.reason} exitCode=${details.exitCode}`);
+    void diagnostics?.recordLauncherError("launcher_renderer_gone", failure).catch(() => undefined);
     const copy = MAIN_COPY[currentLocale];
-    dialog.showErrorBox(copy.startupTitle, `${copy.rendererGone(details.reason)}\n\n${copy.startupSafety}`);
+    // On Windows the window only exists once the launcher runs elevated. A
+    // renderer that Windows refuses to create there (issue #151: exitCode=18,
+    // the sandbox could not create its process) is refused again on every
+    // restart, so asking the player to restart would only send them in a loop.
+    const message = details.reason === "launch-failed" && process.platform === "win32"
+      ? copy.rendererLaunchRefused(details.exitCode)
+      : copy.rendererGone(details.reason);
+    dialog.showErrorBox(copy.startupTitle, `${message}\n\n${copy.startupSafety}`);
   });
   window.on("closed", () => {
     clearTimeout(showDeadline);
