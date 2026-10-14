@@ -7,8 +7,8 @@ import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
 export const GAMEPLAY_PATCH_FILE_NAME = "dinput8.dll";
 export const GAMEPLAY_PATCH_SHA256 =
-  "cd7cef06a332b1dd333604f8369cecc1e86561835f7c595b10c00963b5adcd44";
-export const GAMEPLAY_PATCH_BYTES = 50_176;
+  "d180030eb20949b6c3f095c8593e66ca72b04a811d172f8bd0c35c103395e73b";
+export const GAMEPLAY_PATCH_BYTES = 50_688;
 
 /**
  * Marker next to H1Z1.exe. The proxy enables the sprint byte pair and guarded

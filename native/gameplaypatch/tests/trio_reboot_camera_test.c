@@ -118,6 +118,21 @@ int main(void) {
     bridge_block_reserve_at(image); assert(bridge_block != NULL && bridge_block_base == image);
     reboot_install(image); assert(reboot_enabled && (BYTE *)(uintptr_t)reboot_original_actor == bridge_block);
     assert(VirtualQuery(image + REBOOT_ACTOR_RVA, &mem, sizeof(mem)) == sizeof(mem) && mem.Protect == PAGE_EXECUTE_READ);
+    assert(!reboot_refused_step);
+    /* A second commit finds the installed hook: the refusal line names the
+     * failed step, keeps the old prefix and suffix, and writes nothing. */
+    BYTE installed_jump[REBOOT_ACTOR_STOLEN], installed_call[REBOOT_RESPONSE_STOLEN]; char line[192];
+    const char refused_tail[] = " threads); disabled.\n";
+    memcpy(installed_jump, image + REBOOT_ACTOR_RVA, sizeof(installed_jump));
+    memcpy(installed_call, image + REBOOT_RESPONSE_RVA, sizeof(installed_call));
+    assert(!reboot_commit(image, installed_jump, installed_call));
+    assert(reboot_refused_step && !strcmp(reboot_refused_step, "actor bytes changed") && !reboot_refused_error);
+    assert(!memcmp(image + REBOOT_ACTOR_RVA, installed_jump, sizeof(installed_jump)) &&
+        !memcmp(image + REBOOT_RESPONSE_RVA, installed_call, sizeof(installed_call)));
+    reboot_refused_line(line, sizeof(line));
+    assert(strstr(line, "ROTK trio reboot: guarded installation refused (actor bytes changed, error 0, ") == line);
+    assert(strlen(line) > sizeof(refused_tail) - 1 &&
+        !strcmp(line + strlen(line) - (sizeof(refused_tail) - 1), refused_tail));
     forward(image + 0xee0f20, (const void *)(uintptr_t)native_select);
     forward(image + 0xf71710, (const void *)(uintptr_t)native_set);
     forward(image + 0x10876b0, (const void *)(uintptr_t)native_hidden);
@@ -214,6 +229,6 @@ int main(void) {
     assert(event_calls == 1 && !reboot_pending.game && history[0x438] == 1); /* Stock Training UI unchanged. */
     fresh(); response(1); *(unsigned int *)(mode + 0x28) = 6; apply_state();
     assert(!setter_calls && !reboot_pending.game);
-    puts("Trio reboot camera: native x64 state-consumer trampoline/gate ABI and both original continuations, delayed alive transition applied by original consumer BEFORE restoration, local BR success and terminal death required, two latches reset with all other history preserved, distinct full actor/character IDs, TeamSpectate and DeathCam exits with both UIs, Training excluded, unchanged stock Lua event routing, rejection, expiry and no DeathCam fallback passed.");
+    puts("Trio reboot camera: native x64 state-consumer trampoline/gate ABI and both original continuations, delayed alive transition applied by original consumer BEFORE restoration, local BR success and terminal death required, two latches reset with all other history preserved, distinct full actor/character IDs, TeamSpectate and DeathCam exits with both UIs, Training excluded, unchanged stock Lua event routing, rejection, expiry and no DeathCam fallback passed; a refused install names its step.");
     return 0;
 }

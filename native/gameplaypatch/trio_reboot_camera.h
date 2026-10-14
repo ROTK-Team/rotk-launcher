@@ -223,6 +223,19 @@ static void reboot_actor(BYTE *actor) {
     reboot_original_actor(actor);
     reboot_after_actor(actor);
 }
+/* Why the last reboot_commit returned FALSE, for the refusal line: the first
+ * step that failed, the error of that call (0 for a check that is not a
+ * Windows call) and how many other threads of this process the snapshot held.
+ */
+static const char *reboot_refused_step;
+static DWORD reboot_refused_error;
+static unsigned int reboot_refused_threads;
+/* Called right after the failing call, before ResumeThread or CloseHandle
+ * replace its error. */
+static void reboot_refuse(const char *step, BOOL windows_call) {
+    DWORD error = windows_call ? GetLastError() : 0;
+    if (!reboot_refused_step) { reboot_refused_step = step; reboot_refused_error = error; }
+}
 /* Two native windows are committed while all other threads are suspended.
  * Neither window contains RIP-relative instructions in its displaced prologue.
  */
@@ -231,46 +244,75 @@ static BOOL reboot_commit(BYTE *base, const BYTE *actor_jump, const BYTE *respon
     DWORD self = GetCurrentThreadId(), process = GetCurrentProcessId(), p1 = 0, p2 = 0;
     BOOL ok = FALSE, writable1 = FALSE, writable2 = FALSE;
     BYTE *actor = base + REBOOT_ACTOR_RVA, *call = base + REBOOT_RESPONSE_RVA;
+    reboot_refused_step = NULL; reboot_refused_error = 0; reboot_refused_threads = 0;
     snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return FALSE;
+    if (snapshot == INVALID_HANDLE_VALUE) { reboot_refuse("thread snapshot", TRUE); return FALSE; }
     row.dwSize = sizeof(row);
-    if (!Thread32First(snapshot, &row)) { CloseHandle(snapshot); return FALSE; }
+    if (!Thread32First(snapshot, &row)) { reboot_refuse("first thread", TRUE); CloseHandle(snapshot); return FALSE; }
     do {
         if (row.th32OwnerProcessID != process || row.th32ThreadID == self) continue;
-        if (count == ARRAYSIZE(handles)) goto close_handles;
+        ++reboot_refused_threads;
+        if (count == ARRAYSIZE(handles)) { reboot_refuse("more than 256 threads", FALSE); goto close_handles; }
         handles[count] = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, row.th32ThreadID);
-        if (!handles[count]) goto close_handles;
+        if (!handles[count]) { reboot_refuse("open thread", TRUE); goto close_handles; }
         ++count;
     } while (Thread32Next(snapshot, &row));
     CloseHandle(snapshot); snapshot = INVALID_HANDLE_VALUE;
     for (i = 0; i < count; ++i) {
         CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
-        if (SuspendThread(handles[i]) == (DWORD)-1) goto resume_threads;
+        if (SuspendThread(handles[i]) == (DWORD)-1) { reboot_refuse("suspend thread", TRUE); goto resume_threads; }
         ++stopped;
-        if (!GetThreadContext(handles[i], &ctx) ||
-            (ctx.Rip >= (uintptr_t)actor && ctx.Rip < (uintptr_t)actor + REBOOT_ACTOR_STOLEN) ||
-            (ctx.Rip >= (uintptr_t)call && ctx.Rip < (uintptr_t)call + REBOOT_RESPONSE_STOLEN)) goto resume_threads;
+        if (!GetThreadContext(handles[i], &ctx)) { reboot_refuse("thread context", TRUE); goto resume_threads; }
+        if (ctx.Rip >= (uintptr_t)actor && ctx.Rip < (uintptr_t)actor + REBOOT_ACTOR_STOLEN) {
+            reboot_refuse("thread in actor prologue", FALSE); goto resume_threads;
+        }
+        if (ctx.Rip >= (uintptr_t)call && ctx.Rip < (uintptr_t)call + REBOOT_RESPONSE_STOLEN) {
+            reboot_refuse("thread in response gate", FALSE); goto resume_threads;
+        }
     }
-    if (!exact_bytes(actor, reboot_actor_guard, sizeof(reboot_actor_guard)) ||
-        !exact_bytes(call, reboot_response_guard, sizeof(reboot_response_guard))) goto resume_threads;
+    if (!exact_bytes(actor, reboot_actor_guard, sizeof(reboot_actor_guard))) {
+        reboot_refuse("actor bytes changed", FALSE); goto resume_threads;
+    }
+    if (!exact_bytes(call, reboot_response_guard, sizeof(reboot_response_guard))) {
+        reboot_refuse("response bytes changed", FALSE); goto resume_threads;
+    }
     writable1 = VirtualProtect(actor, REBOOT_ACTOR_STOLEN, PAGE_EXECUTE_READWRITE, &p1);
+    if (!writable1) reboot_refuse("actor page protection", TRUE);
     writable2 = VirtualProtect(call, REBOOT_RESPONSE_STOLEN, PAGE_EXECUTE_READWRITE, &p2);
+    if (!writable2) reboot_refuse("response page protection", TRUE);
     if (writable1 && writable2) {
         memcpy(actor, actor_jump, REBOOT_ACTOR_STOLEN); memcpy(call, response_call, REBOOT_RESPONSE_STOLEN);
         ok = FlushInstructionCache(GetCurrentProcess(), actor, REBOOT_ACTOR_STOLEN) && FlushInstructionCache(GetCurrentProcess(), call, REBOOT_RESPONSE_STOLEN);
         if (!ok) {
+            reboot_refuse("instruction cache flush", TRUE);
             memcpy(actor, reboot_actor_guard, REBOOT_ACTOR_STOLEN);
             memcpy(call, reboot_response_guard, REBOOT_RESPONSE_STOLEN); FlushInstructionCache(GetCurrentProcess(), NULL, 0);
         }
     }
-    if (writable1 && !restore_page_protection(actor, REBOOT_ACTOR_STOLEN, p1)) ok = FALSE;
-    if (writable2 && !restore_page_protection(call, REBOOT_RESPONSE_STOLEN, p2)) ok = FALSE;
+    if (writable1 && !restore_page_protection(actor, REBOOT_ACTOR_STOLEN, p1)) {
+        reboot_refuse("actor protection restore", TRUE); ok = FALSE;
+    }
+    if (writable2 && !restore_page_protection(call, REBOOT_RESPONSE_STOLEN, p2)) {
+        reboot_refuse("response protection restore", TRUE); ok = FALSE;
+    }
 resume_threads:
     while (stopped) ResumeThread(handles[--stopped]);
 close_handles:
-    if (snapshot != INVALID_HANDLE_VALUE) CloseHandle(snapshot);
+    if (snapshot != INVALID_HANDLE_VALUE) {
+        /* The walk stopped early: count the rest of the snapshot for the log. */
+        while (Thread32Next(snapshot, &row))
+            if (row.th32OwnerProcessID == process && row.th32ThreadID != self) ++reboot_refused_threads;
+        CloseHandle(snapshot);
+    }
     while (count) CloseHandle(handles[--count]);
     return ok;
+}
+/* The old prefix and suffix keep log searches working. */
+static void reboot_refused_line(char *line, size_t size) {
+    snprintf(line, size,
+        "ROTK trio reboot: guarded installation refused (%s, error %lu, %u threads); disabled.\n",
+        reboot_refused_step ? reboot_refused_step : "unknown step",
+        (unsigned long)reboot_refused_error, reboot_refused_threads);
 }
 static void reboot_install(BYTE *base) {
     BYTE *memory = NULL, actor_jump[REBOOT_ACTOR_STOLEN], call[REBOOT_RESPONSE_STOLEN]; DWORD old;
@@ -311,7 +353,9 @@ static void reboot_install(BYTE *base) {
     if (!reboot_commit(base, actor_jump, call)) {
         /* Keep the bridge alive if a protection-restoration error left a hook
          * installed. Disabled wrappers preserve the complete original path. */
-        patch_log("ROTK trio reboot: guarded installation refused; disabled.\n"); return;
+        char line[192];
+        reboot_refused_line(line, sizeof(line));
+        patch_log(line); return;
     }
     InterlockedExchange(&reboot_enabled, 1);
     patch_log("ROTK trio reboot: native response/alive camera restoration installed.\n");
