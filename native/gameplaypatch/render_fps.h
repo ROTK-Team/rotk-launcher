@@ -113,17 +113,14 @@ static BOOL fps_hook_option(BYTE *base) {
     static const BYTE string_thunk[] = {0xe9,0x20,0x4a,0xd0,0x01};
     static const BYTE getter_thunk[] = {0xe9,0xfc,0xce,0xb8,0x01};
     BYTE *bridge = NULL, original[15], replacement[15];
-    SYSTEM_INFO info;
     DWORD protection;
     int32_t relative;
     if (!exact_bytes(base + 0x1c18b10, prologue, sizeof(prologue)) ||
         !exact_bytes(base + 0x1c18b18, remaining_prologue, sizeof(remaining_prologue)) ||
         !exact_bytes(base + 0x8bc0f, getter_thunk, sizeof(getter_thunk)) ||
         !exact_bytes(base + 0xba36b, string_thunk, sizeof(string_thunk))) return FALSE;
-    GetSystemInfo(&info);
-    for (uintptr_t delta = 0x08000000; delta < 0x70000000 && !bridge; delta += info.dwAllocationGranularity)
-        bridge = VirtualAlloc(base + delta, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!bridge) return FALSE;
+    bridge = bridge_page(base);
+    if (!bridge) { bridge_refused("ROTK FPS", base); return FALSE; }
     memcpy(bridge, prologue, 8);
     stance_jump(bridge + 8, base + 0x1c18b18);
     stance_jump(bridge + 32, (void *)(uintptr_t)fps_option);
@@ -136,7 +133,7 @@ static BOOL fps_hook_option(BYTE *base) {
     if (!VirtualProtect(bridge, 4096, PAGE_EXECUTE_READ, &protection) ||
         !FlushInstructionCache(GetCurrentProcess(), bridge, 4096) ||
         !RtlAddFunctionTable(&fps_unwind, 1, (DWORD64)(uintptr_t)bridge)) {
-        VirtualFree(bridge, 0, MEM_RELEASE);
+        bridge_release(bridge);
         return FALSE;
     }
     relative = (int32_t)((bridge + 32) - (base + 0x1c18b15));

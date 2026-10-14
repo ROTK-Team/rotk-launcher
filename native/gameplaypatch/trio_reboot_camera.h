@@ -273,7 +273,7 @@ close_handles:
     return ok;
 }
 static void reboot_install(BYTE *base) {
-    BYTE *memory = NULL, actor_jump[REBOOT_ACTOR_STOLEN], call[REBOOT_RESPONSE_STOLEN]; DWORD old; SYSTEM_INFO info;
+    BYTE *memory = NULL, actor_jump[REBOOT_ACTOR_STOLEN], call[REBOOT_RESPONSE_STOLEN]; DWORD old;
     int64_t distance; int32_t relative; uintptr_t callback = (uintptr_t)reboot_response;
     const BYTE bridge[] = {
         0x48,0x83,0xec,0x20, /* JMP entry: native RSP aligned, shadow space */
@@ -291,10 +291,8 @@ static void reboot_install(BYTE *base) {
         !exact_bytes(base + 0x10876b0, reboot_hidden_guard, sizeof(reboot_hidden_guard))) {
         patch_log("ROTK trio reboot: native signature mismatch; skipped.\n"); return;
     }
-    GetSystemInfo(&info);
-    for (uintptr_t delta = 0x08000000; delta < 0x70000000 && !memory; delta += info.dwAllocationGranularity)
-        memory = VirtualAlloc(base + delta, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!memory) { patch_log("ROTK trio reboot: bridge allocation refused.\n"); return; }
+    memory = bridge_page(base);
+    if (!memory) { bridge_refused("ROTK trio reboot", base); return; }
     memcpy(memory, reboot_actor_guard, REBOOT_ACTOR_STOLEN);
     stance_jump(memory + REBOOT_ACTOR_STOLEN, base + REBOOT_ACTOR_RVA + REBOOT_ACTOR_STOLEN);
     memcpy(memory + 64, bridge, sizeof(bridge)); memcpy(memory + 83, &callback, sizeof(callback));
@@ -303,7 +301,8 @@ static void reboot_install(BYTE *base) {
     distance = (int64_t)(uintptr_t)(memory + 64) - (int64_t)(uintptr_t)(base + REBOOT_RESPONSE_RVA + 5);
     if (distance < INT32_MIN || distance > INT32_MAX ||
         !VirtualProtect(memory, 4096, PAGE_EXECUTE_READ, &old) || !FlushInstructionCache(GetCurrentProcess(), memory, 4096)) {
-        VirtualFree(memory, 0, MEM_RELEASE); return;
+        bridge_release(memory);
+        patch_log("ROTK trio reboot: bridge out of reach or protection refused; skipped.\n"); return;
     }
     reboot_base = base; reboot_original_actor = (reboot_actor_fn)(uintptr_t)memory;
     memset(actor_jump, 0x90, sizeof(actor_jump)); stance_jump(actor_jump, (void *)(uintptr_t)reboot_actor);
