@@ -40,6 +40,8 @@ export const MAIN_COPY = {
     },
     rendererGone: (reason: string) =>
       `The launcher window's process stopped (${reason}). Restart the launcher; if this happens again, send %APPDATA%\\ROTK Launcher\\startup.log to the ROTK team.`,
+    rendererLaunchRefused: (exitCode: number) =>
+      `Windows refused to start the launcher window's process (launch-failed, code ${exitCode}) while the launcher runs as administrator. Restarting will not fix this: on some PCs the window's sandbox cannot start with administrator rights (a security policy such as AppLocker is one known cause). Send %APPDATA%\\ROTK Launcher\\startup.log to the ROTK team.`,
     launcherError: (id: string, message: string) => `Launcher error ${id}: ${message}`,
     update: {
       required: "Update the ROTK launcher before playing.",
@@ -98,6 +100,8 @@ export const MAIN_COPY = {
     },
     rendererGone: (reason: string) =>
       `Le processus de la fenêtre du launcher s’est arrêté (${reason}). Relance le launcher ; si cela se reproduit, envoie %APPDATA%\\ROTK Launcher\\startup.log à l’équipe ROTK.`,
+    rendererLaunchRefused: (exitCode: number) =>
+      `Windows a refusé de démarrer le processus de la fenêtre du launcher (launch-failed, code ${exitCode}) alors que le launcher s’exécute en tant qu’administrateur. Relancer le launcher n’y changera rien : sur certains PC, le bac à sable de la fenêtre ne peut pas démarrer avec les droits administrateur (une stratégie de sécurité comme AppLocker en est une cause connue). Envoie %APPDATA%\\ROTK Launcher\\startup.log à l’équipe ROTK.`,
     launcherError: (id: string, message: string) => `Erreur launcher ${id} : ${message}`,
     update: {
       unavailable: "Les mises à jour ne sont disponibles que depuis le launcher installé.",
@@ -156,6 +160,8 @@ export const MAIN_COPY = {
     },
     rendererGone: (reason: string) =>
       `启动器窗口进程已停止（${reason}）。请重启启动器；如果再次出现，请把 %APPDATA%\\ROTK Launcher\\startup.log 发给 ROTK 团队。`,
+    rendererLaunchRefused: (exitCode: number) =>
+      `启动器以管理员身份运行时，Windows 拒绝启动启动器窗口进程（launch-failed，代码 ${exitCode}）。重启启动器无法解决：在部分电脑上，窗口的沙盒无法在管理员权限下启动（AppLocker 等安全策略是已知原因之一）。请把 %APPDATA%\\ROTK Launcher\\startup.log 发给 ROTK 团队。`,
     launcherError: (id: string, message: string) => `启动器错误 ${id}：${message}`,
     update: {
       required: "开始游戏前，请先更新 ROTK 启动器。",

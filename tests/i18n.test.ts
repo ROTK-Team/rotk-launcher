@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { localizeServiceError } from "../electron/i18n";
+import { localizeServiceError, MAIN_COPY } from "../electron/i18n";
 import { assertOutsideLauncherFolder } from "../electron/services/path-policy";
 import { APP_LOCALES, normalizeAppLocale } from "../shared/locale";
 
@@ -173,5 +173,28 @@ describe("launcher locales", () => {
       .toBe("H1Z1 closed during initialization (Windows code 0xC0E90002). Windows blocked a game file with an App Control policy: check Smart App Control in Windows Security > App & browser control.");
     expect(localizeServiceError(blocked, "zh"))
       .toBe("H1Z1 在初始化时关闭（Windows 代码 0xC0E90002）。Windows 的应用控制策略阻止了一个游戏文件：请在“Windows 安全中心 > 应用和浏览器控制”中检查“智能应用控制”。");
+  });
+
+  // Issue #151: a renderer that Windows refuses to create under the elevated
+  // launcher fails the same way on every restart.
+  it.each(APP_LOCALES)("does not ask to restart a window that Windows refused to start in %s", (locale) => {
+    const copy = MAIN_COPY[locale];
+    const noRetry = { en: "will not fix this", fr: "n’y changera rien", zh: "无法解决" }[locale];
+    const refused = copy.rendererLaunchRefused(18);
+    expect(refused).toContain("launch-failed");
+    expect(refused).toMatch(/\b18\b/);
+    expect(refused).toContain(noRetry);
+    expect(refused).toContain("AppLocker");
+    expect(refused).toContain("%APPDATA%\\ROTK Launcher\\startup.log");
+    expect(copy.rendererGone("crashed")).not.toContain(noRetry);
+  });
+
+  it("keeps the restart advice for renderers that stopped after starting", async () => {
+    const main = await readFile(new URL("../electron/main.ts", import.meta.url), "utf8");
+    // One match for the condition and both branches, so a swap fails.
+    expect(main).toMatch(
+      /details\.reason === "launch-failed" && process\.platform === "win32"\s*\?\s*copy\.rendererLaunchRefused\(details\.exitCode\)\s*:\s*copy\.rendererGone\(details\.reason\)/,
+    );
+    expect(main).toContain("new Error(`${details.reason} exitCode=${details.exitCode}`)");
   });
 });
