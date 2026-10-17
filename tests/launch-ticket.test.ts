@@ -34,6 +34,15 @@ function jsonResponse(payload: unknown, status = 200): Response {
 }
 
 describe("ROTK launch ticket client", () => {
+  it.each([
+    [403, { error: "steam_level_required", minimumLevel: 1, steamLevel: 0 }, "Steam level 1 or higher is required"],
+    [403, { error: "steam_level_required", minimumLevel: "bad" }, "Steam level 1 or higher is required"],
+    [503, { error: "steam_level_unavailable" }, "Your Steam level could not be verified"],
+  ])("explains Steam level admission failures (%s)", async (status, body, message) => {
+    const fetchImpl = vi.fn(async () => jsonResponse(body, status as number)) as typeof fetch;
+    await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl })).rejects.toThrow(message as string);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
   it("sends the durable key only in the HTTPS JSON body and validates the identity", async () => {
     const fetchImpl = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       expect(input.toString()).toBe(endpoint);
