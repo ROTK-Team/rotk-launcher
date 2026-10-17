@@ -790,4 +790,120 @@ describe("ROTK asset sync", () => {
     expect((await sync.readState())?.assets).toEqual([]);
     await expect(stat(join(userData, "asset-backups", "sounds.pack"))).rejects.toThrow();
   });
+
+  describe("background download", () => {
+    const v1 = Buffer.from("weapons v1");
+    const v2 = Buffer.from("weapons v2, longer");
+    const entryV1 = assetEntry("weapons", v1, { installPath: "data/weapons.pack" });
+    const entryV2 = assetEntry("weapons", v2, {
+      version: "2.0.0",
+      url: "https://github.com/rotk/rotk-assets/releases/download/assets-v2.0.0/weapons",
+      installPath: "data/weapons.pack",
+    });
+    const feedV2: Record<string, RouteHandler> = {
+      [FEED_URL]: () => new Response(JSON.stringify(manifest([entryV2], "2.0.0"))),
+      [entryV2.url]: () => new Response(new Uint8Array(v2)),
+    };
+
+    async function installedV1(): Promise<{ userData: string; root: string }> {
+      const { userData, root } = await setup();
+      await service(userData, {
+        [FEED_URL]: () => new Response(JSON.stringify(manifest([entryV1]))),
+        [entryV1.url]: () => new Response(new Uint8Array(v1)),
+      }).sync(root);
+      return { userData, root };
+    }
+
+    it("downloads an update without installing it, and the next sync installs it from the cache", async () => {
+      const { userData, root } = await installedV1();
+      const calls: string[] = [];
+      const sync = service(userData, feedV2, calls);
+
+      expect(await sync.prefetch(root)).toEqual({ packVersion: "2.0.0", pendingAssets: 1 });
+      expect(calls).toEqual([FEED_URL, entryV2.url]);
+      expect(await readFile(join(assetStorage(root), "asset-cache", `${entryV2.sha256}.pack`))).toEqual(v2);
+      // Nothing changed in the client or the state.
+      expect(await readFile(join(root, "data", "weapons.pack"))).toEqual(v1);
+      expect((await readdir(root)).sort()).toEqual([INSTALL_MARKER_NAME, "data"]);
+      expect((await sync.readState())?.packVersion).toBe("1.0.0");
+
+      // Play: only the feed is read again.
+      calls.length = 0;
+      expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "2.0.0" });
+      expect(calls).toEqual([FEED_URL]);
+      expect(await readFile(join(root, "data", "weapons.pack"))).toEqual(v2);
+    });
+
+    it("reuses a payload already downloaded and skips what is installed", async () => {
+      const { userData, root } = await installedV1();
+      const calls: string[] = [];
+      const progress: number[] = [];
+      const sync = service(userData, feedV2, calls);
+      await sync.prefetch(root, { onProgress: (event) => progress.push(event.completedBytes) });
+      expect(progress.at(-1)).toBe(v2.length);
+
+      calls.length = 0;
+      progress.length = 0;
+      expect(await sync.prefetch(root, { onProgress: (event) => progress.push(event.completedBytes) }))
+        .toEqual({ packVersion: "2.0.0", pendingAssets: 1 });
+      expect(calls).toEqual([FEED_URL]);
+      expect(progress).toEqual([]);
+
+      await sync.sync(root);
+      calls.length = 0;
+      expect(await sync.prefetch(root)).toEqual({ packVersion: "2.0.0", pendingAssets: 0 });
+      expect(calls).toEqual([FEED_URL]);
+    });
+
+    it("leaves its .part file for the sync that interrupts it, which resumes it", async () => {
+      const { userData, root } = await setup();
+      const payload = Buffer.from("0123456789".repeat(100));
+      const entry = assetEntry("big.pack", payload, { installPath: "data/big.pack" });
+      const partialPath = join(assetStorage(root), "asset-cache", `${entry.sha256}.pack.part`);
+      const ranges: Array<string | null> = [];
+      let servedBytes = 0;
+      const sync = new AssetSyncService({
+        userDataDirectory: userData,
+        feedUrl: FEED_URL,
+        fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+          const range = new Headers(init?.headers).get("range");
+          ranges.push(range);
+          if (range === null) {
+            // The background download receives 400 bytes, then nothing more.
+            servedBytes += 400;
+            return new Response(new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new Uint8Array(payload.subarray(0, 400)));
+              },
+            }));
+          }
+          servedBytes += payload.length - 400;
+          return new Response(new Uint8Array(payload.subarray(400)), {
+            status: 206,
+            headers: { "content-range": `bytes 400-999/${payload.length}` },
+          });
+        }) as typeof fetch,
+      });
+
+      const controller = new AbortController();
+      const background = sync.prefetch(root, { signal: controller.signal });
+      await vi.waitFor(async () => expect((await stat(partialPath)).size).toBe(400));
+      controller.abort();
+      await expect(background).rejects.toThrow();
+      expect((await stat(partialPath)).size).toBe(400);
+
+      await sync.sync(root);
+      expect(ranges).toEqual([null, "bytes=400-"]);
+      expect(servedBytes).toBe(payload.length);
+      expect(await readFile(join(root, "data", "big.pack"))).toEqual(payload);
+    });
+
+    it("fails without writing anything when the feed is unreachable", async () => {
+      const { userData, root } = await installedV1();
+      await expect(service(userData, {}).prefetch(root)).rejects.toThrow("Unrouted fetch");
+      expect(await readdir(join(assetStorage(root), "asset-cache"))).toEqual([`${entryV1.sha256}.pack`]);
+      expect(await readFile(join(root, "data", "weapons.pack"))).toEqual(v1);
+    });
+  });
 });

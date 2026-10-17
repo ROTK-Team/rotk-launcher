@@ -16,6 +16,7 @@ import {
 } from "electron";
 import {
   IPC_CHANNELS,
+  type AssetPrefetchSummary,
   type AssetSyncProgress,
   type AssetSyncStatus,
   type AssetSyncSummary,
@@ -79,6 +80,7 @@ import {
 } from "./services/server-status.js";
 import { UpdateFeedService } from "./services/update-feed.js";
 import { AssetSyncService, assetSyncInternals } from "./services/asset-sync.js";
+import { AssetPrefetchScheduler, canPrefetchAssets } from "./services/asset-prefetch.js";
 import { LauncherUpdateService } from "./services/launcher-update.js";
 import { launcherUpdateBlocksPlay } from "../shared/launcher-update.js";
 import electronUpdater from "electron-updater";
@@ -205,6 +207,21 @@ let assetSyncProgress: AssetSyncProgress | null = null;
 let attestationProgress: AttestationProgress | null = null;
 let assetSyncPackVersion: string | null = null;
 let assetSyncLastAt: string | null = null;
+let assetPrefetchState: AssetPrefetchSummary | null = null;
+// Downloads asset updates while the launcher waits; Play only installs them.
+const assetPrefetch = new AssetPrefetchScheduler({
+  canStart: () => canPrefetchAssets({
+    enabled: assetSyncEnabled,
+    phase,
+    busy: assetSyncRunning || installAbortController !== null,
+    gameRunning: gameLauncher.isRunning(),
+  }),
+  run: (signal) => prefetchAssets(signal),
+  onFailure: (error, failuresInARow) => startupLog.mark(
+    "asset-prefetch-failed",
+    redactDiagnosticText(`${failuresInARow} ${error instanceof Error ? error.message : String(error)}`),
+  ),
+});
 
 function diagnosticCopy(): { failed: string; invalid: string; save: string; exists: string; settings: string } {
   return currentLocale === "fr" ? {
@@ -432,6 +449,7 @@ function assetSyncSummary(): AssetSyncSummary {
     lastSyncAt: assetSyncLastAt,
     progress: assetSyncProgress,
     warning: assetSyncWarning,
+    prefetch: assetPrefetchState,
   };
 }
 
@@ -451,6 +469,8 @@ async function runAssetSync(mode: "sync" | "verify", soft: boolean): Promise<Ope
   assetSyncProgress = null;
   await broadcastSnapshot();
   try {
+    // The sync resumes the background download's .part file, if any.
+    await stopAssetPrefetch();
     const outcome = mode === "verify" ? await assetSync.verify(root) : await assetSync.sync(root);
     assetSyncPackVersion = outcome.packVersion;
     assetSyncLastAt = new Date().toISOString();
@@ -474,6 +494,40 @@ async function runAssetSync(mode: "sync" | "verify", soft: boolean): Promise<Ope
     assetSyncProgress = null;
     await broadcastSnapshot();
   }
+}
+
+/**
+ * One background pass of the asset prefetch: download what the next sync
+ * will install, then show it as ready. Failures go back to the scheduler,
+ * which only logs them.
+ */
+async function prefetchAssets(signal: AbortSignal): Promise<void> {
+  const root = await installationRoot();
+  if (!root || signal.aborted) return;
+  try {
+    const outcome = await assetSync.prefetch(root, {
+      signal,
+      onProgress: (value) => {
+        if (signal.aborted) return;
+        assetPrefetchState = { status: "downloading", progress: value };
+        void broadcastSnapshot();
+      },
+    });
+    assetPrefetchState = outcome.pendingAssets > 0 && !signal.aborted
+      ? { status: "ready", progress: null }
+      : null;
+  } catch (error) {
+    assetPrefetchState = null;
+    throw error;
+  } finally {
+    void broadcastSnapshot();
+  }
+}
+
+/** Stop a background download before a sync or an installation uses the cache. */
+async function stopAssetPrefetch(): Promise<void> {
+  await assetPrefetch.interrupt();
+  assetPrefetchState = null;
 }
 
 /**
@@ -1130,6 +1184,7 @@ function registerIpc(): void {
       lastErrorRaw = null;
       await broadcastSnapshot();
       try {
+        await stopAssetPrefetch();
         const onProgress = (nextProgress: NonNullable<LauncherSnapshot["progress"]>): void => {
           progress = nextProgress;
           void broadcastSnapshot();
@@ -1402,6 +1457,8 @@ function registerIpc(): void {
       assetSyncEnabled = enabled;
       assetSyncStatus = enabled ? "idle" : "disabled";
       assetSyncWarning = null;
+      if (enabled) assetPrefetch.poke();
+      else await stopAssetPrefetch();
       await broadcastSnapshot();
       return { ok: true };
     }),
@@ -1607,6 +1664,7 @@ async function initialize(): Promise<void> {
   setInterval(() => void launcherUpdate.check(), LAUNCHER_UPDATE_CHECK_INTERVAL_MS);
   void refreshServerStatus();
   setInterval(() => void refreshServerStatus(), SERVER_STATUS_POLL_INTERVAL_MS);
+  assetPrefetch.start();
 }
 
 if (singleInstanceLock) {
@@ -1674,7 +1732,10 @@ if (singleInstanceLock) {
     }
     app.quit();
   });
-  app.on("will-quit", () => discordPresence.stop());
+  app.on("will-quit", () => {
+    discordPresence.stop();
+    assetPrefetch.dispose();
+  });
 }
 
 process.on("uncaughtException", (error) => {
