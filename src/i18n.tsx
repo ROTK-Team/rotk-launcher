@@ -63,6 +63,7 @@ export interface Copy {
     attention: string;
     ready: string;
     clientConfigured: string;
+    assetUpdateReady: string;
     accountRequired: string;
     missingAccountKey: string;
     setupRequired: string;
@@ -169,6 +170,7 @@ export interface Copy {
     launcherUpdate: string;
     checkingUpdate: string;
     checkingAssets: string;
+    backgroundDownload: string;
     preparingFiles: string;
     integrityDetail: string;
     launchDetail: string;
@@ -247,6 +249,7 @@ const COPY: Record<AppLocale, Copy> = {
       attention: "ATTENTION",
       ready: "READY",
       clientConfigured: "ROTK CLIENT CONFIGURED",
+      assetUpdateReady: "ASSET UPDATE DOWNLOADED, INSTALLED WHEN YOU PLAY",
       accountRequired: "ROTK ACCOUNT REQUIRED",
       missingAccountKey: "ADD YOUR WEBSITE LAUNCHER KEY",
       setupRequired: "SETUP REQUIRED",
@@ -373,6 +376,7 @@ const COPY: Record<AppLocale, Copy> = {
       launcherUpdate: "LAUNCHER UPDATE",
       checkingUpdate: "CHECKING FOR UPDATE",
       checkingAssets: "Checking the official asset feed",
+      backgroundDownload: "DOWNLOADING IN THE BACKGROUND",
       preparingFiles: "Preparing the H1Z1 client files",
       integrityDetail: "Checking every game file before launch",
       launchDetail: "Preparing the secure game session",
@@ -461,6 +465,7 @@ const COPY: Record<AppLocale, Copy> = {
       attention: "ATTENTION",
       ready: "PRÊT",
       clientConfigured: "CLIENT ROTK CONFIGURÉ",
+      assetUpdateReady: "MISE À JOUR DES ASSETS TÉLÉCHARGÉE, INSTALLÉE AU LANCEMENT",
       accountRequired: "COMPTE ROTK REQUIS",
       missingAccountKey: "AJOUTE TA CLÉ LAUNCHER DU SITE",
       setupRequired: "À CONFIGURER",
@@ -587,6 +592,7 @@ const COPY: Record<AppLocale, Copy> = {
       launcherUpdate: "MISE À JOUR DU LAUNCHER",
       checkingUpdate: "RECHERCHE DE MISE À JOUR",
       checkingAssets: "Vérification du flux officiel des assets",
+      backgroundDownload: "TÉLÉCHARGEMENT EN ARRIÈRE-PLAN",
       preparingFiles: "Préparation des fichiers du client H1Z1",
       integrityDetail: "Vérification de chaque fichier avant le lancement",
       launchDetail: "Préparation de la session de jeu sécurisée",
@@ -675,6 +681,7 @@ const COPY: Record<AppLocale, Copy> = {
       attention: "注意",
       ready: "就绪",
       clientConfigured: "ROTK 客户端已配置",
+      assetUpdateReady: "资源更新已下载，开始游戏时安装",
       accountRequired: "需要 ROTK 账号",
       missingAccountKey: "请添加网站上的启动器密钥",
       setupRequired: "尚未安装",
@@ -801,6 +808,7 @@ const COPY: Record<AppLocale, Copy> = {
       launcherUpdate: "启动器更新",
       checkingUpdate: "正在检查更新",
       checkingAssets: "正在检查 ROTK 资源更新",
+      backgroundDownload: "正在后台下载",
       preparingFiles: "正在准备 H1Z1 客户端文件",
       integrityDetail: "启动前检查游戏文件是否完整",
       launchDetail: "正在连接服务器并准备游戏",
