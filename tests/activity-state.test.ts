@@ -185,6 +185,39 @@ describe("homepage activity selector", () => {
     expect(activity.kind).toBe("asset-sync");
   });
 
+  it("shows a background download until a sync takes over", () => {
+    const downloading = {
+      status: "downloading" as const,
+      progress: {
+        phase: "downloading" as const,
+        assetName: "assets_x64_0",
+        assetsCompleted: 0,
+        totalAssets: 1,
+        completedBytes: 30,
+        totalBytes: 120,
+      },
+    };
+    const [background] = selectGlobalActivities(snapshot({
+      assetSync: { ...snapshot().assetSync, prefetch: downloading },
+    }));
+    expect(background).toMatchObject({
+      kind: "asset-sync",
+      stage: "background",
+      detail: "assets_x64_0",
+      progressPercent: 25,
+    });
+
+    const [sync] = selectGlobalActivities(snapshot({
+      phase: "launching",
+      assetSync: { ...snapshot().assetSync, status: "checking", prefetch: downloading },
+    }));
+    expect(sync).toMatchObject({ kind: "asset-sync", stage: "checking" });
+
+    expect(selectGlobalActivities(snapshot({
+      assetSync: { ...snapshot().assetSync, prefetch: { status: "ready", progress: null } },
+    }))).toEqual([]);
+  });
+
   it("shows integrity progress before falling back to generic launch", () => {
     const [integrity] = selectGlobalActivities(snapshot({
       phase: "launching",
