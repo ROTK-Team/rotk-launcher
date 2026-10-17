@@ -61,6 +61,8 @@ const MANIFEST_TIMEOUT_MS = 10_000;
 const DOWNLOAD_ATTEMPTS = 4;
 // A download that sends nothing for this long is dropped and resumed.
 const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
+// Nobody waits on a background download: fewer progress events are enough.
+const PREFETCH_PROGRESS_INTERVAL_MS = 500;
 const STATE_FILE_NAME = "asset-state.v1.json";
 const CACHE_DIRECTORY_NAME = "asset-cache";
 const BACKUP_DIRECTORY_NAME = "asset-backups";
@@ -122,6 +124,12 @@ export interface AssetSyncState {
 export interface AssetSyncOutcome {
   status: "up-to-date" | "updated" | "offline-warning";
   packVersion: string | null;
+}
+
+export interface AssetPrefetchOutcome {
+  packVersion: string;
+  /** Payloads the next sync will install, all in the cache now. */
+  pendingAssets: number;
 }
 
 export interface AssetSyncServiceOptions {
@@ -556,6 +564,68 @@ export class AssetSyncService {
   /** Repair pass: re-hash every installed file and reinstall what drifted. */
   async verify(installRoot: string, signal?: AbortSignal): Promise<AssetSyncOutcome> {
     return this.sync(installRoot, { thorough: true, signal });
+  }
+
+  /**
+   * Download the new or changed packs of the feed into the cache, without
+   * installing them: the game folder, the state and the other cache entries
+   * are left as they are. The next sync finds the payloads in the cache and
+   * checks their SHA-256 before installing them, like any cached pack.
+   */
+  async prefetch(
+    installRoot: string,
+    options: { signal?: AbortSignal; onProgress?(progress: AssetSyncProgress): void } = {},
+  ): Promise<AssetPrefetchOutcome> {
+    const root = resolve(installRoot);
+    if (!(await exists(join(root, INSTALL_MARKER_NAME)))) {
+      throw new Error("Installe d’abord le client ROTK.");
+    }
+    this.useStorageFor(root);
+    const state = await this.readState();
+    const manifest = await this.fetchManifest(options.signal);
+    const records = new Map((state?.assets ?? []).map((asset) => [asset.name, asset]));
+    // Same test as sync(); an installed pack that only needs a repair is left to it.
+    const pending = manifest.assets.filter((asset) => {
+      const record = records.get(asset.name);
+      return !record || record.version !== asset.version || record.sha256 !== asset.sha256;
+    });
+
+    const totalBytes = pending.reduce((sum, asset) => sum + asset.size, 0);
+    await ensureFreeSpace(dirname(root), totalBytes);
+    let completedBytes = 0;
+    let assetsCompleted = 0;
+    let lastProgressAt = 0;
+    const emit = (assetName: string, force = false): void => {
+      const now = Date.now();
+      if (!force && now - lastProgressAt < PREFETCH_PROGRESS_INTERVAL_MS) return;
+      lastProgressAt = now;
+      options.onProgress?.({
+        phase: "downloading",
+        assetName,
+        assetsCompleted,
+        totalAssets: pending.length,
+        completedBytes,
+        totalBytes,
+      });
+    };
+
+    for (const asset of pending) {
+      // Not hashed again on every pass: the sync that installs it does that.
+      const cached = await stat(join(this.cacheDirectory, `${asset.sha256}.pack`)).catch(() => null);
+      if (cached?.isFile() && cached.size === asset.size) {
+        completedBytes += asset.size;
+        assetsCompleted += 1;
+        continue;
+      }
+      emit(asset.name, true);
+      await this.ensureCachedAsset(asset, options.signal, (amount) => {
+        completedBytes += amount;
+        emit(asset.name);
+      });
+      assetsCompleted += 1;
+      emit(asset.name, true);
+    }
+    return { packVersion: manifest.packVersion, pendingAssets: pending.length };
   }
 
   /**
