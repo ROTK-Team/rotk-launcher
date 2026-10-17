@@ -96,8 +96,8 @@ export function synchronizeClientConfig(
   return synchronized;
 }
 
-/** Match the Chinese launcher option to the published Chinese game locale. */
-export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "en_us", zh: "zh_cn" };
+/** Requires the locale-independent HUD assets; publish those before this launcher. */
+export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "fr_fr", zh: "zh_cn" };
 
 /** Keep the custom social menu in English until its translations are validated. */
 export function synchronizeUserOptions(config: string): string {
