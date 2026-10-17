@@ -96,16 +96,12 @@ export function synchronizeClientConfig(
   return synchronized;
 }
 
-/** Match the Chinese launcher option to the published Chinese game locale. */
-export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "en_us", zh: "zh_cn" };
+/** Requires the locale-independent HUD assets; publish those before this launcher. */
+export const GAME_LOCALE: Readonly<Record<AppLocale, string>> = { en: "en_us", fr: "fr_fr", zh: "zh_cn" };
 
-/** Keep the custom social menu in English until its translations are validated. */
+/** Social now follows the native game locale; discard its obsolete override. */
 export function synchronizeUserOptions(config: string): string {
-  return upsertIniDirective(config, {
-    section: "UI",
-    key: "ROTKSocialLanguage",
-    value: "en",
-  });
+  return config.replace(/^[\t ]*ROTKSocialLanguage[\t ]*=.*(?:\r?\n|$)/gim, "");
 }
 
 export function validateLocalCreateSessionUrl(value: string): string {
