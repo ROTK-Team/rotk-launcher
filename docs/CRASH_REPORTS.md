@@ -62,8 +62,8 @@ La présence de chaque pièce dépend de ce qui était disponible pour la sessio
 | `performance.jsonl` et éventuellement `.1` | En mode Debug : mesures du processus environ chaque seconde, dates UTC et horloge monotone QPC. |
 | `frame-times-summary.json` | Disponibilité de PresentMon, raisons d'échec éventuelles, statistiques des intervalles de présentation par swapchain et pics. |
 | `frame-times.jsonl` et éventuellement `.1` | Événements de présentation réellement observés pour ce PID, avec QPC et données numériques sélectionnées. |
-| `client-game-KillFeed.log-….log`, `client-game-GFxWrap.log-….log` et autres journaux reconnus | Journaux du dossier `Logs` du jeu : killfeed, Scaleform/GFx, UI, échecs de chargement d'assets et erreurs de packs, lorsqu'ils existent et ont été écrits pendant cette session. |
-| `client-local-….log`, `client-failure-….log`, `client-native-….log` et extensions similaires | Extraits des journaux autorisés du jeu, associés à cette session. Le suffixe évite d’exposer le chemin original. |
+| `client-game-KillFeed.log-….log`, `client-game-LongFrames.log-….log`, `client-game-GFxWrap.log-….log` et autres journaux reconnus | Journaux du dossier `Logs` du jeu : killfeed, images longues mesurées par le jeu, Scaleform/GFx, UI, échecs de chargement d'assets et erreurs de packs, lorsqu'ils existent et ont été écrits pendant cette session. |
+| `client-local-….log`, `client-failure-….log`, `client-native-….log` et extensions similaires | Extraits des journaux autorisés du jeu, associés à cette session. Les `client-native` viennent du dossier du jeu, dont `rotk-shotgun-sprint.log` : installation ou refus de chaque patch de gameplay. Le suffixe évite d’exposer le chemin original. |
 | `dumps/crash-….dmp` | Minidump d’une exception fatale observée, si la capture a réussi. Les dumps disponibles sont inclus dans le ZIP automatique de la session. |
 | `dumps/snapshot-….dmp`, éventuellement `-full.dmp` | Capture de l’état du processus lorsqu’elle est disponible. Le suffixe `full` identifie une capture mémoire complète issue du mécanisme technique décrit plus bas. |
 
@@ -171,10 +171,14 @@ Pour rapprocher un pic d'un kill :
    journal. Utiliser les ancres UTC/QPC et la fréquence QPC du journal natif pour
    rapprocher les horloges sur ce PC. L'heure UTC de **réception** du flux PresentMon
    peut être retardée par son buffering : ce n'est pas l'heure exacte de l'image.
-2. Examiner `KillFeed`, `GFxWrap`, `uiDB`, `FailedLoadAssets`, `FailedSyncLoadAssets`
-   et `ContentPackErrors` autour de l'événement. Les lignes du client peuvent employer
-   une date locale et un compteur interne en millisecondes ; conserver ce compteur,
-   vérifier son origine et appliquer le décalage horaire indiqué par le rapport.
+2. Examiner `LongFrames`, `KillFeed`, `GFxWrap`, `uiDB`, `FailedLoadAssets`,
+   `FailedSyncLoadAssets` et `ContentPackErrors` autour de l'événement. `LongFrames`
+   est écrit par le jeu pour chaque image anormalement longue : la ligne
+   `Frame … usec (avg …) Highest[Section=… usec]` nomme la section du moteur la plus
+   coûteuse, puis les lignes indentées détaillent l'arbre des sections mesurées.
+   Les lignes du client peuvent employer une date locale et un compteur interne en
+   millisecondes ; conserver ce compteur, vérifier son origine et appliquer le
+   décalage horaire indiqué par le rapport.
 3. Comparer plusieurs kills avec et sans pic. Refaire une session avec assets ROTK
    et une session stock, sur le même PC et avec Debug et les options graphiques
    identiques. Vérifier `context.clientContext` : une case de synchronisation
@@ -258,8 +262,9 @@ Les textes exportés passent par des règles de masquage des secrets connus,
 jetons, mots de passe, adresses et chemins sensibles reconnus. Les fichiers de
 configuration/identifiants, l’environnement et la ligne de commande brute sont
 exclus. Le joueur/SteamID, les codes, horaires et empreintes utiles à l’enquête
-peuvent rester présents. Ce masquage n’est pas une garantie d’anonymisation de
-toute chaîne arbitraire écrite par le jeu : relire le contexte avant partage.
+peuvent rester présents. Dans les journaux du dossier `Logs`, la colonne du nom du
+PC est remplacée par `[HOST]`. Ce masquage n’est pas une garantie d’anonymisation
+de toute chaîne arbitraire écrite par le jeu : relire le contexte avant partage.
 
 **Les dumps binaires ne sont pas masqués.** Un minidump comme un dump complet
 peut contenir des données de session, identifiants, messages ou autres morceaux
@@ -272,7 +277,8 @@ partage au support.
 
 La collecte textuelle vise au maximum **2 Mio par fichier, 20 Mio au total et
 40 fichiers de journaux collectés** ; les fichiers de synthèse du ZIP s’y
-ajoutent. Les omissions et troncatures sont décrites dans le manifeste. Le helper
+ajoutent. Les omissions et troncatures sont décrites dans le manifeste ; un
+journal tronqué commence à sa première ligne complète. Le helper
 fait tourner son journal natif autour de 4 Mio avec une sauvegarde ; l’export peut
 donc n’en conserver que les extraits bornés. Les dumps ont leurs propres limites
 et ne sont pas réduits au budget des textes.
