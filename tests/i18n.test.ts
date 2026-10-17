@@ -154,6 +154,21 @@ describe("launcher locales", () => {
       .toBe("Ce compte ROTK est banni définitivement. Raison : cheating");
   });
 
+  it("localizes the Steam level refusals for French and Chinese players", () => {
+    const required = "Steam level 5 or higher is required to play ROTK with this account.";
+    const unavailable = "Your Steam level could not be verified. Make sure your Steam profile is public, then try again shortly.";
+    expect(localizeServiceError(required, "fr"))
+      .toBe("Il faut un niveau Steam 5 ou plus pour jouer à ROTK avec ce compte.");
+    expect(localizeServiceError(unavailable, "fr"))
+      .toBe("Ton niveau Steam n’a pas pu être vérifié. Vérifie que ton profil Steam est public, puis réessaie dans quelques instants.");
+    expect(localizeServiceError(required, "zh"))
+      .toBe("使用此账号游玩 ROTK 需要 Steam 等级达到 5 级或以上。");
+    expect(localizeServiceError(unavailable, "zh"))
+      .toBe("无法验证你的 Steam 等级。请确认你的 Steam 个人资料为公开，然后稍后重试。");
+    expect(localizeServiceError(required, "en")).toBe(required);
+    expect(localizeServiceError(unavailable, "en")).toBe(unavailable);
+  });
+
   it("localizes the early game exit message in English and Chinese", () => {
     const raw = "H1Z1 s’est fermé 12 s après son lancement (code Windows 0xC0000005). Si tu ne l’as pas fermé toi-même, relance le jeu ; si ça recommence, Debug (dans les réglages) permet d’envoyer un rapport à ROTK.";
     expect(localizeServiceError(raw, "en"))

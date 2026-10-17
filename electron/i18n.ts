@@ -239,6 +239,7 @@ const FRENCH_ERRORS = new Map<string, string>([
   ["The ROTK account service refused the launch request", "Le service de compte ROTK a refusé le lancement."],
   ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "Les fichiers du jeu ne correspondent pas à l’installation ROTK officielle. Utilise « Vérifier les fichiers », puis réessaie."],
   ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "Ce compte ROTK n’est pas encore prêt. Connecte-toi sur le site ROTK, puis réessaie."],
+  ["Your Steam level could not be verified. Make sure your Steam profile is public, then try again shortly.", "Ton niveau Steam n’a pas pu être vérifié. Vérifie que ton profil Steam est public, puis réessaie dans quelques instants."],
   ["Unable to reach the ROTK integrity service", "Impossible de joindre le service de vérification ROTK. Vérifie ta connexion."],
   ["The ROTK integrity service is temporarily unavailable", "Le service de vérification ROTK est momentanément indisponible."],
   ["Too many ROTK integrity checks. Wait a moment and try again", "Trop de vérifications ROTK. Attends un peu puis réessaie."],
@@ -266,6 +267,7 @@ const DYNAMIC_FRENCH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]
   [/^ROTK could not verify your game files: (.+?)\.? Check your connection and try again\.$/, (match) => `ROTK n’a pas pu vérifier tes fichiers de jeu : ${FRENCH_ATTESTATION_REASONS.get(match[1]) ?? "la vérification n’a pas pu aboutir."} Vérifie ta connexion puis réessaie.`],
   [/^This ROTK account is suspended until (.+?)\.(?: Reason: (.+))?$/, (match) => `Ce compte ROTK est suspendu jusqu’au ${match[1]}.${match[2] ? ` Raison : ${match[2]}` : ""}`],
   [/^This ROTK account is permanently banned\.(?: Reason: (.+))?$/, (match) => `Ce compte ROTK est banni définitivement.${match[1] ? ` Raison : ${match[1]}` : ""}`],
+  [/^Steam level (\d+) or higher is required to play ROTK with this account\.$/, (match) => `Il faut un niveau Steam ${match[1]} ou plus pour jouer à ROTK avec ce compte.`],
 ];
 
 const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
@@ -316,6 +318,7 @@ const CHINESE_ERRORS = new Map<string, string>([
   ["The ROTK account service refused the launch request", "ROTK 账号服务拒绝了本次启动。"],
   ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "游戏文件与 ROTK 官方版本不一致。请点击“验证文件”后重试。"],
   ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "此 ROTK 账号还不能进入游戏。请先登录 ROTK 网站，然后重试。"],
+  ["Your Steam level could not be verified. Make sure your Steam profile is public, then try again shortly.", "无法验证你的 Steam 等级。请确认你的 Steam 个人资料为公开，然后稍后重试。"],
   ["Unable to reach the ROTK integrity service", "无法连接 ROTK 校验服务，请检查网络。"],
   ["The ROTK integrity service is temporarily unavailable", "ROTK 校验服务暂时不可用。"],
   ["Too many ROTK integrity checks. Wait a moment and try again", "校验请求过于频繁，请稍后再试。"],
@@ -342,6 +345,7 @@ const DYNAMIC_CHINESE_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string
   [/^ROTK could not verify your game files: (.+) Check your connection and try again\.$/, (match) => `ROTK 无法验证你的游戏文件：${match[1]} 请检查网络后重试。`],
   [/^This ROTK account is suspended until (.+?)\.(?: Reason: (.+))?$/, (match) => `此 ROTK 账号已被封禁至 ${match[1]}。${match[2] ? `原因：${match[2]}` : ""}`],
   [/^This ROTK account is permanently banned\.(?: Reason: (.+))?$/, (match) => `此 ROTK 账号已被永久封禁。${match[1] ? `原因：${match[1]}` : ""}`],
+  [/^Steam level (\d+) or higher is required to play ROTK with this account\.$/, (match) => `使用此账号游玩 ROTK 需要 Steam 等级达到 ${match[1]} 级或以上。`],
   [/^H1Z1 s’est fermé pendant son initialisation \(code Windows (.+?)\)\.(?: Windows a bloqué .+)?$/, (match) => `H1Z1 在初始化时关闭（Windows 代码 ${match[1] === "inconnu" ? "未知" : match[1]}）。${gameExitHint(match[1], "zh")}`],
   [/^H1Z1 s’est fermé (\d+) s après son lancement \(code Windows (.+?)\)\.(?: Windows a bloqué .+?)? Si tu ne l’as pas fermé toi-même, relance le jeu ; si ça recommence, Debug \(dans les réglages\) permet d’envoyer un rapport à ROTK\.$/, (match) => `H1Z1 在启动 ${match[1]} 秒后关闭（Windows 代码 ${match[2] === "inconnu" ? "未知" : match[2]}）。${gameExitHint(match[2], "zh")}如果不是你自己关闭的，请重新启动游戏；如果再次发生，可以通过设置中的“调试”向 ROTK 发送报告。`],
 ];
