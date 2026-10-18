@@ -7,14 +7,15 @@ import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
 export const GAMEPLAY_PATCH_FILE_NAME = "dinput8.dll";
 export const GAMEPLAY_PATCH_SHA256 =
-  "b1f35314f2e183cdc1ccbbc2b24ee76b8e991179e1adb653f560128d500852d9";
-export const GAMEPLAY_PATCH_BYTES = 48_128;
+  "39cd1ecb3da7d194fc332b029780a293de9d2b38b56c3b33d32d4541f560329d";
+export const GAMEPLAY_PATCH_BYTES = 51_712;
 
 /**
  * Marker next to H1Z1.exe. The proxy enables the sprint byte pair and guarded
- * stance hooks, FPS counter and nameplate correction only with this exact mode
- * and patch list. Removing it disables stance/FPS behavior and restores sprint and nameplate
- * bytes within two seconds; dormant trampolines and the CZ continuation-address
+ * stance hooks, FPS counter, vehicle exit recovery and nameplate correction
+ * only with this exact mode and patch list. Removing it disables the custom
+ * stance/FPS/vehicle exit behavior and restores sprint and nameplate bytes
+ * within two seconds; dormant trampolines and the CZ continuation-address
  * repair remain until the game exits. Full removal requires a restart.
  */
 export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
@@ -22,7 +23,17 @@ export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
 /** Exact retired ROTK artifacts an automatic migration may replace. */
 export const RETIRED_GAMEPLAY_PATCHES = Object.freeze([
   Object.freeze({
-    // Launcher through 2.0.41: Trio recovery could forget an accepted respawn.
+    // Launcher 2.0.42: keep its Trio respawn recovery while adding vehicle exits.
+    sha256: "b1f35314f2e183cdc1ccbbc2b24ee76b8e991179e1adb653f560128d500852d9",
+    bytes: 48_128,
+  }),
+  Object.freeze({
+    // Local slope candidate before startup thread-race recovery.
+    sha256: "d8943e14657aa8289f0c1dca368e21dee4df2404101a4f03b3a6bf5b1fbf64b0",
+    bytes: 50_688,
+  }),
+  Object.freeze({
+    // Previous public proxy, before slope-aware vehicle exit recovery.
     sha256: "e969dedbb8f7a130449c5d38fd3e4f6fb34ba61abfdc3d413f63a069d4a7b36e",
     bytes: 47_616,
   }),
@@ -86,17 +97,17 @@ if (!GAMEPLAY_CLIENT_BUILD) {
 const STATE_FILE_NAME = "gameplay-patch-state.v1.json";
 
 const UNKNOWN_DINPUT_ERROR =
-  "Un dinput8.dll inconnu est présent dans le client ROTK. Supprime-le ou réimporte un client propre.";
+  "Un dinput8.dll inconnu est prÃ©sent dans le client ROTK. Supprime-le ou rÃ©importe un client propre.";
 const INVALID_BUNDLED_PATCH_ERROR =
-  "Le patch sprint ROTK embarqué est absent ou modifié. Ton antivirus l’a peut-être mis en quarantaine : restaure-le depuis Sécurité Windows ou réinstalle le launcher.";
+  "Le patch sprint ROTK embarquÃ© est absent ou modifiÃ©. Ton antivirus lâ€™a peut-Ãªtre mis en quarantaine : restaure-le depuis SÃ©curitÃ© Windows ou rÃ©installe le launcher.";
 const UNSUPPORTED_CLIENT_ERROR =
-  "Cette version de H1Z1 n’est pas compatible avec le patch sprint ROTK. Vérifie les fichiers du jeu dans Steam puis réessaie.";
+  "Cette version de H1Z1 nâ€™est pas compatible avec le patch sprint ROTK. VÃ©rifie les fichiers du jeu dans Steam puis rÃ©essaie.";
 const INSTALL_PATCH_ERROR =
-  "Le patch sprint ROTK n’a pas pu être installé. Ferme H1Z1 puis réessaie.";
+  "Le patch sprint ROTK nâ€™a pas pu Ãªtre installÃ©. Ferme H1Z1 puis rÃ©essaie.";
 const REMOVE_PATCH_ERROR =
-  "Le patch sprint ROTK n’a pas pu être supprimé. Ferme H1Z1 puis réessaie.";
+  "Le patch sprint ROTK nâ€™a pas pu Ãªtre supprimÃ©. Ferme H1Z1 puis rÃ©essaie.";
 const MARKER_ERROR =
-  "Le marqueur du patch sprint ROTK n’a pas pu être écrit. Ferme H1Z1 puis réessaie.";
+  "Le marqueur du patch sprint ROTK nâ€™a pas pu Ãªtre Ã©crit. Ferme H1Z1 puis rÃ©essaie.";
 export const GAMEPLAY_MARKER_CONTENTS = [
   "mode=anti-slow-v3",
   "patch=1046F98:8f>82,1046FE5:74>eb",
