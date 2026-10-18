@@ -184,7 +184,8 @@ describe("launcher locales", () => {
     expect(refused).toContain("launch-failed");
     expect(refused).toMatch(/\b18\b/);
     expect(refused).toContain(noRetry);
-    expect(refused).toContain("AppLocker");
+    expect(refused).toContain("#151");
+    expect(refused).not.toContain("AppLocker");
     expect(refused).toContain("%APPDATA%\\ROTK Launcher\\startup.log");
     expect(copy.rendererGone("crashed")).not.toContain(noRetry);
   });
