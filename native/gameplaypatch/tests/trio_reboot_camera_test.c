@@ -5,13 +5,17 @@
 #define DllUnregisterServer RotkTestDllUnregisterServer
 #define GetdfDIJoystick RotkTestGetdfDIJoystick
 #define DllMain RotkTestDllMain
+#include <windows.h>
+static ULONGLONG test_now = 10000;
+static ULONGLONG test_clock(void) { return test_now; }
+#define GetTickCount64 test_clock
 #include "../dinput8_proxy.c"
 #undef NDEBUG
 #include <assert.h>
 
 static BYTE *image, *game, *context, *actor, *flags_context, *flags_owner, *history, *team_view, *normal_view, *mode;
 static unsigned int wanted = 0x18, setter_calls, visible_calls, hidden_calls, event_calls, actor_calls;
-static BYTE native_dead, refuse_setter, expect_unfinished_event;
+static BYTE native_dead, refuse_setter, expect_unfinished_event, reenter_setter, die_in_setter, mutate_flags;
 static int apply_dead = -1;
 static void native_actor(BYTE *a) {
     assert(a != NULL); ++actor_calls;
@@ -22,8 +26,11 @@ static unsigned int native_select(BYTE *g) {
     assert(g == game); assert((flags_owner[0x108fc] & 0x18) == 0); return wanted;
 }
 static void native_set(BYTE *g, unsigned int selected) {
-    assert(g == game && selected == wanted && !reboot_pending.game);
+    assert(g == game && selected == wanted && reboot_pending.game && reboot_pending.applying);
     ++setter_calls;
+    if (reenter_setter) reboot_after_actor(actor);
+    if (die_in_setter) history[0x438] = 1;
+    if (mutate_flags) flags_owner[0x108fc] ^= 0x40;
     if (!refuse_setter) *(BYTE **)(game + 0x382d8) = normal_view;
     if (refuse_setter == 2) *(BYTE **)(game + 0x382d8) = NULL;
 }
@@ -46,6 +53,7 @@ static void forward(BYTE *where, const void *target) {
     BYTE bytes[14]; stance_jump(bytes, target); write_code(where, bytes, sizeof(bytes));
 }
 static void fresh(void) {
+    test_now = 10000;
     reboot_clear(); InterlockedExchange(&reboot_enabled, 1);
     *(BYTE **)(game + 0x382a0) = context; *(BYTE **)(context + 0x780) = actor;
     *(BYTE **)(game + 0x37680) = flags_context; *(BYTE **)(flags_context + 0x1710) = flags_owner;
@@ -60,9 +68,11 @@ static void fresh(void) {
     *(uintptr_t *)team_view = (uintptr_t)(image + 0x37ea5c8);
     *(uintptr_t *)normal_view = (uintptr_t)(image + 0x3800200);
     history[0x438] = 1; history[0x439] = 0;
+    *(uint64_t *)(history + 0x3d8) = UINT64_C(0xf0123456789abcde);
     flags_owner[0x108fc] = 0xa9; /* Preserve 0xa1, remove exactly 0x08. */
     setter_calls = visible_calls = hidden_calls = event_calls = actor_calls = 0;
     native_dead = refuse_setter = expect_unfinished_event = 0; apply_dead = -1; wanted = 0x18;
+    reenter_setter = die_in_setter = mutate_flags = 0;
 }
 static void apply_state(void) {
     ((reboot_actor_fn)(uintptr_t)(image + REBOOT_ACTOR_RVA))(actor);
@@ -87,7 +97,39 @@ static uintptr_t response(BYTE success) {
     write_code(image + 0x2000, code, sizeof(code));
     return ((uintptr_t (*)(void))(uintptr_t)(image + 0x2000))();
 }
-int main(void) {
+/* Reproduce the reported alive-but-following state through the real installed
+ * response bridge and deferred actor consumer, without the player's logs. */
+static void recovery_case(const char *name) {
+    fresh();
+    if (!strcmp(name, "controller-change")) {
+        response(1);
+        *(uintptr_t *)team_view = (uintptr_t)(image + 0x37eac30);
+        flags_owner[0x108fc] = 0xb9;
+        apply_state();
+        assert(setter_calls == 1 && hidden_calls == 1 && visible_calls == 1);
+    } else if (!strcmp(name, "delayed-alive")) {
+        response(1); native_dead = 1; apply_state();
+        test_now += 6000; apply_dead = 0; apply_state();
+        assert(setter_calls == 1 && hidden_calls == 1 && visible_calls == 1);
+    } else if (!strcmp(name, "duplicate-reply")) {
+        response(1); response(1); apply_state();
+        assert(setter_calls == 1 && hidden_calls == 1 && visible_calls == 1);
+    } else if (!strcmp(name, "setter-retry")) {
+        response(1); refuse_setter = 1; apply_state();
+        refuse_setter = 0; test_now += 250; apply_state();
+        assert(setter_calls == 2 && hidden_calls == 1 && visible_calls == 1);
+    } else if (!strcmp(name, "flags-in-transition")) {
+        flags_owner[0x108fc] = 0xb9; response(1);
+        *(uintptr_t *)team_view = (uintptr_t)(image + 0x37eac30);
+        apply_state();
+        assert(setter_calls == 1 && hidden_calls == 1 && visible_calls == 1);
+    } else {
+        assert(!"unknown recovery case");
+    }
+    assert(flags_owner[0x108fc] == 0xa1 && !reboot_pending.game);
+    printf("Trio reboot recovery passed: %s\n", name);
+}
+int main(int argc, char **argv) {
     DWORD old; MEMORY_BASIC_INFORMATION mem;
     image = VirtualAlloc(NULL, 0x4800000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     game = calloc(1, 0x39000); context = calloc(1, 0x1000); actor = calloc(1, 0x11000);
@@ -112,6 +154,7 @@ int main(void) {
     memcpy(image + 0xee0f20, reboot_selector_guard, sizeof(reboot_selector_guard));
     memcpy(image + 0xf71710, reboot_setter_guard, sizeof(reboot_setter_guard));
     memcpy(image + 0x10876b0, reboot_hidden_guard, sizeof(reboot_hidden_guard));
+    memcpy(image + 0x16d5131, reboot_match_guard, sizeof(reboot_match_guard));
     assert(VirtualProtect(image, 0x4800000, PAGE_EXECUTE_READ, &old));
     assert(FlushInstructionCache(GetCurrentProcess(), image, 0x4800000));
     reboot_install(image); assert(reboot_enabled && reboot_original_actor);
@@ -132,6 +175,9 @@ int main(void) {
     write_code(image + 0xef4e05, event_tail, sizeof(event_tail));
     const BYTE skip_tail[] = {0x31,0xc0,0x48,0x81,0xc4,0x50,0x04,0,0,0x41,0x5f,0x5d,0x5b,0xc3};
     write_code(image + 0xef4e6d, skip_tail, sizeof(skip_tail));
+    if (argc == 3 && !strcmp(argv[1], "--recovery-case")) {
+        recovery_case(argv[2]); return 0;
+    }
     fresh(); assert(response(1) == 0 && event_calls == 0 && reboot_pending.game == game);
     native_dead = 1; apply_dead = 0; /* Only the original consumer makes this alive. */
     apply_state(); assert(actor_calls == 1 && setter_calls == 1 && hidden_calls == 1 && visible_calls == 1);
@@ -150,7 +196,10 @@ int main(void) {
     fresh(); history[0x438] = history[0x439] = 1; response(0); apply_state();
     assert(!setter_calls && !reboot_pending.game && history[0x438] == 1 && history[0x439] == 1);
     fresh(); history[0x438] = history[0x439] = 1; *(uintptr_t *)team_view = 0; response(1);
-    assert(!reboot_pending.game && history[0x438] == 1 && history[0x439] == 1);
+    assert(reboot_pending.game && !history[0x438] && !history[0x439]);
+    apply_state(); assert(!setter_calls && reboot_pending.game); /* wait, never force an unknown view */
+    *(uintptr_t *)team_view = (uintptr_t)(image + 0x37ea5c8);
+    apply_state(); assert(setter_calls == 1);
     fresh(); history[0x438] = history[0x439] = 1; reboot_arm(1, game + 8, UINT64_C(0xeabcdef012345678));
     assert(!reboot_pending.game && history[0x438] == 1 && history[0x439] == 1);
     fresh(); history[0x438] = 2; response(1); apply_state(); assert(!setter_calls && !reboot_pending.game && history[0x438] == 2);
@@ -164,7 +213,9 @@ int main(void) {
     assert(other_history); write_code(image + 0x476e6b8, (BYTE *)&other_history, sizeof(other_history));
     apply_state(); assert(!setter_calls && !reboot_pending.game);
     write_code(image + 0x476e6b8, (BYTE *)&history, sizeof(history)); VirtualFree(other_history, 0, MEM_RELEASE);
-    fresh(); *(uintptr_t *)team_view = 0; response(1); apply_state(); assert(!setter_calls && !reboot_pending.game);
+    fresh(); *(BYTE **)(game + 0x382d8) = NULL; response(1); apply_state();
+    assert(!setter_calls && reboot_pending.game);
+    *(BYTE **)(game + 0x382d8) = team_view; apply_state(); assert(setter_calls == 1);
     fresh(); response(1); native_dead = 1; apply_state(); assert(!setter_calls && reboot_pending.game);
     apply_dead = 0; apply_state(); assert(setter_calls == 1);
     fresh(); response(1); native_dead = 1; apply_state(); assert(!setter_calls && flags_owner[0x108fc] == 0xa9);
@@ -178,10 +229,17 @@ int main(void) {
     fresh(); response(1); *(BYTE **)(context + 0x780) = NULL; apply_state(); assert(!setter_calls && !reboot_pending.game);
     fresh(); response(1); *(BYTE **)(flags_context + 0x1710) = NULL; apply_state(); assert(!setter_calls && !reboot_pending.game);
     fresh(); response(1); history[0x438] = 1; apply_state(); assert(!setter_calls && !reboot_pending.game);
-    fresh(); response(1); reboot_pending.until = 0; apply_state(); assert(!setter_calls && !reboot_pending.game);
+    fresh(); response(1); test_now += 120000; apply_state(); assert(setter_calls == 1 && !reboot_pending.game);
     fresh(); response(1); InterlockedExchange(&reboot_enabled, 0); apply_state(); assert(!setter_calls && !reboot_pending.game);
-    fresh(); response(1); refuse_setter = 1; apply_state(); assert(setter_calls == 1 && !visible_calls && !hidden_calls && !reboot_pending.game && flags_owner[0x108fc] == 0xa9);
-    fresh(); response(1); refuse_setter = 2; apply_state(); assert(setter_calls == 1 && !visible_calls && !hidden_calls && !reboot_pending.game && flags_owner[0x108fc] == 0xa9);
+    fresh(); response(1); refuse_setter = 1; apply_state();
+    assert(setter_calls == 1 && !visible_calls && !hidden_calls && reboot_pending.game && flags_owner[0x108fc] == 0xa9);
+    for (unsigned int i = 0; i < 100; ++i) apply_state();
+    assert(setter_calls == 1); /* a deferred setter is retried at most 4/s */
+    refuse_setter = 0; test_now += 250; apply_state(); assert(setter_calls == 2 && !reboot_pending.game);
+    fresh(); response(1); refuse_setter = 2; apply_state();
+    assert(setter_calls == 1 && !visible_calls && !hidden_calls && reboot_pending.game && flags_owner[0x108fc] == 0xa9);
+    *(BYTE **)(game + 0x382d8) = team_view; refuse_setter = 0; test_now += 250;
+    apply_state(); assert(setter_calls == 2 && visible_calls == 1);
     fresh(); *(uintptr_t *)team_view = (uintptr_t)(image + 0x37eac30); flags_owner[0x108fc] = 0xb9;
     response(1); wanted = 1; apply_state(); assert(setter_calls == 1 && flags_owner[0x108fc] == 0xa1);
     /* No SPECTATE click: DeathCam leaves the two spectator bits and hidden
@@ -212,6 +270,34 @@ int main(void) {
     assert(event_calls == 1 && !reboot_pending.game && history[0x438] == 1); /* Stock Training UI unchanged. */
     fresh(); response(1); *(unsigned int *)(mode + 0x28) = 6; apply_state();
     assert(!setter_calls && !reboot_pending.game);
-    puts("Trio reboot camera: native x64 state-consumer trampoline/gate ABI and both original continuations, delayed alive transition applied by original consumer BEFORE restoration, local BR success and terminal death required, two latches reset with all other history preserved, distinct full actor/character IDs, TeamSpectate and DeathCam exits with both UIs, Training excluded, unchanged stock Lua event routing, rejection, expiry and no DeathCam fallback passed.");
+    fresh(); response(1); *(uint64_t *)(history + 0x3d8) ^= UINT64_C(0x100000000);
+    apply_state(); assert(!setter_calls && !reboot_pending.game); /* same pointers, different full match ID */
+    fresh(); *(uint64_t *)(history + 0x3d8) = 0; response(1);
+    assert(!reboot_pending.game && history[0x438] == 1);
+    for (unsigned int i = 0; i < 20; ++i) {
+        recovery_case("controller-change"); recovery_case("delayed-alive");
+        recovery_case("duplicate-reply"); recovery_case("setter-retry");
+        recovery_case("flags-in-transition");
+    }
+    fresh(); response(1); response(0); apply_state(); assert(setter_calls == 1);
+    fresh(); response(1); reboot_response(game, 1, UINT64_C(0x42));
+    apply_state(); assert(setter_calls == 1); /* an unrelated reply cannot revoke this life */
+    fresh(); response(1); reenter_setter = 1; apply_state();
+    assert(setter_calls == 1 && hidden_calls == 1 && visible_calls == 1);
+    fresh(); response(1); die_in_setter = 1; apply_state();
+    assert(setter_calls == 1 && !hidden_calls && !visible_calls && !reboot_pending.game);
+    fresh(); response(1); refuse_setter = 1; mutate_flags = 1; apply_state();
+    assert(flags_owner[0x108fc] == 0xe9 && reboot_pending.game); /* preserve native flag changes */
+    history[0x438] = 1; apply_state(); assert(!reboot_pending.game);
+    history[0x438] = 0; refuse_setter = 0; test_now += 250; apply_state();
+    assert(setter_calls == 1); /* a later life cannot revive a cancelled recovery */
+    fresh(); response(1); *(BYTE **)(game + 0x382d8) = normal_view; apply_state();
+    assert(!setter_calls && hidden_calls == 1 && visible_calls == 1 && flags_owner[0x108fc] == 0xa1);
+    fresh(); response(1); flags_owner[0x108fc] = 0xa1; apply_state();
+    assert(setter_calls == 1 && hidden_calls == 1); /* flags already cleared, camera still attached */
+    fresh(); *(uintptr_t *)team_view = (uintptr_t)(image + 0x37e41d8); flags_owner[0x108fc] = 0xa1;
+    response(1); *(uintptr_t *)team_view = (uintptr_t)(image + 0x37ea5c8); flags_owner[0x108fc] = 0xa9;
+    apply_state(); assert(setter_calls == 1 && hidden_calls == 1); /* SPECTATE arrives during reboot */
+    puts("Trio reboot camera: installed x64 ABI, both original Lua paths, retained next-life recovery across controller/flag changes, delayed alive, duplicate replies and deferred setters; retries bounded, re-entry blocked, new death/identity/mode cancellation and no DeathCam fallback passed.");
     return 0;
 }
