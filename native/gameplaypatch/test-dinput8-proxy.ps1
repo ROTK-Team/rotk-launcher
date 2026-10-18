@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "E969DEDBB8F7A130449C5D38FD3E4F6FB34BA61ABFDC3D413F63A069D4A7B36E"
-$expectedBytes = 47616
+$expectedHash = "2CBCD25EA38AD00A87AEA3A57A323E637FBB2D40C7DD14F4252CE34E1132B7D1"
+$expectedBytes = 51200
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
@@ -228,3 +228,12 @@ if ($LASTEXITCODE -ne 0) { throw "Native FPS counter test failed." }
 Write-Host "Shotgun sprint, weapon stance, respawn, Trio reboot and spectator nameplate proxy tests passed."
 Write-Host "  Size $actualBytes bytes"
 Write-Host "  SHA256 $actualHash"
+
+$exitExe = Join-Path $testRoot "vehicle_exit_test.exe"
+& $zig.Source @(
+    "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $exitExe, (Join-Path $root "tests\vehicle_exit_test.c")
+)
+if ($LASTEXITCODE -ne 0) { throw "Vehicle exit test compilation failed." }
+& $exitExe
+if ($LASTEXITCODE -ne 0) { throw "Vehicle exit slope recovery test failed." }
