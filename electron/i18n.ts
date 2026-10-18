@@ -32,6 +32,12 @@ export const MAIN_COPY = {
     },
     startupTitle: "ROTK Launcher could not start",
     startupSafety: "No H1Z1 files were modified.",
+    sandboxFallback: {
+      message: "Windows refused to start the security sandbox of the launcher window on this PC.",
+      detail: "This happens on some PCs while the launcher runs as administrator (known issue #151), and restarting normally will not help.\n\nYou can restart the launcher without the sandbox, an extra protection around the window. While it is off, the window only loads the launcher's own files, so news images are not shown. This choice applies to this launcher version only: the next version tries the sandbox again.",
+      restart: "Restart without the sandbox",
+      quit: "Quit",
+    },
     elevation: {
       "check-failed": "Windows administrator rights could not be verified. The launcher will close. Try Run as administrator.",
       required: "ROTK Launcher requires Windows administrator rights and will close. Use Run as administrator to start it.",
@@ -90,6 +96,12 @@ export const MAIN_COPY = {
     },
     startupTitle: "ROTK Launcher ne peut pas démarrer",
     startupSafety: "Aucun fichier H1Z1 n’a été modifié.",
+    sandboxFallback: {
+      message: "Windows a refusé de démarrer le bac à sable de sécurité de la fenêtre du launcher sur ce PC.",
+      detail: "Cela arrive sur certains PC quand le launcher s’exécute en tant qu’administrateur (problème connu #151), et relancer normalement n’y changera rien.\n\nTu peux redémarrer le launcher sans le bac à sable, une protection supplémentaire autour de la fenêtre. Tant qu’il est désactivé, la fenêtre ne charge que les fichiers du launcher lui-même, donc les images des actualités ne s’affichent pas. Ce choix ne vaut que pour cette version du launcher : la prochaine version réessaiera avec le bac à sable.",
+      restart: "Redémarrer sans le bac à sable",
+      quit: "Quitter",
+    },
     elevation: {
       "check-failed": "Les droits administrateur Windows n’ont pas pu être vérifiés. Le launcher va se fermer. Essaie Exécuter en tant qu’administrateur.",
       required: "ROTK Launcher exige les droits administrateur Windows et va se fermer. Utilise Exécuter en tant qu’administrateur pour le démarrer.",
@@ -148,6 +160,12 @@ export const MAIN_COPY = {
     },
     startupTitle: "ROTK 启动器无法启动",
     startupSafety: "H1Z1 的游戏文件没有被改动。",
+    sandboxFallback: {
+      message: "在这台电脑上，Windows 拒绝启动启动器窗口的安全沙盒。",
+      detail: "启动器以管理员身份运行时，部分电脑会出现这个问题（已知问题 #151），正常重启也无法解决。\n\n你可以在不使用沙盒的情况下重新启动启动器。沙盒是窗口的一层额外保护。沙盒关闭期间，窗口只加载启动器自带的文件，因此不会显示最新消息的图片。此选择仅对当前版本的启动器有效：下一个版本会重新尝试使用沙盒。",
+      restart: "不使用沙盒重新启动",
+      quit: "退出",
+    },
     elevation: {
       "check-failed": "无法确认 Windows 管理员权限。启动器即将关闭。请尝试“以管理员身份运行”。",
       required: "ROTK 启动器需要 Windows 管理员权限，即将关闭。请使用“以管理员身份运行”来启动。",
