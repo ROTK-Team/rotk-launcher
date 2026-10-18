@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "E969DEDBB8F7A130449C5D38FD3E4F6FB34BA61ABFDC3D413F63A069D4A7B36E"
-$expectedBytes = 47616
+$expectedHash = "F76D48B04A15BBBDB7FE1BEA26DD7B8B073B2DBA346B06C41FD3BBC23896DA18"
+$expectedBytes = 54784
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
@@ -225,6 +225,15 @@ if ($LASTEXITCODE -ne 0) { throw "Native FPS test compilation failed." }
 & $fpsExe
 if ($LASTEXITCODE -ne 0) { throw "Native FPS counter test failed." }
 
-Write-Host "Shotgun sprint, weapon stance, respawn, Trio reboot and spectator nameplate proxy tests passed."
+$adsExe = Join-Path $testRoot "ads_collision_test.exe"
+& $zig.Source @(
+    "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $adsExe, (Join-Path $root "tests\ads_collision_test.c")
+)
+if ($LASTEXITCODE -ne 0) { throw "ADS collision test compilation failed." }
+& $adsExe
+if ($LASTEXITCODE -ne 0) { throw "ADS collision test failed." }
+
+Write-Host "Shotgun sprint, stance, respawn, reboot, nameplates, FPS and ADS collision tests passed."
 Write-Host "  Size $actualBytes bytes"
 Write-Host "  SHA256 $actualHash"
