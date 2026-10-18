@@ -15,6 +15,8 @@ import { buildZip } from "./helpers/build-zip.js";
 
 const faults = vi.hoisted(() => ({
   locked: null as { operation: "copyFile" | "rename"; path: string } | null,
+  // When set, statfs reports this many free bytes on every drive.
+  freeBytes: null as (() => Promise<number>) | null,
 }));
 // Until released, every copy from or rename onto the locked path fails with
 // EPERM, like a file an antivirus holds for the whole attempt.
@@ -33,6 +35,10 @@ vi.mock("node:fs/promises", async (original) => {
     rename: (...args: Parameters<typeof fs.rename>) => {
       const failure = fault("rename", String(args[1]));
       return failure ? Promise.reject(failure) : fs.rename(...args);
+    },
+    statfs: async (...args: Parameters<typeof fs.statfs>) => {
+      const disk = await fs.statfs(...args);
+      return faults.freeBytes ? { ...disk, bavail: await faults.freeBytes(), bsize: 1 } : disk;
     },
   };
 });
@@ -88,6 +94,7 @@ describe("ROTK asset sync", () => {
   afterEach(async () => {
     vi.useRealTimers();
     faults.locked = null;
+    faults.freeBytes = null;
     await Promise.all(temporaryDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true })));
   });
@@ -904,6 +911,99 @@ describe("ROTK asset sync", () => {
       await expect(service(userData, {}).prefetch(root)).rejects.toThrow("Unrouted fetch");
       expect(await readdir(join(assetStorage(root), "asset-cache"))).toEqual([`${entryV1.sha256}.pack`]);
       expect(await readFile(join(root, "data", "weapons.pack"))).toEqual(v1);
+    });
+  });
+
+  describe("free space check", () => {
+    const pack = Buffer.from("0123456789".repeat(100));
+    const size = pack.length;
+    const entry = assetEntry("big.pack", pack, { installPath: "data/big.pack" });
+    const feed: Record<string, RouteHandler> = {
+      [FEED_URL]: () => new Response(JSON.stringify(manifest([entry]))),
+      [entry.url]: () => new Response(new Uint8Array(pack)),
+    };
+
+    function cachePath(root: string): string {
+      return join(assetStorage(root), "asset-cache", `${entry.sha256}.pack`);
+    }
+
+    async function writeCache(root: string, path: string, data: Buffer): Promise<void> {
+      await mkdir(dirname(cachePath(root)), { recursive: true });
+      await writeFile(path, data);
+    }
+
+    /** Bytes written into and next to the install since setup(). */
+    async function writtenBytes(root: string): Promise<number> {
+      let total = 0;
+      for (const directory of [root, assetStorage(root)]) {
+        const entries = await readdir(directory, { recursive: true, withFileTypes: true }).catch(() => []);
+        for (const file of entries) {
+          if (!file.isFile() || file.name === INSTALL_MARKER_NAME) continue;
+          total += (await stat(join(file.parentPath, file.name))).size;
+        }
+      }
+      return total;
+    }
+
+    it("asks for three times a pack that is not downloaded yet", async () => {
+      const { userData, root } = await setup();
+      faults.freeBytes = async () => 3 * size - 1;
+      await expect(service(userData, feed).sync(root)).rejects.toThrow("Espace disque insuffisant pour les assets");
+      faults.freeBytes = async () => 3 * size;
+      expect((await service(userData, feed).sync(root)).status).toBe("updated");
+    });
+
+    it("asks for twice a pack already complete in the cache", async () => {
+      const { userData, root } = await setup();
+      await writeCache(root, cachePath(root), pack);
+      faults.freeBytes = async () => 2 * size - 1;
+      await expect(service(userData, feed).sync(root)).rejects.toThrow("Espace disque insuffisant pour les assets");
+      const calls: string[] = [];
+      faults.freeBytes = async () => 2 * size;
+      expect(await service(userData, feed, calls).sync(root)).toEqual({ status: "updated", packVersion: "1.0.0" });
+      expect(calls).toEqual([FEED_URL]);
+    });
+
+    it("counts only the bytes a .part file is missing", async () => {
+      const { userData, root } = await setup();
+      await writeCache(root, `${cachePath(root)}.part`, pack.subarray(0, 400));
+      const resumed: Record<string, RouteHandler> = {
+        [FEED_URL]: feed[FEED_URL],
+        [entry.url]: () => new Response(new Uint8Array(pack.subarray(400)), {
+          status: 206,
+          headers: { "content-range": `bytes 400-999/${size}` },
+        }),
+      };
+      faults.freeBytes = async () => (size - 400) + 2 * size - 1;
+      await expect(service(userData, resumed).sync(root)).rejects.toThrow("Espace disque insuffisant pour les assets");
+      faults.freeBytes = async () => (size - 400) + 2 * size;
+      expect((await service(userData, resumed).sync(root)).status).toBe("updated");
+      expect(await readFile(join(root, "data", "big.pack"))).toEqual(pack);
+    });
+
+    it("lets a background pass with nothing left to download skip the check", async () => {
+      const { userData, root } = await setup();
+      faults.freeBytes = async () => 0;
+      const calls: string[] = [];
+      await expect(service(userData, feed, calls).prefetch(root)).rejects.toThrow("Espace disque insuffisant pour les assets");
+      expect(calls).toEqual([FEED_URL]);
+
+      await writeCache(root, cachePath(root), pack);
+      calls.length = 0;
+      expect(await service(userData, feed, calls).prefetch(root)).toEqual({ packVersion: "1.0.0", pendingAssets: 1 });
+      expect(calls).toEqual([FEED_URL]);
+    });
+
+    it("lets Play install a background download with 3.5 times the pack free", async () => {
+      const { userData, root } = await setup();
+      // The drive starts with 3.5 times the pack free and loses every byte written.
+      faults.freeBytes = async () => 3.5 * size - await writtenBytes(root);
+      const sync = service(userData, feed);
+      expect(await sync.prefetch(root)).toEqual({ packVersion: "1.0.0", pendingAssets: 1 });
+      // 2.5 times the pack is left: enough for the install, not for the old three times.
+      expect(await writtenBytes(root)).toBe(size);
+      expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "1.0.0" });
+      expect(await readFile(join(root, "data", "big.pack"))).toEqual(pack);
     });
   });
 });
