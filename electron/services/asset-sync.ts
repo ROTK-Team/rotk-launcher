@@ -361,13 +361,15 @@ function relativeToNative(relativePath: string): string {
 
 /**
  * Each pending pack is downloaded, then extracted next to its target, with the
- * replaced original backed up: plan for about three times the download size.
+ * replaced original backed up: plan for the bytes still to download plus about
+ * twice the pack sizes. A pack already downloaded (by a background pass or an
+ * interrupted attempt) is on the drive already and is not counted twice.
  */
-async function ensureFreeSpace(directory: string, downloadBytes: number): Promise<void> {
-  if (downloadBytes === 0) return;
+async function ensureFreeSpace(directory: string, downloadBytes: number, packBytes: number): Promise<void> {
+  const requiredBytes = downloadBytes + 2 * packBytes;
+  if (requiredBytes === 0) return;
   const disk = await statfs(directory).catch(() => null);
   if (!disk) return;
-  const requiredBytes = downloadBytes * 3;
   if (Number(disk.bavail) * Number(disk.bsize) < requiredBytes) {
     throw new Error(`Espace disque insuffisant pour les assets : ${Math.ceil(requiredBytes / 1024 ** 3)} Go sont nécessaires.`);
   }
@@ -493,7 +495,7 @@ export class AssetSyncService {
     }
 
     const totalBytes = pending.reduce((sum, asset) => sum + asset.size, 0);
-    await ensureFreeSpace(dirname(root), totalBytes);
+    await ensureFreeSpace(dirname(root), await this.bytesToDownload(pending), totalBytes);
     let completedBytes = 0;
     let assetsCompleted = 0;
     const emit = (phase: AssetSyncProgress["phase"], assetName: string, force = false): void => {
@@ -591,7 +593,9 @@ export class AssetSyncService {
     });
 
     const totalBytes = pending.reduce((sum, asset) => sum + asset.size, 0);
-    await ensureFreeSpace(dirname(root), totalBytes);
+    // Nothing left to download: the sync that installs checks the space it needs.
+    const downloadBytes = await this.bytesToDownload(pending);
+    if (downloadBytes > 0) await ensureFreeSpace(dirname(root), downloadBytes, totalBytes);
     let completedBytes = 0;
     let assetsCompleted = 0;
     let lastProgressAt = 0;
@@ -713,6 +717,24 @@ export class AssetSyncService {
       return response;
     }
     throw new Error("Trop de redirections pendant le téléchargement des assets.");
+  }
+
+  /**
+   * What ensureCachedAsset() still has to fetch for these packs: nothing for a
+   * complete payload in the cache, the rest of a `.part` file, otherwise the
+   * whole size.
+   */
+  private async bytesToDownload(assets: AssetManifestEntry[]): Promise<number> {
+    let total = 0;
+    for (const asset of assets) {
+      const cachePath = join(this.cacheDirectory, `${asset.sha256}.pack`);
+      const cached = await stat(cachePath).catch(() => null);
+      if (cached?.isFile() && cached.size === asset.size) continue;
+      const partial = (await stat(`${cachePath}.part`).catch(() => null))?.size ?? 0;
+      // A part longer than the pack is dropped and downloaded again.
+      total += partial <= asset.size ? asset.size - partial : asset.size;
+    }
+    return total;
   }
 
   /**
