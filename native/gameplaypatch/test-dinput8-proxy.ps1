@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "B1F35314F2E183CDC1CCBBC2B24EE76B8E991179E1ADB653F560128D500852D9"
-$expectedBytes = 48128
+$expectedHash = "7DE5B115A302A44042B7361BF31112A66B473AA8E21F21AE29572FF254EAFC30"
+$expectedBytes = 58368
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
@@ -225,6 +225,24 @@ if ($LASTEXITCODE -ne 0) { throw "Native FPS test compilation failed." }
 & $fpsExe
 if ($LASTEXITCODE -ne 0) { throw "Native FPS counter test failed." }
 
-Write-Host "Shotgun sprint, weapon stance, respawn, Trio reboot and spectator nameplate proxy tests passed."
+$adsExe = Join-Path $testRoot "ads_collision_test.exe"
+& $zig.Source @(
+    "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $adsExe, (Join-Path $root "tests\ads_collision_test.c")
+)
+if ($LASTEXITCODE -ne 0) { throw "ADS collision test compilation failed." }
+& $adsExe
+if ($LASTEXITCODE -ne 0) { throw "ADS collision test failed." }
+
+Write-Host "Shotgun sprint, stance, respawn, reboot, nameplates, FPS and ADS collision tests passed."
 Write-Host "  Size $actualBytes bytes"
 Write-Host "  SHA256 $actualHash"
+
+$exitExe = Join-Path $testRoot "vehicle_exit_test.exe"
+& $zig.Source @(
+    "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $exitExe, (Join-Path $root "tests\vehicle_exit_test.c")
+)
+if ($LASTEXITCODE -ne 0) { throw "Vehicle exit test compilation failed." }
+& $exitExe
+if ($LASTEXITCODE -ne 0) { throw "Vehicle exit slope recovery test failed." }
