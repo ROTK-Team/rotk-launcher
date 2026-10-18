@@ -7,14 +7,14 @@ import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
 export const GAMEPLAY_PATCH_FILE_NAME = "dinput8.dll";
 export const GAMEPLAY_PATCH_SHA256 =
-  "39cd1ecb3da7d194fc332b029780a293de9d2b38b56c3b33d32d4541f560329d";
-export const GAMEPLAY_PATCH_BYTES = 51_712;
+  "7de5b115a302a44042b7361bf31112a66b473aa8e21f21ae29572ff254eafc30";
+export const GAMEPLAY_PATCH_BYTES = 58_368;
 
 /**
  * Marker next to H1Z1.exe. The proxy enables the sprint byte pair and guarded
- * stance hooks, FPS counter, vehicle exit recovery and nameplate correction
+ * stance hooks, FPS counter, vehicle exit recovery, ADS transitions and nameplate correction
  * only with this exact mode and patch list. Removing it disables the custom
- * stance/FPS/vehicle exit behavior and restores sprint and nameplate bytes
+ * stance/FPS/vehicle exit/ADS behavior and restores sprint and nameplate bytes
  * within two seconds; dormant trampolines and the CZ continuation-address
  * repair remain until the game exits. Full removal requires a restart.
  */
@@ -23,7 +23,7 @@ export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
 /** Exact retired ROTK artifacts an automatic migration may replace. */
 export const RETIRED_GAMEPLAY_PATCHES = Object.freeze([
   Object.freeze({
-    // Launcher 2.0.42: keep its Trio respawn recovery while adding vehicle exits.
+    // Launcher 2.0.42: keep its Trio respawn recovery while adding vehicle exits and ADS transitions.
     sha256: "b1f35314f2e183cdc1ccbbc2b24ee76b8e991179e1adb653f560128d500852d9",
     bytes: 48_128,
   }),
