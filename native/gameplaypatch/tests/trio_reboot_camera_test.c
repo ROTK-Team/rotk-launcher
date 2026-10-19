@@ -157,7 +157,9 @@ int main(int argc, char **argv) {
     memcpy(image + 0x16d5131, reboot_match_guard, sizeof(reboot_match_guard));
     assert(VirtualProtect(image, 0x4800000, PAGE_EXECUTE_READ, &old));
     assert(FlushInstructionCache(GetCurrentProcess(), image, 0x4800000));
-    reboot_install(image); assert(reboot_enabled && reboot_original_actor);
+    /* The bridge comes from the block DllMain reserves for the real image. */
+    bridge_block_reserve_at(image); assert(bridge_block != NULL && bridge_block_base == image);
+    reboot_install(image); assert(reboot_enabled && (BYTE *)(uintptr_t)reboot_original_actor == bridge_block);
     assert(VirtualQuery(image + REBOOT_ACTOR_RVA, &mem, sizeof(mem)) == sizeof(mem) && mem.Protect == PAGE_EXECUTE_READ);
     forward(image + 0xee0f20, (const void *)(uintptr_t)native_select);
     forward(image + 0xf71710, (const void *)(uintptr_t)native_set);

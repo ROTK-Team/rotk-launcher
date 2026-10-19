@@ -198,6 +198,17 @@ if ($LASTEXITCODE -ne -1073741819) { throw "CZ native access violation was not r
 & $respawnExe
 if ($LASTEXITCODE -ne 0) { throw "CZ respawn repair test failed." }
 
+# Bridge pages: the early block, the original upward search and the search
+# below the image when that window is full, all on private allocations.
+$bridgeExe = Join-Path $testRoot "bridge_page_test.exe"
+& $zig.Source @(
+    "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $bridgeExe, (Join-Path $root "tests\bridge_page_test.c"), "-luser32"
+)
+if ($LASTEXITCODE -ne 0) { throw "Bridge page test compilation failed." }
+& $bridgeExe
+if ($LASTEXITCODE -ne 0) { throw "Bridge page test failed." }
+
 $rebootExe = Join-Path $testRoot "trio_reboot_camera_test.exe"
 & $zig.Source @(
     "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
