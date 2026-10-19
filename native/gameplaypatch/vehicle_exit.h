@@ -140,7 +140,8 @@ static void vehicle_exit_install(BYTE *base) {
     vehicle_exit_build_bridges(memory);
     if (!VirtualProtect(memory, 4096, PAGE_EXECUTE_READ, &protection) ||
         !FlushInstructionCache(GetCurrentProcess(), memory, 4096)) {
-        bridge_release(memory); return;
+        bridge_release(memory);
+        patch_log("ROTK vehicle exit: bridge protection refused; skipped.\n"); return;
     }
     for (unsigned int i = 0; i < 3; ++i) {
         int32_t relative = (int32_t)((memory + (i == 1 ? 32 : 0) - base) - (i == 1 ? 0x10579a5 : i == 2 ? 0x12e5a8c : 0x12e663a));
