@@ -24,9 +24,10 @@
  * The patch is opt-in through a marker file next to the executable,
  * ``rotk-shotgun-sprint.ini``. Removing that marker is a complete, local
  * live switch: the worker restores both stock bytes within two seconds and
- * the launcher deletes the DLL on the next launch. The marker is written by
- * the launcher before every patched launch and removed before attestation
- * whenever the server directs a clean client.
+ * the launcher deletes the DLL on the next launch. A marker that is present
+ * but cannot be opened or read counts as removed after three checks in a
+ * row. The marker is written by the launcher before every patched launch
+ * and removed before attestation whenever the server directs a clean client.
  */
 
 #define ROTK_H1Z1_FILE_SIZE UINT64_C(82158616)
@@ -48,6 +49,7 @@
 #define ROTK_STABLE_READ_INTERVAL_MS 100U
 #define ROTK_STABLE_READ_LIMIT 300U
 #define ROTK_WATCH_INTERVAL_MS 2000U
+#define ROTK_MARKER_UNREADABLE_LIMIT 3U
 
 static const WCHAR k_marker_name[] = L"rotk-shotgun-sprint.ini";
 static const char k_marker_mode[] = "mode=anti-slow-v3";
@@ -196,18 +198,31 @@ static void patch_log(const char *message) {
     CloseHandle(file);
 }
 
-static BOOL marker_enabled(void) {
+typedef enum {
+    MARKER_ENABLED,
+    MARKER_REMOVED,
+    MARKER_UNREADABLE
+} marker_state;
+
+/*
+ * MARKER_REMOVED is the launcher's switch: no file, or a file without both
+ * opt-in lines. Any other open or read failure (a sharing violation from an
+ * antivirus or backup tool, for example) is MARKER_UNREADABLE, with its error.
+ */
+static marker_state marker_check(DWORD *error) {
     WCHAR marker_path[MAX_PATH];
     HANDLE file;
     char contents[512];
     DWORD read = 0U;
-    BOOL enabled = FALSE;
+    marker_state state = MARKER_REMOVED;
 
+    *error = ERROR_SUCCESS;
     if (!module_sibling_path(
             marker_path,
             (DWORD)ARRAYSIZE(marker_path),
             k_marker_name)) {
-        return FALSE;
+        *error = GetLastError();
+        return MARKER_UNREADABLE;
     }
     file = CreateFileW(
         marker_path,
@@ -218,22 +233,34 @@ static BOOL marker_enabled(void) {
         FILE_ATTRIBUTE_NORMAL,
         NULL);
     if (file == INVALID_HANDLE_VALUE) {
-        return FALSE;
+        *error = GetLastError();
+        return *error == ERROR_FILE_NOT_FOUND ||
+                *error == ERROR_PATH_NOT_FOUND
+            ? MARKER_REMOVED
+            : MARKER_UNREADABLE;
     }
-    if (ReadFile(
+    if (!ReadFile(
             file,
             contents,
             (DWORD)(sizeof(contents) - 1U),
             &read,
-            NULL) &&
-        read > 0U) {
+            NULL)) {
+        *error = GetLastError();
+        state = MARKER_UNREADABLE;
+    } else if (read > 0U) {
         contents[read] = '\0';
-        enabled =
-            strstr(contents, k_marker_mode) != NULL &&
-            strstr(contents, k_marker_patch) != NULL;
+        if (strstr(contents, k_marker_mode) != NULL &&
+            strstr(contents, k_marker_patch) != NULL) {
+            state = MARKER_ENABLED;
+        }
     }
     CloseHandle(file);
-    return enabled;
+    return state;
+}
+
+static BOOL marker_enabled(void) {
+    DWORD error;
+    return marker_check(&error) == MARKER_ENABLED;
 }
 
 static FARPROC system_dinput_export(const char *name) {
@@ -653,11 +680,37 @@ static BOOL install_patch_pair(BYTE *image_base) {
 #include "ads_collision.h"
 #include "ads_sprint_rule.h"
 
+/*
+ * The state the watchdog acts on. A removed marker counts at once. An
+ * unreadable one counts as enabled until ROTK_MARKER_UNREADABLE_LIMIT checks
+ * in a row failed, so one read blocked by another program does not turn
+ * every feature off for the rest of the game.
+ */
+static marker_state watchdog_check(unsigned int *unreadable, DWORD *error) {
+    marker_state state = marker_check(error);
+
+    if (state != MARKER_UNREADABLE) {
+        *unreadable = 0U;
+        return state;
+    }
+    ++*unreadable;
+    return *unreadable < ROTK_MARKER_UNREADABLE_LIMIT
+        ? MARKER_ENABLED
+        : MARKER_UNREADABLE;
+}
+
 static DWORD WINAPI watchdog_worker(LPVOID parameter) {
+    unsigned int unreadable = 0U;
+    DWORD error = ERROR_SUCCESS;
+    marker_state state;
+    BOOL restored;
+    char line[160];
+
     (void)parameter;
     for (;;) {
         Sleep(ROTK_WATCH_INTERVAL_MS);
-        if (marker_enabled()) {
+        state = watchdog_check(&unreadable, &error);
+        if (state == MARKER_ENABLED) {
             continue;
         }
         InterlockedExchange(&stance_enabled, 0);
@@ -671,7 +724,18 @@ static DWORD WINAPI watchdog_worker(LPVOID parameter) {
         if (!nameplate_restore()) {
             patch_log("ROTK spectator names: original formatter restore refused.\n");
         }
-        if (restore_patch_pair(g_image_base)) {
+        restored = restore_patch_pair(g_image_base);
+        if (state == MARKER_UNREADABLE) {
+            snprintf(
+                line,
+                sizeof(line),
+                "ROTK shotgun sprint: marker unreadable %u times in a row "
+                "(error %lu); %s.\n",
+                unreadable,
+                (unsigned long)error,
+                restored ? "stock bytes restored" : "restore refused");
+            patch_log(line);
+        } else if (restored) {
             patch_log(
                 "ROTK shotgun sprint: marker removed; stock bytes restored.\n");
         } else {
