@@ -9,9 +9,40 @@
 static ULONGLONG test_now = 10000;
 static ULONGLONG test_clock(void) { return test_now; }
 #define GetTickCount64 test_clock
+static HANDLE WINAPI test_open_thread(DWORD access, BOOL inherit, DWORD id);
+#define OpenThread test_open_thread
 #include "../dinput8_proxy.c"
+#undef OpenThread
 #undef NDEBUG
 #include <assert.h>
+
+static HANDLE retiring_thread, retire_event;
+static DWORD retiring_id;
+static unsigned int retired_open_errors, denied_opens, forced_open_failures;
+static DWORD WINAPI retire_worker(LPVOID unused) {
+    (void)unused;
+    assert(WaitForSingleObject(retire_event, 5000) == WAIT_OBJECT_0);
+    return 0;
+}
+/* A snapshot thread exits before OpenThread and the call fails with the
+ * error 87 seen in H1Z1. */
+static HANDLE WINAPI test_open_thread(DWORD access, BOOL inherit, DWORD id) {
+    if (id == retiring_id) {
+        assert(SetEvent(retire_event));
+        assert(WaitForSingleObject(retiring_thread, 5000) == WAIT_OBJECT_0);
+        assert(CloseHandle(retiring_thread));
+        retiring_thread = NULL; retiring_id = 0;
+        ++retired_open_errors;
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+    if (forced_open_failures) {
+        --forced_open_failures; ++denied_opens;
+        SetLastError(ERROR_ACCESS_DENIED);
+        return NULL;
+    }
+    return OpenThread(access, inherit, id);
+}
 
 static BYTE *image, *game, *context, *actor, *flags_context, *flags_owner, *history, *team_view, *normal_view, *mode;
 static unsigned int wanted = 0x18, setter_calls, visible_calls, hidden_calls, event_calls, actor_calls;
@@ -312,6 +343,40 @@ int main(int argc, char **argv) {
     fresh(); *(uintptr_t *)team_view = (uintptr_t)(image + 0x37e41d8); flags_owner[0x108fc] = 0xa1;
     response(1); *(uintptr_t *)team_view = (uintptr_t)(image + 0x37ea5c8); flags_owner[0x108fc] = 0xa9;
     apply_state(); assert(setter_calls == 1 && hidden_calls == 1); /* SPECTATE arrives during reboot */
-    puts("Trio reboot camera: installed x64 ABI, both original Lua paths, retained next-life recovery across controller/flag changes, delayed alive, duplicate replies and deferred setters; retries bounded, re-entry blocked, new death/identity/mode cancellation and no DeathCam fallback passed; a refused install names its step.");
+
+    /* Install on a second image with the stock guards. A snapshot thread that
+     * exits before OpenThread is retried with a fresh snapshot; a persistent
+     * failure stops after 20 attempts and writes nothing. */
+    BYTE *stock = VirtualAlloc(NULL, 0x1700000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    assert(stock);
+    memcpy(stock + REBOOT_ACTOR_RVA, reboot_actor_guard, sizeof(reboot_actor_guard));
+    memcpy(stock + REBOOT_RESPONSE_RVA, reboot_response_guard, sizeof(reboot_response_guard));
+    memcpy(stock + 0xee0f20, reboot_selector_guard, sizeof(reboot_selector_guard));
+    memcpy(stock + 0xf71710, reboot_setter_guard, sizeof(reboot_setter_guard));
+    memcpy(stock + 0x10876b0, reboot_hidden_guard, sizeof(reboot_hidden_guard));
+    memcpy(stock + 0x16d5131, reboot_match_guard, sizeof(reboot_match_guard));
+    assert(VirtualProtect(stock, 0x1700000, PAGE_EXECUTE_READ, &old));
+    retire_event = CreateEventW(NULL, TRUE, FALSE, NULL); assert(retire_event);
+    retiring_thread = CreateThread(NULL, 0, retire_worker, NULL, 0, &retiring_id);
+    assert(retiring_thread);
+    InterlockedExchange(&reboot_enabled, 0); reboot_install(stock);
+    assert(retired_open_errors == 1 && !retiring_thread && reboot_enabled && !reboot_refused_step);
+    assert(stock[REBOOT_RESPONSE_RVA] == 0xe9 &&
+        memcmp(stock + REBOOT_ACTOR_RVA, reboot_actor_guard, REBOOT_ACTOR_STOLEN));
+    write_code(stock + REBOOT_ACTOR_RVA, reboot_actor_guard, sizeof(reboot_actor_guard));
+    write_code(stock + REBOOT_RESPONSE_RVA, reboot_response_guard, sizeof(reboot_response_guard));
+    assert(ResetEvent(retire_event));
+    retiring_thread = CreateThread(NULL, 0, retire_worker, NULL, 0, NULL); assert(retiring_thread);
+    forced_open_failures = 100; denied_opens = 0;
+    InterlockedExchange(&reboot_enabled, 0); reboot_install(stock);
+    assert(!reboot_enabled && denied_opens == 20 && forced_open_failures == 80);
+    /* The gate logs the reason and the attempts; the step only names the gate. */
+    assert(reboot_refused_step && !strcmp(reboot_refused_step, "thread gate") && !reboot_refused_error);
+    assert(!memcmp(stock + REBOOT_ACTOR_RVA, reboot_actor_guard, sizeof(reboot_actor_guard)) &&
+        !memcmp(stock + REBOOT_RESPONSE_RVA, reboot_response_guard, sizeof(reboot_response_guard)));
+    forced_open_failures = 0;
+    assert(SetEvent(retire_event) && WaitForSingleObject(retiring_thread, 5000) == WAIT_OBJECT_0);
+    CloseHandle(retiring_thread); CloseHandle(retire_event);
+    puts("Trio reboot camera: installed x64 ABI, both original Lua paths, retained next-life recovery across controller/flag changes, delayed alive, duplicate replies and deferred setters; retries bounded, re-entry blocked, new death/identity/mode cancellation and no DeathCam fallback passed; a refused install names its step; install retries a thread that exits during the snapshot and stops after 20 attempts.");
     return 0;
 }
