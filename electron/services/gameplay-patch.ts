@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, createReadStream } from "node:fs";
-import { copyFile, lstat, mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { retryFs } from "./fs-safe.js";
+import { copyFile, lstat, mkdir, readFile, rename, rm, stat, unlink } from "node:fs/promises";
+import { atomicWriteFile, retryFs } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
@@ -262,14 +262,10 @@ async function writeMarker(
   policy: GameplayPatchPolicy,
 ): Promise<void> {
   const path = join(root, policy.marker.fileName);
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporaryPath, policy.marker.contents, { encoding: "utf8", mode: 0o600 });
-    await retryFs(() => rename(temporaryPath, path));
+    await atomicWriteFile(path, policy.marker.contents, "utf8", { mode: 0o600 });
   } catch (error) {
     throw new Error(MARKER_ERROR, { cause: error });
-  } finally {
-    await rm(temporaryPath, { force: true }).catch(() => undefined);
   }
   const written = await readMarker(root, policy);
   if (written !== policy.marker.contents) throw new Error(MARKER_ERROR);
@@ -519,9 +515,7 @@ export async function recordGameplayPatchState(
     updatedAt: state.updatedAt ?? new Date().toISOString(),
   };
   await mkdir(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
-  await retryFs(() => rename(temporaryPath, path));
+  await atomicWriteFile(path, `${JSON.stringify(document, null, 2)}\n`);
 }
 
 export const gameplayPatchInternals = {

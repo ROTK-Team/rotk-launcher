@@ -1,6 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { retryFs } from "./fs-safe.js";
+import { mkdir, readFile, rm } from "node:fs/promises";
+import { atomicWriteFile, retryFs } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import {
   isPlayerRole,
@@ -223,8 +222,6 @@ export class ConfigStore {
 
   private async writeAtomic(path: string, next: LauncherConfig): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
-    const temporaryPath = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-    await retryFs(() => rename(temporaryPath, path));
+    await atomicWriteFile(path, `${JSON.stringify(next, null, 2)}\n`);
   }
 }

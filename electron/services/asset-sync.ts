@@ -11,9 +11,8 @@ import {
   rmdir,
   stat,
   statfs,
-  writeFile,
 } from "node:fs/promises";
-import { retryFs } from "./fs-safe.js";
+import { atomicWriteFile, retryFs } from "./fs-safe.js";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -895,12 +894,7 @@ export class AssetSyncService {
 
   private async writeState(state: AssetSyncState): Promise<void> {
     await mkdir(dirname(this.statePath), { recursive: true });
-    const temporaryPath = `${this.statePath}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-    });
-    await retryFs(() => rename(temporaryPath, this.statePath));
+    await atomicWriteFile(this.statePath, `${JSON.stringify(state, null, 2)}\n`);
   }
 
   /** Move still-current packs out of the old userData cache instead of downloading them again. */
