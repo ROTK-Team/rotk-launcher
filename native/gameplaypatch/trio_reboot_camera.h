@@ -261,7 +261,10 @@ static void reboot_actor(BYTE *actor) {
     reboot_original_actor(actor);
     reboot_after_actor(actor);
 }
-/* Why the last reboot_commit returned FALSE, for the refusal line: the first
+typedef enum {
+    REBOOT_REFUSED, REBOOT_BUSY, REBOOT_INSTALLED
+} reboot_commit_result;
+/* Why the last reboot_commit did not install, for the refusal line: the first
  * step that failed, the error of that call (0 for a check that is not a
  * Windows call) and how many other threads of this process the snapshot held.
  */
@@ -277,24 +280,28 @@ static void reboot_refuse(const char *step, BOOL windows_call) {
 /* Two native windows are committed while all other threads are suspended.
  * Neither window contains RIP-relative instructions in its displaced prologue.
  */
-static BOOL reboot_commit(BYTE *base, const BYTE *actor_jump, const BYTE *response_call) {
+static reboot_commit_result reboot_commit(BYTE *base, const BYTE *actor_jump, const BYTE *response_call) {
     HANDLE handles[256], snapshot; THREADENTRY32 row; unsigned int count = 0, stopped = 0, i;
     DWORD self = GetCurrentThreadId(), process = GetCurrentProcessId(), p1 = 0, p2 = 0;
     BOOL ok = FALSE, writable1 = FALSE, writable2 = FALSE;
     BYTE *actor = base + REBOOT_ACTOR_RVA, *call = base + REBOOT_RESPONSE_RVA;
+    reboot_commit_result result = REBOOT_BUSY;
     reboot_refused_step = NULL; reboot_refused_error = 0; reboot_refused_threads = 0;
     snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) { reboot_refuse("thread snapshot", TRUE); return FALSE; }
+    if (snapshot == INVALID_HANDLE_VALUE) { reboot_refuse("thread snapshot", TRUE); return result; }
     row.dwSize = sizeof(row);
-    if (!Thread32First(snapshot, &row)) { reboot_refuse("first thread", TRUE); CloseHandle(snapshot); return FALSE; }
+    if (!Thread32First(snapshot, &row)) { reboot_refuse("first thread", TRUE); CloseHandle(snapshot); return result; }
     do {
         if (row.th32OwnerProcessID != process || row.th32ThreadID == self) continue;
         ++reboot_refused_threads;
-        if (count == ARRAYSIZE(handles)) { reboot_refuse("more than 256 threads", FALSE); goto close_handles; }
+        if (count == ARRAYSIZE(handles)) {
+            reboot_refuse("more than 256 threads", FALSE); result = REBOOT_REFUSED; goto close_handles;
+        }
         handles[count] = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, row.th32ThreadID);
         if (!handles[count]) { reboot_refuse("open thread", TRUE); goto close_handles; }
         ++count;
     } while (Thread32Next(snapshot, &row));
+    if (GetLastError() != ERROR_NO_MORE_FILES) { reboot_refuse("thread walk", TRUE); goto close_handles; }
     CloseHandle(snapshot); snapshot = INVALID_HANDLE_VALUE;
     for (i = 0; i < count; ++i) {
         CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
@@ -308,6 +315,9 @@ static BOOL reboot_commit(BYTE *base, const BYTE *actor_jump, const BYTE *respon
             reboot_refuse("thread in response gate", FALSE); goto resume_threads;
         }
     }
+    /* Thread failures above are retried with a fresh snapshot. From here a
+     * refusal is final: a retry must never take a partial write as stock. */
+    result = REBOOT_REFUSED;
     if (!exact_bytes(actor, reboot_actor_guard, sizeof(reboot_actor_guard))) {
         reboot_refuse("actor bytes changed", FALSE); goto resume_threads;
     }
@@ -343,18 +353,19 @@ close_handles:
         CloseHandle(snapshot);
     }
     while (count) CloseHandle(handles[--count]);
-    return ok;
+    return ok ? REBOOT_INSTALLED : result;
 }
 /* The old prefix and suffix keep log searches working. */
-static void reboot_refused_line(char *line, size_t size) {
+static void reboot_refused_line(char *line, size_t size, unsigned int attempts) {
     snprintf(line, size,
-        "ROTK trio reboot: guarded installation refused (%s, error %lu, %u threads); disabled.\n",
+        "ROTK trio reboot: guarded installation refused (%s, error %lu, %u threads, attempt %u); disabled.\n",
         reboot_refused_step ? reboot_refused_step : "unknown step",
-        (unsigned long)reboot_refused_error, reboot_refused_threads);
+        (unsigned long)reboot_refused_error, reboot_refused_threads, attempts);
 }
 static void reboot_install(BYTE *base) {
     BYTE *memory = NULL, actor_jump[REBOOT_ACTOR_STOLEN], call[REBOOT_RESPONSE_STOLEN]; DWORD old;
     int64_t distance; int32_t relative; uintptr_t callback = (uintptr_t)reboot_response;
+    reboot_commit_result result = REBOOT_BUSY; unsigned int attempts = 0;
     const BYTE bridge[] = {
         0x48,0x83,0xec,0x20, /* JMP entry: native RSP aligned, shadow space */
         0x4c,0x89,0xf9, 0x0f,0xb6,0xd3, /* RCX=R15, EDX=BL */
@@ -389,11 +400,17 @@ static void reboot_install(BYTE *base) {
     memset(actor_jump, 0x90, sizeof(actor_jump)); stance_jump(actor_jump, (void *)(uintptr_t)reboot_actor);
     memset(call, 0x90, sizeof(call)); call[0] = 0xe9;
     relative = (int32_t)distance; memcpy(call + 1, &relative, 4);
-    if (!reboot_commit(base, actor_jump, call)) {
+    /* Startup threads can exit after enumeration. Resume/close everything,
+     * then take a fresh snapshot; never sleep with another thread suspended. */
+    do {
+        if (attempts++) Sleep(10);
+        result = reboot_commit(base, actor_jump, call);
+    } while (result == REBOOT_BUSY && attempts < 20U);
+    if (result != REBOOT_INSTALLED) {
         /* Keep the bridge alive if a protection-restoration error left a hook
          * installed. Disabled wrappers preserve the complete original path. */
-        char line[192];
-        reboot_refused_line(line, sizeof(line));
+        char line[224];
+        reboot_refused_line(line, sizeof(line), attempts);
         patch_log(line); return;
     }
     InterlockedExchange(&reboot_enabled, 1);
