@@ -190,7 +190,7 @@ close_handles:
 static void ads_install(BYTE *base) {
     BYTE *memory = NULL, call_patch[sizeof(ads_call_guard)], eval_patch[sizeof(ads_eval_guard)];
     BYTE rotation_patch[sizeof(ads_rotation_guard)];
-    DWORD protection; SYSTEM_INFO info; int32_t relative; SIZE_T length;
+    DWORD protection; int32_t relative; SIZE_T length;
     const BYTE solver_guard[] = {0x48,0x8b,0xc4,0x55,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
     const BYTE collision_guard[] = {0x48,0x8b,0xc4,0x48,0x89,0x50,0x10,0x48,0x89,0x48,0x08};
     const BYTE pose_guard[] = {0x48,0x8b,0xc4,0x4c,0x89,0x48,0x20,0x4c,0x89,0x40,0x18};
@@ -207,10 +207,8 @@ static void ads_install(BYTE *base) {
         !exact_bytes(base + 0x12b6760, rotate_guard, sizeof(rotate_guard))) {
         patch_log("ROTK ADS: native signature mismatch; skipped.\n"); return;
     }
-    GetSystemInfo(&info);
-    for (uintptr_t delta = 0x08000000; delta < 0x70000000 && !memory; delta += info.dwAllocationGranularity)
-        memory = VirtualAlloc(base + delta, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!memory) return;
+    memory = bridge_page(base);
+    if (!memory) { bridge_refused("ROTK ADS", base); return; }
     stance_jump(memory, (void *)(uintptr_t)ads_transition);
     stance_jump(memory + 544, (void *)(uintptr_t)ads_rotate);
     length = ads_build_eval(memory + 64);
@@ -219,7 +217,7 @@ static void ads_install(BYTE *base) {
     if (!VirtualProtect(memory, 4096, PAGE_EXECUTE_READ, &protection) ||
         !FlushInstructionCache(GetCurrentProcess(), memory, 4096) ||
         !RtlAddFunctionTable(&ads_unwind, 1, (DWORD64)(uintptr_t)memory)) {
-        VirtualFree(memory, 0, MEM_RELEASE); return;
+        bridge_release(memory); return;
     }
     memset(call_patch, 0x90, sizeof(call_patch)); call_patch[0] = 0xe8;
     relative = (int32_t)((memory - base) - 0x12bfa98); memcpy(call_patch + 1, &relative, 4);

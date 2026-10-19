@@ -76,8 +76,10 @@ static dll_get_class_object_fn g_dll_get_class_object = NULL;
 static hresult_no_args_fn g_dll_register_server = NULL;
 static hresult_no_args_fn g_dll_unregister_server = NULL;
 static get_joystick_format_fn g_get_joystick_format = NULL;
+static DWORD g_system_dinput_error = ERROR_SUCCESS;
 static volatile LONG g_patch_worker_started = 0;
 static volatile LONG g_watchdog_started = 0;
+static volatile LONG g_direct_input_reported = 0;
 static BYTE *g_image_base = NULL;
 
 static const BYTE k_patch_a_signature[] = {
@@ -257,11 +259,14 @@ static BOOL CALLBACK load_system_dinput(
     if (length == 0U ||
         length >= (UINT)ARRAYSIZE(path) ||
         length + (UINT)ARRAYSIZE(suffix) > (UINT)ARRAYSIZE(path)) {
+        g_system_dinput_error =
+            length == 0U ? GetLastError() : ERROR_INSUFFICIENT_BUFFER;
         return TRUE;
     }
     CopyMemory(path + length, suffix, sizeof(suffix));
     g_system_dinput = LoadLibraryW(path);
     if (g_system_dinput == NULL) {
+        g_system_dinput_error = GetLastError();
         return TRUE;
     }
 
@@ -639,6 +644,7 @@ static BOOL install_patch_pair(BYTE *image_base) {
     return TRUE;
 }
 
+#include "bridge_page.h"
 #include "weapon_stance.h"
 #include "respawn_address.h"
 #include "trio_reboot_camera.h"
@@ -761,6 +767,42 @@ static void start_patch_worker(void) {
     CloseHandle(worker);
 }
 
+/* One line on the first call, outside the loader lock. A log without it
+ * means the game never reached this proxy's DirectInput8Create. */
+static void report_direct_input(void) {
+    const char *system = g_direct_input8_create == NULL
+        ? "loaded without DirectInput8Create"
+        : "loaded";
+    char failure[48];
+    char line[256];
+
+    if (g_system_dinput == NULL) {
+        snprintf(
+            failure,
+            sizeof(failure),
+            "load failed (error %lu)",
+            (unsigned long)g_system_dinput_error);
+        system = failure;
+    }
+    if (bridge_block != NULL) {
+        snprintf(
+            line,
+            sizeof(line),
+            "ROTK gameplay patch: DirectInput8Create reached; system dinput8 %s; "
+            "bridge block reserved at base+0x%08llx.\n",
+            system,
+            (unsigned long long)(bridge_block - bridge_block_base));
+    } else {
+        snprintf(
+            line,
+            sizeof(line),
+            "ROTK gameplay patch: DirectInput8Create reached; system dinput8 %s; "
+            "bridge block not reserved.\n",
+            system);
+    }
+    patch_log(line);
+}
+
 HRESULT WINAPI DirectInput8Create(
     HINSTANCE instance,
     DWORD version,
@@ -771,6 +813,9 @@ HRESULT WINAPI DirectInput8Create(
 
     InitOnceExecuteOnce(
         &g_system_dinput_once, load_system_dinput, NULL, NULL);
+    if (InterlockedCompareExchange(&g_direct_input_reported, 1, 0) == 0) {
+        report_direct_input();
+    }
     if (g_direct_input8_create == NULL) {
         return E_FAIL;
     }
@@ -822,6 +867,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_self_module = instance;
         DisableThreadLibraryCalls(instance);
+        bridge_block_reserve();
     }
     return TRUE;
 }

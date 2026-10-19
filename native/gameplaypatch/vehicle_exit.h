@@ -128,7 +128,6 @@ close_handles:
 static void vehicle_exit_install(BYTE *base) {
     BYTE *memory = NULL, patches[3][5];
     DWORD protection;
-    SYSTEM_INFO info;
     vehicle_exit_commit_result result = VEHICLE_EXIT_BUSY;
     if (!exact_bytes(base + 0x12e6635, vehicle_exit_candidate_guard, sizeof(vehicle_exit_candidate_guard)) ||
         !exact_bytes(base + 0x10579a0, vehicle_exit_inverse_guard, sizeof(vehicle_exit_inverse_guard)) ||
@@ -136,14 +135,12 @@ static void vehicle_exit_install(BYTE *base) {
         !exact_bytes(base + 0x1057a12, vehicle_exit_frame_guard, sizeof(vehicle_exit_frame_guard))) {
         patch_log("ROTK vehicle exit: native signature mismatch; skipped.\n"); return;
     }
-    GetSystemInfo(&info);
-    for (uintptr_t delta = 0x08000000; delta < 0x70000000 && !memory; delta += info.dwAllocationGranularity)
-        memory = VirtualAlloc(base + delta, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!memory) return;
+    memory = bridge_page(base);
+    if (!memory) { bridge_refused("ROTK vehicle exit", base); return; }
     vehicle_exit_build_bridges(memory);
     if (!VirtualProtect(memory, 4096, PAGE_EXECUTE_READ, &protection) ||
         !FlushInstructionCache(GetCurrentProcess(), memory, 4096)) {
-        VirtualFree(memory, 0, MEM_RELEASE); return;
+        bridge_release(memory); return;
     }
     for (unsigned int i = 0; i < 3; ++i) {
         int32_t relative = (int32_t)((memory + (i == 1 ? 32 : 0) - base) - (i == 1 ? 0x10579a5 : i == 2 ? 0x12e5a8c : 0x12e663a));
