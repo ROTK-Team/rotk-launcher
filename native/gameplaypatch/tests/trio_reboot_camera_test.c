@@ -161,6 +161,21 @@ int main(int argc, char **argv) {
     bridge_block_reserve_at(image); assert(bridge_block != NULL && bridge_block_base == image);
     reboot_install(image); assert(reboot_enabled && (BYTE *)(uintptr_t)reboot_original_actor == bridge_block);
     assert(VirtualQuery(image + REBOOT_ACTOR_RVA, &mem, sizeof(mem)) == sizeof(mem) && mem.Protect == PAGE_EXECUTE_READ);
+    assert(!reboot_refused_step);
+    /* A second commit finds the installed hook: the refusal line names the
+     * failed step, keeps the old prefix and suffix, and writes nothing. */
+    BYTE installed_jump[REBOOT_ACTOR_STOLEN], installed_call[REBOOT_RESPONSE_STOLEN]; char line[192];
+    const char refused_tail[] = " threads); disabled.\n";
+    memcpy(installed_jump, image + REBOOT_ACTOR_RVA, sizeof(installed_jump));
+    memcpy(installed_call, image + REBOOT_RESPONSE_RVA, sizeof(installed_call));
+    assert(!reboot_commit(image, installed_jump, installed_call));
+    assert(reboot_refused_step && !strcmp(reboot_refused_step, "actor bytes changed") && !reboot_refused_error);
+    assert(!memcmp(image + REBOOT_ACTOR_RVA, installed_jump, sizeof(installed_jump)) &&
+        !memcmp(image + REBOOT_RESPONSE_RVA, installed_call, sizeof(installed_call)));
+    reboot_refused_line(line, sizeof(line));
+    assert(strstr(line, "ROTK trio reboot: guarded installation refused (actor bytes changed, error 0, ") == line);
+    assert(strlen(line) > sizeof(refused_tail) - 1 &&
+        !strcmp(line + strlen(line) - (sizeof(refused_tail) - 1), refused_tail));
     forward(image + 0xee0f20, (const void *)(uintptr_t)native_select);
     forward(image + 0xf71710, (const void *)(uintptr_t)native_set);
     forward(image + 0x10876b0, (const void *)(uintptr_t)native_hidden);
@@ -300,6 +315,6 @@ int main(int argc, char **argv) {
     fresh(); *(uintptr_t *)team_view = (uintptr_t)(image + 0x37e41d8); flags_owner[0x108fc] = 0xa1;
     response(1); *(uintptr_t *)team_view = (uintptr_t)(image + 0x37ea5c8); flags_owner[0x108fc] = 0xa9;
     apply_state(); assert(setter_calls == 1 && hidden_calls == 1); /* SPECTATE arrives during reboot */
-    puts("Trio reboot camera: installed x64 ABI, both original Lua paths, retained next-life recovery across controller/flag changes, delayed alive, duplicate replies and deferred setters; retries bounded, re-entry blocked, new death/identity/mode cancellation and no DeathCam fallback passed.");
+    puts("Trio reboot camera: installed x64 ABI, both original Lua paths, retained next-life recovery across controller/flag changes, delayed alive, duplicate replies and deferred setters; retries bounded, re-entry blocked, new death/identity/mode cancellation and no DeathCam fallback passed; a refused install names its step.");
     return 0;
 }
