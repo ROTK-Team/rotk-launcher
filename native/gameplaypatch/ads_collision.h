@@ -196,7 +196,8 @@ static void ads_install(BYTE *base) {
     if (!VirtualProtect(memory, 4096, PAGE_EXECUTE_READ, &protection) ||
         !FlushInstructionCache(GetCurrentProcess(), memory, 4096) ||
         !RtlAddFunctionTable(&ads_unwind, 1, (DWORD64)(uintptr_t)memory)) {
-        bridge_release(memory); return;
+        bridge_release(memory);
+        patch_log("ROTK ADS: bridge protection or unwind registration refused; skipped.\n"); return;
     }
     memset(call_patch, 0x90, sizeof(call_patch)); call_patch[0] = 0xe8;
     relative = (int32_t)((memory - base) - 0x12bfa98); memcpy(call_patch + 1, &relative, 4);
