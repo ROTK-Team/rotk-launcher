@@ -12,11 +12,25 @@ vi.mock("../electron/services/vivox-client.js", () => ({
   deployVivoxCompatibility: async () => undefined,
 }));
 
+const faults = vi.hoisted(() => ({ driveRoot: null as string | null }));
+// Windows refuses mkdir on a drive root with EPERM, even with recursive. A test
+// marks a folder as that root to install right under it, like G:\ROTK.
+vi.mock("node:fs/promises", async (original) => {
+  const fs = await original<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    mkdir: (...args: Parameters<typeof fs.mkdir>) => String(args[0]) === faults.driveRoot
+      ? Promise.reject(Object.assign(new Error(`EPERM: operation not permitted, mkdir '${String(args[0])}'`), { code: "EPERM" }))
+      : fs.mkdir(...args),
+  };
+});
+
 const { installClient, inspectDestination, readInstallationMarker } = await import("../electron/services/installer.js");
 const { INSTALL_PENDING_MARKER_NAME } = await import("../electron/constants.js");
 
 const roots: string[] = [];
 afterEach(async () => {
+  faults.driveRoot = null;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -69,6 +83,15 @@ describe("installClient flow", () => {
     expect(await read(join(destination, "steam_api64.original.dll"))).toBe("vanilla steam");
     expect(await read(join(destination, "Resources/Assets/assets_x64_1.pack2"))).toBe(SOURCE_FILES["Resources/Assets/assets_x64_1.pack2"]);
     expect(await read(join(source, "steam_api64.dll"))).toBe("vanilla steam");
+  });
+
+  it("installs into a folder right under a drive root, like G:\\ROTK", async () => {
+    const { destination, request } = await fixture();
+    await mkdir(dirname(destination));
+    faults.driveRoot = dirname(destination);
+
+    await installClient(request());
+    expect(await inspectDestination(destination)).toBe("installed");
   });
 
   it("resumes after a cancel without starting over", async () => {
