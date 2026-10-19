@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, rename, rm, stat, unlink } from "node:fs/promises";
 import { fileHashOrEmpty } from "./file-hash.js";
-import { atomicWriteFile, retryFs } from "./fs-safe.js";
+import { atomicWriteFile, retryFs, syncFile } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
@@ -378,6 +378,7 @@ async function deployGameplayPatchWithPolicy(
     ) {
       throw new Error(INSTALL_PATCH_ERROR);
     }
+    await syncFile(temporaryPath);
 
     // Detect a path replacement between validation and the atomic rename. This
     // cannot eliminate every hostile local race, but it closes ordinary drift
