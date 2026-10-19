@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { copyFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, open, rename, rm } from "node:fs/promises";
 
 // Antivirus, indexer and sync clients hold freshly written files for a moment,
 // so rename/replace/delete can fail with EPERM/EBUSY/EACCES. Retry those.
@@ -31,6 +31,40 @@ export async function retryFs<T>(
   }
 }
 
+export interface DurableWriteOptions {
+  encoding?: BufferEncoding;
+  flag?: string;
+  mode?: number;
+}
+
+// NTFS can commit a rename and the new file size before the data itself: after
+// a power cut or a BSOD the file then has the right size and only NUL bytes.
+// Flush the data (FlushFileBuffers) before renaming it over the old file.
+export async function writeFileDurably(
+  path: string,
+  contents: string,
+  { encoding = "utf8", flag = "w", mode }: DurableWriteOptions = {},
+): Promise<void> {
+  const handle = await open(path, flag, mode);
+  try {
+    await handle.writeFile(contents, { encoding });
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Flush a file written by something else (copyFile, a stream) to the disk. */
+export async function syncFile(path: string): Promise<void> {
+  // FlushFileBuffers needs a handle with write access.
+  const handle = await retryFs(() => open(path, "r+"));
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function atomicCopyFile(source: string, target: string): Promise<void> {
   const temporary = `${target}.rotk-${randomUUID()}.tmp`;
   try {
@@ -38,6 +72,7 @@ export async function atomicCopyFile(source: string, target: string): Promise<vo
       await rm(temporary, { force: true });
       await copyFile(source, temporary, fsConstants.COPYFILE_EXCL);
     });
+    await syncFile(temporary);
     await retryFs(() => rename(temporary, target));
   } finally {
     await rm(temporary, { force: true }).catch(() => undefined);
@@ -48,10 +83,11 @@ export async function atomicWriteFile(
   target: string,
   contents: string,
   encoding: BufferEncoding = "utf8",
+  { mode }: { mode?: number } = {},
 ): Promise<void> {
   const temporary = `${target}.rotk-${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, contents, { encoding, flag: "wx" });
+    await writeFileDurably(temporary, contents, { encoding, flag: "wx", mode });
     await retryFs(() => rename(temporary, target));
   } finally {
     await rm(temporary, { force: true }).catch(() => undefined);
