@@ -112,6 +112,17 @@ describe("launcher locales", () => {
     );
   });
 
+  it("translates every error the gameplay patch service throws", async () => {
+    const source = await readFile(new URL("../electron/services/gameplay-patch.ts", import.meta.url), "utf8");
+    const messages = [...source.matchAll(/^const [A-Z_]+_ERROR =\s*"([^"]+)";/gm)].map((match) => match[1]);
+    expect(messages).toHaveLength(6);
+    for (const message of messages) {
+      expect(message).not.toMatch(/Ã|â€/);
+      expect(localizeServiceError(message, "en")).not.toBe(message);
+      expect(localizeServiceError(message, "zh")).not.toBe(message);
+    }
+  });
+
   it("explains the launcher folder rule in English and Chinese", async () => {
     const refused = "Le jeu ne peut pas être placé dans le dossier de ROTK Launcher : chaque mise à jour ou désinstallation du launcher supprime ce dossier. Place le jeu ailleurs, par exemple dans C:\\Games\\ROTK.";
     const deleted = "Le jeu était installé dans le dossier de ROTK Launcher, que chaque mise à jour ou désinstallation du launcher supprime. Si tu l’as déplacé, sélectionne-le à son nouvel emplacement ; sinon, réinstalle-le ailleurs, par exemple dans C:\\Games\\ROTK.";
