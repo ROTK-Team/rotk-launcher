@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
             AcquireSRWLockExclusive(&g_async_lock);
             for (unsigned i = 0; i < VOICE_ASYNC_LIMIT; ++i) if (g_async_jobs[i].request == original) {
                 if (test != 13U) g_async_jobs[i].until = 1U;
-                else g_async_jobs[i].grant.expires = unix_time_seconds() - 1U;
+                else g_async_jobs[i].grant.expires_tick = GetTickCount64() - 1U;
             }
             ReleaseSRWLockExclusive(&g_async_lock);
         }

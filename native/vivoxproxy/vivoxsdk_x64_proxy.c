@@ -91,6 +91,9 @@ static rotk_volume_destroy_fn g_volume_destroy;
     (GRANT_HEADER_BYTES + GRANT_ACCOUNT_MAX + \
      GRANT_CHANNEL_MAX + GRANT_TOKEN_MAX + \
      GRANT_DISPLAY_NAME_MAX)
+/* A response Date outside these bounds is ignored; the PC clock is used then. */
+#define GRANT_DATE_MIN_SECONDS 1767225600U /* 2026-01-01T00:00:00Z */
+#define GRANT_DATE_MAX_SKEW_SECONDS 86400U
 
 #define TRACE_ORIGINAL_PATH_FAILED 0x00000001L
 #define TRACE_ORIGINAL_LOAD_FAILED 0x00000002L
@@ -291,6 +294,9 @@ typedef struct voice_config {
 
 typedef struct voice_grant {
     uint32_t expires;
+    /* GetTickCount64 deadline: the lifetime left at receipt, measured
+     * against the grant server's clock rather than the PC's. */
+    ULONGLONG expires_tick;
     char account[GRANT_ACCOUNT_MAX + 1U];
     char channel[GRANT_CHANNEL_MAX + 1U];
     char token[GRANT_TOKEN_MAX + 1U];
@@ -502,19 +508,58 @@ static uint32_t load_le32(const uint8_t *value) {
            ((uint32_t)value[3] << 24U);
 }
 
-static uint32_t unix_time_seconds(void) {
-    FILETIME file_time;
+static uint32_t file_time_unix_seconds(const FILETIME *file_time) {
     ULARGE_INTEGER ticks;
     const uint64_t epoch = UINT64_C(116444736000000000);
 
-    GetSystemTimeAsFileTime(&file_time);
-    ticks.LowPart = file_time.dwLowDateTime;
-    ticks.HighPart = file_time.dwHighDateTime;
-    if (ticks.QuadPart <= epoch) {
+    ticks.LowPart = file_time->dwLowDateTime;
+    ticks.HighPart = file_time->dwHighDateTime;
+    if (ticks.QuadPart <= epoch ||
+        (ticks.QuadPart - epoch) / UINT64_C(10000000) > UINT32_MAX) {
         return 0U;
     }
     return (uint32_t)((ticks.QuadPart - epoch) /
                       UINT64_C(10000000));
+}
+
+static uint32_t unix_time_seconds(void) {
+    FILETIME file_time;
+
+    GetSystemTimeAsFileTime(&file_time);
+    return file_time_unix_seconds(&file_time);
+}
+
+/* Grant expiry is stamped with the grant server's clock. Use the response
+ * Date as "now" when it is plausible, so a PC clock running ahead does not
+ * make every fresh grant look expired. Returns 0 when there is no Date. */
+static uint32_t response_date_seconds(HINTERNET request) {
+    SYSTEMTIME date;
+    FILETIME file_time;
+    DWORD date_bytes = sizeof(date);
+
+    if (!WinHttpQueryHeaders(
+            request,
+            WINHTTP_QUERY_DATE | WINHTTP_QUERY_FLAG_SYSTEMTIME,
+            WINHTTP_HEADER_NAME_BY_INDEX,
+            &date,
+            &date_bytes,
+            WINHTTP_NO_HEADER_INDEX) ||
+        !SystemTimeToFileTime(&date, &file_time)) {
+        return 0U;
+    }
+    return file_time_unix_seconds(&file_time);
+}
+
+static uint32_t grant_reference_seconds(uint32_t server_now,
+                                        uint32_t local_now) {
+    uint32_t skew;
+
+    if (server_now < GRANT_DATE_MIN_SECONDS) {
+        return local_now;
+    }
+    skew = server_now > local_now ? server_now - local_now
+                                  : local_now - server_now;
+    return skew > GRANT_DATE_MAX_SKEW_SECONDS ? local_now : server_now;
 }
 
 #if !defined(ROTK_VIVOX_IAT_HOOK)
@@ -817,14 +862,14 @@ static BOOL bytes_are_visible_ascii(const uint8_t *value,
 static BOOL parse_grant(const uint8_t *wire,
                         size_t wire_bytes,
                         voice_action action,
-                        voice_grant *grant) {
+                        voice_grant *grant,
+                        uint32_t now) {
     uint16_t account_bytes;
     uint16_t channel_bytes;
     uint16_t token_bytes;
     uint16_t display_name_bytes;
     BOOL version_two;
     size_t offset;
-    uint32_t now;
 
     if (wire_bytes < GRANT_HEADER_BYTES) {
         return FALSE;
@@ -854,10 +899,11 @@ static BOOL parse_grant(const uint8_t *wire,
         (action == VOICE_ACTION_JOIN && channel_bytes < 4U)) {
         return FALSE;
     }
-    now = unix_time_seconds();
     if (now == 0U || grant->expires <= now) {
         return FALSE;
     }
+    grant->expires_tick = GetTickCount64() +
+        (ULONGLONG)(grant->expires - now) * 1000U;
 
     offset = GRANT_HEADER_BYTES;
     if (!bytes_are_visible_ascii(wire + offset, account_bytes) ||
@@ -923,6 +969,8 @@ static BOOL fetch_grant_result(voice_action action, const WCHAR *channel, voice_
     BOOL result = FALSE;
     BOOL interrupted = FALSE;
     DWORD transport_error = 0U;
+    uint32_t local_now = 0U;
+    uint32_t server_now = 0U;
     int written;
 
     SecureZeroMemory(grant, sizeof(*grant));
@@ -1037,7 +1085,10 @@ static BOOL fetch_grant_result(voice_action action, const WCHAR *channel, voice_
         }
     }
     if (remaining_timeout(deadline) != 0U) {
-        result = parse_grant(wire, wire_bytes, action, grant);
+        local_now = unix_time_seconds();
+        server_now = response_date_seconds(request);
+        result = parse_grant(wire, wire_bytes, action, grant,
+                             grant_reference_seconds(server_now, local_now));
     } else interrupted = TRUE;
 
 cleanup:
@@ -1057,12 +1108,15 @@ cleanup:
         }
     }
     if (InterlockedIncrement(&g_grant_trace_count) <= 16L) {
-        char line[192];
+        char line[192], skew[24] = "none";
+        /* Local minus server Date, in seconds; "none" without a Date. */
+        if (server_now != 0U)
+            (void)snprintf(skew, sizeof(skew), "%lld", (long long)local_now - (long long)server_now);
         (void)snprintf(line, sizeof(line),
-            "[rotk-vivoxproxy] grant: action=%u http=%lu elapsed_ms=%llu valid=%u winhttp_error=%lu",
+            "[rotk-vivoxproxy] grant: action=%u http=%lu elapsed_ms=%llu valid=%u winhttp_error=%lu clock_skew_s=%s",
             (unsigned)action, (unsigned long)status,
             (unsigned long long)(GetTickCount64() - began), (unsigned)result,
-            (unsigned long)transport_error);
+            (unsigned long)transport_error, skew);
         proxy_trace_line(line);
     }
     if (request != NULL) {
