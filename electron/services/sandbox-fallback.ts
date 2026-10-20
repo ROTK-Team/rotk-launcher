@@ -57,7 +57,8 @@ export type SandboxFallbackState = "active" | "absent" | "outdated" | "invalid";
 /**
  * "active" only for a marker recorded by this exact launcher version. A marker
  * from another version or a damaged one is ignored and removed, so the player
- * is asked again if the window still cannot start.
+ * is asked again if the window still cannot start. A marker that cannot be
+ * read right now counts as absent and stays where it is.
  */
 export function readSandboxFallback(directory: string, launcherVersion: string): SandboxFallbackState {
   const path = join(directory, SANDBOX_FALLBACK_MARKER_NAME);
@@ -75,7 +76,10 @@ export function readSandboxFallback(directory: string, launcherVersion: string):
       else state = recorded === launcherVersion ? "active" : "outdated";
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
+    // Missing, or held by another program for a moment: an antivirus can lock
+    // the marker right after it was written (EBUSY, EPERM, EACCES) during the
+    // relaunch. Only a marker that was read and found wrong is removed.
+    if (typeof (error as NodeJS.ErrnoException).code === "string") return "absent";
     state = "invalid";
   }
   if (state !== "active") {

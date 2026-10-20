@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAIN_COPY } from "../electron/i18n.js";
 import {
   SANDBOX_FALLBACK_MARKER_NAME,
@@ -14,6 +14,32 @@ import {
 } from "../electron/services/sandbox-fallback.js";
 import { APP_LOCALES } from "../shared/locale.js";
 
+const faults = vi.hoisted(() => ({
+  held: null as { operation: "lstat" | "read"; code: string } | null,
+}));
+// While set, every lstat or read of a marker fails with the given code, like a
+// file an antivirus holds right after it was written.
+vi.mock("node:fs", async (original) => {
+  const fs = await original<typeof import("node:fs")>();
+  const fault = (operation: "lstat" | "read", path: string): NodeJS.ErrnoException | null => {
+    if (faults.held?.operation !== operation || !path.endsWith("sandbox-fallback.v1.json")) return null;
+    return Object.assign(new Error(`${faults.held.code}: ${operation} '${path}'`), { code: faults.held.code });
+  };
+  return {
+    ...fs,
+    lstatSync: ((...args: Parameters<typeof fs.lstatSync>) => {
+      const failure = fault("lstat", String(args[0]));
+      if (failure) throw failure;
+      return fs.lstatSync(...args);
+    }) as typeof fs.lstatSync,
+    readFileSync: ((...args: Parameters<typeof fs.readFileSync>) => {
+      const failure = fault("read", String(args[0]));
+      if (failure) throw failure;
+      return fs.readFileSync(...args);
+    }) as typeof fs.readFileSync,
+  };
+});
+
 const PREFIX = join(tmpdir(), "rotk-sandbox-fallback-test-");
 let root: string;
 
@@ -22,6 +48,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  faults.held = null;
   if (!resolve(root).startsWith(resolve(PREFIX))) throw new Error("Unsafe test cleanup");
   await rm(root, { recursive: true, force: true });
 });
@@ -87,6 +114,23 @@ describe("sandbox fallback marker", () => {
     await writeFile(marker(), contents);
     expect(readSandboxFallback(root, "2.0.41")).toBe("invalid");
     expect(await readdir(root)).toEqual([]);
+  });
+
+  it.each([
+    ["lstat", "EBUSY"],
+    ["lstat", "EPERM"],
+    ["lstat", "EACCES"],
+    ["read", "EBUSY"],
+    ["read", "EPERM"],
+    ["read", "EACCES"],
+  ] as const)("keeps a marker it cannot %s right now (%s) for the next start", async (operation, code) => {
+    recordSandboxFallback(root, "2.0.41");
+    faults.held = { operation, code };
+    expect(readSandboxFallback(root, "2.0.41")).toBe("absent");
+    expect(readSandboxFallback(root, "2.0.42")).toBe("absent");
+    faults.held = null;
+    expect(await readdir(root)).toEqual([SANDBOX_FALLBACK_MARKER_NAME]);
+    expect(readSandboxFallback(root, "2.0.41")).toBe("active");
   });
 
   it("ignores a directory in place of the marker without failing", async () => {
