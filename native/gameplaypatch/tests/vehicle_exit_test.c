@@ -53,6 +53,7 @@ static HANDLE WINAPI test_open_thread(DWORD access, BOOL inherit, DWORD id) {
     return OpenThread(access, inherit, id);
 }
 
+static BYTE *vehicle_exit_bridge_for_test;
 static float tilted[16] = {0.8f,0.6f,0,0,-0.6f,0.8f,0,0,0,0,1,0,10,20,30,1};
 static float upright[16] = {1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
 static float observed[16];
@@ -84,6 +85,34 @@ static BYTE mock_point(BYTE *vehicle, float *out, const char *bone, void *auxili
     }
     for (unsigned int i = 0; i < 16; ++i) out[i] = (float)calls;
     return calls == 1 ? first_accept : second_accept;
+}
+/* Mock character: vtable slot 0x2d0 reads the cached point, the native search
+ * refreshes it from the vehicle's current pose. */
+static BYTE *mock_character_vtable[0x2d0 / 8 + 1];
+static BYTE *mock_character = (BYTE *)mock_character_vtable;
+static BYTE *mock_character_object = (BYTE *)&mock_character;
+static float cached_point[4];
+static BOOL cached_valid, search_finds;
+static unsigned int searches;
+static BYTE mock_cached(BYTE *character, float *out) {
+    assert(character == mock_character_object);
+    if (cached_valid) memcpy(out, cached_point, sizeof(cached_point));
+    return (BYTE)cached_valid;
+}
+static BYTE mock_search(BYTE *character) {
+    static const float fresh[4] = {-1.7f, 0, 30, 1};
+    assert(character == mock_character_object);
+    ++searches; cached_valid = search_finds;
+    if (search_finds) memcpy(cached_point, fresh, sizeof(fresh));
+    return (BYTE)search_finds;
+}
+static void run_cached(BOOL had, BOOL finds, float expected_x, BYTE expected, unsigned int expected_searches) {
+    static const float stale[4] = {-1.7f, 0, 0, 1};
+    float out[4] = {9, 9, 9, 9};
+    memcpy(cached_point, stale, sizeof(stale)); cached_valid = had; search_finds = finds; searches = 0;
+    assert(((vehicle_exit_cached_fn)(uintptr_t)(vehicle_exit_bridge_for_test + 64))(mock_character_object, out) == expected);
+    assert(searches == expected_searches && out[0] == expected_x);
+    if (expected) assert(out[2] == (finds && expected_searches ? 30.0f : 0.0f));
 }
 static void run(BOOL accept_first, BOOL accept_second, BOOL level, unsigned int expected_calls, BYTE expected) {
     float out[16];
@@ -129,6 +158,17 @@ int main(int argc, char **argv) {
         vehicle_exit_current = NULL;
       }
     }
+    /* A dismount reply recomputes the cached point with the current pose. */
+    vehicle_exit_bridge_for_test = bridge;
+    mock_character_vtable[0x2d0 / 8] = (BYTE *)(uintptr_t)mock_cached;
+    stance_jump(memory + 0x164d3e0, (void *)(uintptr_t)mock_search);
+    assert(FlushInstructionCache(GetCurrentProcess(), memory, 0x2000000));
+    InterlockedExchange(&vehicle_exit_enabled, 1);
+    run_cached(TRUE, TRUE, -1.7f, 1, 1);
+    run_cached(TRUE, FALSE, -1.7f, 1, 1);
+    run_cached(FALSE, TRUE, 9.0f, 0, 0);
+    InterlockedExchange(&vehicle_exit_enabled, 0);
+    run_cached(TRUE, TRUE, -1.7f, 1, 0);
     if (argc == 2) { FILE *file = fopen(argv[1], "wb"); assert(file); assert(fwrite(bridge, 1, 64, file) == 64); fclose(file); }
     /* A mismatched site must leave both CALL instructions untouched. */
     memcpy(memory + 0x12e6635, vehicle_exit_candidate_guard, sizeof(vehicle_exit_candidate_guard));
@@ -136,6 +176,7 @@ int main(int argc, char **argv) {
     assert(!vehicle_exit_enabled && !memcmp(memory + 0x12e6635, vehicle_exit_candidate_guard, sizeof(vehicle_exit_candidate_guard)));
     memcpy(memory + 0x10579a0, vehicle_exit_inverse_guard, sizeof(vehicle_exit_inverse_guard));
     memcpy(memory + 0x12e5a87, vehicle_exit_bailout_guard, sizeof(vehicle_exit_bailout_guard));
+    memcpy(memory + 0x10753c0, vehicle_exit_cached_guard, sizeof(vehicle_exit_cached_guard));
     memcpy(memory + 0x1057a12, vehicle_exit_frame_guard, sizeof(vehicle_exit_frame_guard));
     assert(VirtualProtect(memory, 0x2000000, PAGE_EXECUTE_READ, &protection));
     /* The snapshot contains a real thread which exits before OpenThread. */
@@ -148,6 +189,9 @@ int main(int argc, char **argv) {
     assert(memcmp(memory + 0x12e6635, vehicle_exit_candidate_guard, 5));
     assert(memcmp(memory + 0x10579a0, vehicle_exit_inverse_guard, 5));
     assert(memcmp(memory + 0x12e5a87, vehicle_exit_bailout_guard, 5));
+    assert(memory[0x10753c0] == 0xe8 && memory[0x10753c5] == 0x90 && !memcmp(memory + 0x10753c6, vehicle_exit_cached_guard + 6, 2));
+    assert(memory + 0x10753c5 + *(int32_t *)(memory + 0x10753c1) ==
+           memory + 0x12e663a + *(int32_t *)(memory + 0x12e6636) + 64);
     assert(memory + 0x12e663a + *(int32_t *)(memory + 0x12e6636) ==
            memory + 0x12e5a8c + *(int32_t *)(memory + 0x12e5a88));
     /* A persistent failure is bounded and never changes the original code. */
@@ -155,6 +199,7 @@ int main(int argc, char **argv) {
     memcpy(memory + 0x12e6635, vehicle_exit_candidate_guard, sizeof(vehicle_exit_candidate_guard));
     memcpy(memory + 0x10579a0, vehicle_exit_inverse_guard, sizeof(vehicle_exit_inverse_guard));
     memcpy(memory + 0x12e5a87, vehicle_exit_bailout_guard, sizeof(vehicle_exit_bailout_guard));
+    memcpy(memory + 0x10753c0, vehicle_exit_cached_guard, sizeof(vehicle_exit_cached_guard));
     assert(VirtualProtect(memory, 0x2000000, PAGE_EXECUTE_READ, &protection));
     assert(ResetEvent(retire_event));
     retiring_thread = CreateThread(NULL, 0, retire_worker, NULL, 0, NULL); assert(retiring_thread);
@@ -165,6 +210,7 @@ int main(int argc, char **argv) {
     assert(!memcmp(memory + 0x12e6635, vehicle_exit_candidate_guard, sizeof(vehicle_exit_candidate_guard)));
     assert(!memcmp(memory + 0x10579a0, vehicle_exit_inverse_guard, sizeof(vehicle_exit_inverse_guard)));
     assert(!memcmp(memory + 0x12e5a87, vehicle_exit_bailout_guard, sizeof(vehicle_exit_bailout_guard)));
+    assert(!memcmp(memory + 0x10753c0, vehicle_exit_cached_guard, sizeof(vehicle_exit_cached_guard)));
     /* Protection failures must be terminal, unlike the stale thread snapshot. */
     forced_open_failures = 0; refused_site = memory + 0x12e6635;
     vehicle_exit_install(memory);
@@ -172,9 +218,10 @@ int main(int argc, char **argv) {
     assert(!memcmp(memory + 0x12e6635, vehicle_exit_candidate_guard, sizeof(vehicle_exit_candidate_guard)));
     assert(!memcmp(memory + 0x10579a0, vehicle_exit_inverse_guard, sizeof(vehicle_exit_inverse_guard)));
     assert(!memcmp(memory + 0x12e5a87, vehicle_exit_bailout_guard, sizeof(vehicle_exit_bailout_guard)));
+    assert(!memcmp(memory + 0x10753c0, vehicle_exit_cached_guard, sizeof(vehicle_exit_cached_guard)));
     refused_site = NULL;
     assert(SetEvent(retire_event) && WaitForSingleObject(retiring_thread, 5000) == WAIT_OBJECT_0);
     CloseHandle(retiring_thread); CloseHandle(retire_event);
-    puts("PASS vehicle exit: retry, blocked fallback, flat ground, disable, thread isolation, emitted bridge, guarded install, startup thread exit, bounded refusal, terminal protection refusal");
+    puts("PASS vehicle exit: retry, moving exit refresh, blocked fallback, flat ground, disable, thread isolation, emitted bridge, guarded install, startup thread exit, bounded refusal, terminal protection refusal");
     return 0;
 }
