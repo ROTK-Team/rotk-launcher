@@ -150,8 +150,10 @@ hand (bump `version` per changed asset and `packVersion`).
   `config.v1.json` as `assetSyncEnabled`).
 - With the automatic sync on, a launcher that is ready and idle checks the feed at
   start-up and every 30 minutes, and downloads new or changed payloads into the cache
-  without installing them (`electron/services/asset-prefetch.ts`). The home screen shows
-  it as a background download, then the footer says the update is ready. Play,
-  **Verify files** and an installation stop it first: their sync resumes the `.part`
-  file, checks the SHA-256 and installs. A failure is only written to `startup.log`,
-  and the next try waits 1 h, 2 h, then 4 h. Nothing is downloaded while the game runs.
+  without installing them (`electron/services/asset-prefetch.ts`). Each pass also
+  removes the cached payloads and `.part` files of releases replaced since, but keeps
+  the installed ones. The home screen shows it as a background download, then the
+  footer says the update is ready. Play, **Verify files** and an installation stop it
+  first: their sync resumes the `.part` file, checks the SHA-256 and installs. A
+  failure is only written to `startup.log`, and the next try waits 1 h, 2 h, then 4 h.
+  Nothing is downloaded while a game started by the launcher is running.

@@ -912,6 +912,66 @@ describe("ROTK asset sync", () => {
       expect(await readdir(join(assetStorage(root), "asset-cache"))).toEqual([`${entryV1.sha256}.pack`]);
       expect(await readFile(join(root, "data", "weapons.pack"))).toEqual(v1);
     });
+
+    // Later releases of the weapons pack, published while the launcher stays open.
+    const [r2, r3, r4] = [2, 3, 4].map((n) => {
+      const data = Buffer.from(`weapons v${n} `.repeat(n));
+      const entry = assetEntry("weapons", data, {
+        version: `${n}.0.0`,
+        url: `https://github.com/rotk/rotk-assets/releases/download/assets-v${n}.0.0/weapons`,
+        installPath: "data/weapons.pack",
+      });
+      const feed: Record<string, RouteHandler> = {
+        [FEED_URL]: () => new Response(JSON.stringify(manifest([entry], `${n}.0.0`))),
+        [entry.url]: () => new Response(new Uint8Array(data)),
+      };
+      return { data, entry, feed };
+    });
+
+    it("removes the payloads of releases replaced before Play and keeps the installed one", async () => {
+      const { userData, root } = await installedV1();
+      const cache = join(assetStorage(root), "asset-cache");
+      const backup = join(assetStorage(root), "asset-backups", "data", "weapons.pack");
+      await mkdir(dirname(backup), { recursive: true });
+      await writeFile(backup, "original");
+
+      for (const release of [r2, r3, r4]) {
+        await service(userData, release.feed).prefetch(root);
+        expect((await readdir(cache)).sort())
+          .toEqual([`${entryV1.sha256}.pack`, `${release.entry.sha256}.pack`].sort());
+      }
+      // Only the cache is cleaned.
+      expect(await readFile(backup, "utf8")).toBe("original");
+      expect(await readFile(join(root, "data", "weapons.pack"))).toEqual(v1);
+
+      await service(userData, r4.feed).sync(root);
+      expect(await readdir(cache)).toEqual([`${r4.entry.sha256}.pack`]);
+    });
+
+    it("removes the .part file of a replaced release and resumes the current one", async () => {
+      const { userData, root } = await installedV1();
+      const cache = join(assetStorage(root), "asset-cache");
+      // Background passes for both releases were cut by quitting the launcher.
+      await writeFile(join(cache, `${r2.entry.sha256}.pack.part`), r2.data.subarray(0, 10));
+      await writeFile(join(cache, `${r3.entry.sha256}.pack.part`), r3.data.subarray(0, 10));
+      const ranges: Array<string | null> = [];
+      const sync = new AssetSyncService({
+        userDataDirectory: userData,
+        feedUrl: FEED_URL,
+        fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input) === FEED_URL) return r3.feed[FEED_URL]();
+          ranges.push(new Headers(init?.headers).get("range"));
+          return new Response(new Uint8Array(r3.data.subarray(10)), {
+            status: 206,
+            headers: { "content-range": `bytes 10-${r3.data.length - 1}/${r3.data.length}` },
+          });
+        }) as typeof fetch,
+      });
+
+      expect(await sync.prefetch(root)).toEqual({ packVersion: "3.0.0", pendingAssets: 1 });
+      expect(ranges).toEqual(["bytes=10-"]);
+      expect((await readdir(cache)).sort()).toEqual([`${entryV1.sha256}.pack`, `${r3.entry.sha256}.pack`].sort());
+    });
   });
 
   describe("free space check", () => {
