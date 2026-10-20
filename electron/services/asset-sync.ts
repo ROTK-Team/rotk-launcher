@@ -559,7 +559,7 @@ export class AssetSyncService {
           .catch(() => undefined);
       }
     }
-    await this.pruneCache(manifest);
+    await this.pruneCache(new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`)));
     return { status: changed ? "updated" : "up-to-date", packVersion: manifest.packVersion };
   }
 
@@ -570,9 +570,10 @@ export class AssetSyncService {
 
   /**
    * Download the new or changed packs of the feed into the cache, without
-   * installing them: the game folder, the state and the other cache entries
-   * are left as they are. The next sync finds the payloads in the cache and
-   * checks their SHA-256 before installing them, like any cached pack.
+   * installing them: the game folder and the state are left as they are. The
+   * next sync finds the payloads in the cache and checks their SHA-256 before
+   * installing them, like any cached pack. Cache entries that neither the feed
+   * nor the installed state uses any more are removed.
    */
   async prefetch(
     installRoot: string,
@@ -585,6 +586,11 @@ export class AssetSyncService {
     this.useStorageFor(root);
     const state = await this.readState();
     const manifest = await this.fetchManifest(options.signal);
+    // A release replaced before Play, or the .part file of a cut pass, would
+    // otherwise stay until the next sync. Done before the free space check so
+    // their space counts. The installed payloads stay.
+    await this.pruneCache(new Set([...manifest.assets, ...(state?.assets ?? [])]
+      .flatMap(({ sha256 }) => [`${sha256}.pack`, `${sha256}.pack.part`])));
     const records = new Map((state?.assets ?? []).map((asset) => [asset.name, asset]));
     // Same test as sync(); an installed pack that only needs a repair is left to it.
     const pending = manifest.assets.filter((asset) => {
@@ -1037,8 +1043,8 @@ export class AssetSyncService {
     if (!leftOver) await rm(this.legacyBackupDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 
-  private async pruneCache(manifest: AssetManifest): Promise<void> {
-    const keep = new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`));
+  /** Remove every cache entry whose file name is not in `keep`. */
+  private async pruneCache(keep: Set<string>): Promise<void> {
     try {
       for (const entry of await readdir(this.cacheDirectory)) {
         if (!keep.has(entry)) await rm(join(this.cacheDirectory, entry), { force: true });
