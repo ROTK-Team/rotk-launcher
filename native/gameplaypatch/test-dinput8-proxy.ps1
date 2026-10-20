@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "FFE3456B095832BB2DD2C97893E074FE07B34AF6DD8AFB1B410BB9110CA387E0"
-$expectedBytes = 58880
+$expectedHash = "3D2319E6AC4F598FFE90C9389129E56D4E892896276B639D2D1EEB9B16D6DC6A"
+$expectedBytes = 59904
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
@@ -246,3 +246,12 @@ $exitExe = Join-Path $testRoot "vehicle_exit_test.exe"
 if ($LASTEXITCODE -ne 0) { throw "Vehicle exit test compilation failed." }
 & $exitExe
 if ($LASTEXITCODE -ne 0) { throw "Vehicle exit slope recovery test failed." }
+
+$rulesExe = Join-Path $testRoot "ads_sprint_rule_test.exe"
+& $zig.Source @(
+    "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $rulesExe, (Join-Path $root "tests\ads_sprint_rule_test.c")
+)
+if ($LASTEXITCODE -ne 0) { throw "ADS sprint rule test compilation failed." }
+& $rulesExe
+if ($LASTEXITCODE -ne 0) { throw "ADS sprint rule test failed." }
