@@ -1,3 +1,7 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+static HANDLE WINAPI test_open_thread(DWORD access, BOOL inherit, DWORD id);
+#define OpenThread test_open_thread
 #define DirectInput8Create RotkTestDirectInput8Create
 #define DllCanUnloadNow RotkTestDllCanUnloadNow
 #define DllGetClassObject RotkTestDllGetClassObject
@@ -6,8 +10,37 @@
 #define GetdfDIJoystick RotkTestGetdfDIJoystick
 #define DllMain RotkTestDllMain
 #include "../dinput8_proxy.c"
+#undef OpenThread
 #undef NDEBUG
 #include <assert.h>
+
+static HANDLE retiring_thread, retire_event;
+static DWORD retiring_id;
+static unsigned int retired_open_errors, denied_opens, forced_open_failures;
+static DWORD WINAPI retire_worker(LPVOID unused) {
+    (void)unused;
+    assert(WaitForSingleObject(retire_event, 5000) == WAIT_OBJECT_0);
+    return 0;
+}
+/* Same replay as the vehicle exit test: a snapshot thread exits before
+ * OpenThread and the call fails with the error 87 seen in H1Z1. */
+static HANDLE WINAPI test_open_thread(DWORD access, BOOL inherit, DWORD id) {
+    if (id == retiring_id) {
+        assert(SetEvent(retire_event));
+        assert(WaitForSingleObject(retiring_thread, 5000) == WAIT_OBJECT_0);
+        assert(CloseHandle(retiring_thread));
+        retiring_thread = NULL; retiring_id = 0;
+        ++retired_open_errors;
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+    if (forced_open_failures) {
+        --forced_open_failures; ++denied_opens;
+        SetLastError(ERROR_ACCESS_DENIED);
+        return NULL;
+    }
+    return OpenThread(access, inherit, id);
+}
 
 static BYTE camera[0xc00];
 static float eye[4], look[4], target[4];
@@ -172,13 +205,13 @@ int main(int argc, char **argv) {
     int32_t rotation_relative = (int32_t)(0x700000 - 0x12b73fe);
     rotation_patch[0] = 0xe8; memcpy(rotation_patch + 1, &rotation_relative, 4);
     memcpy(ads_base + 0x12bfa93, ads_call_guard, sizeof(ads_call_guard));
-    assert(!ads_commit(ads_base, call_patch, eval_patch, rotation_patch));
+    assert(ads_commit(ads_base, call_patch, eval_patch, rotation_patch) == ADS_REFUSED);
     assert(memcmp(ads_base + 0x12bfa93, ads_call_guard, sizeof(ads_call_guard)) == 0);
     memcpy(ads_base + 0x12b763b, ads_eval_guard, sizeof(ads_eval_guard));
-    assert(!ads_commit(ads_base, call_patch, eval_patch, rotation_patch));
+    assert(ads_commit(ads_base, call_patch, eval_patch, rotation_patch) == ADS_REFUSED);
     assert(memcmp(ads_base + 0x12bfa93, ads_call_guard, sizeof(ads_call_guard)) == 0);
     memcpy(ads_base + 0x12b73f9, ads_rotation_guard, sizeof(ads_rotation_guard));
-    assert(ads_commit(ads_base, call_patch, eval_patch, rotation_patch));
+    assert(ads_commit(ads_base, call_patch, eval_patch, rotation_patch) == ADS_INSTALLED);
     assert(memcmp(ads_base + 0x12bfa93, call_patch, sizeof(call_patch)) == 0);
     assert(memcmp(ads_base + 0x12b763b, eval_patch, sizeof(eval_patch)) == 0);
     assert(memcmp(ads_base + 0x12b73f9, rotation_patch, sizeof(rotation_patch)) == 0);
@@ -187,7 +220,7 @@ int main(int argc, char **argv) {
     memcpy(ads_base + 0x12b73f9, ads_rotation_guard, sizeof(ads_rotation_guard));
     assert(VirtualProtect(ads_base + 0x12bf000, 4096, PAGE_EXECUTE_READ, &protection));
     assert(VirtualProtect(ads_base + 0x12b7000, 4096, PAGE_EXECUTE_READ, &protection));
-    assert(ads_commit(ads_base, call_patch, eval_patch, rotation_patch));
+    assert(ads_commit(ads_base, call_patch, eval_patch, rotation_patch) == ADS_INSTALLED);
     MEMORY_BASIC_INFORMATION page;
     assert(VirtualQuery(ads_base + 0x12b763b, &page, sizeof(page)) && page.Protect == PAGE_EXECUTE_READ);
     assert(VirtualQuery(ads_base + 0x12bfa93, &page, sizeof(page)) && page.Protect == PAGE_EXECUTE_READ);
@@ -228,6 +261,59 @@ int main(int argc, char **argv) {
         assert(fwrite(bridge, 1, length, f) == length); assert(fclose(f) == 0);
     }
     VirtualFree(bridge, 0, MEM_RELEASE); VirtualFree(ads_base, 0, MEM_RELEASE);
-    puts("PASS: ADS ordering, fallback, rollback input, gates, guarded commit, emitted bridge and Windows unwind.");
+
+    /* Full install on a private image with every guard. A snapshot thread
+     * that exits before OpenThread is retried with a fresh snapshot; a
+     * persistent failure stops after 20 attempts and writes nothing. */
+    const BYTE solver_guard[] = {0x48,0x8b,0xc4,0x55,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+    const BYTE collision_guard[] = {0x48,0x8b,0xc4,0x48,0x89,0x50,0x10,0x48,0x89,0x48,0x08};
+    const BYTE pose_guard[] = {0x48,0x8b,0xc4,0x4c,0x89,0x48,0x20,0x4c,0x89,0x40,0x18};
+    const BYTE yaw_guard[] = {0x40,0x53,0x48,0x83,0xec,0x30,0x48,0x8b,0xd9};
+    const BYTE rotate_guard[] = {0x48,0x8b,0xc4,0x44,0x88,0x48,0x20,0xf3,0x0f,0x11,0x50,0x18};
+    BYTE *stock = VirtualAlloc(NULL, 0x1300000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    int32_t site_relative;
+    assert(stock);
+    memcpy(stock + 0x12bfa93, ads_call_guard, sizeof(ads_call_guard));
+    memcpy(stock + 0x12b763b, ads_eval_guard, sizeof(ads_eval_guard));
+    memcpy(stock + 0x12b73f9, ads_rotation_guard, sizeof(ads_rotation_guard));
+    memcpy(stock + 0x12b7070, solver_guard, sizeof(solver_guard));
+    memcpy(stock + 0x12b5120, collision_guard, sizeof(collision_guard));
+    memcpy(stock + 0x12ba300, pose_guard, sizeof(pose_guard));
+    memcpy(stock + 0x12bcc30, yaw_guard, sizeof(yaw_guard));
+    memcpy(stock + 0x12b6760, rotate_guard, sizeof(rotate_guard));
+    assert(VirtualProtect(stock, 0x1300000, PAGE_EXECUTE_READ, &protection));
+    retire_event = CreateEventW(NULL, TRUE, FALSE, NULL); assert(retire_event);
+    retiring_thread = CreateThread(NULL, 0, retire_worker, NULL, 0, &retiring_id);
+    assert(retiring_thread);
+    InterlockedExchange(&ads_enabled, 0); ads_install(stock);
+    assert(retired_open_errors == 1 && !retiring_thread);
+    assert(InterlockedCompareExchange(&ads_enabled, 0, 0) && ads_base == stock);
+    assert(stock[0x12bfa93] == 0xe8 && stock[0x12b763b] == 0xe8 && stock[0x12b73f9] == 0xe8);
+    memcpy(&site_relative, stock + 0x12bfa94, 4);
+    BYTE *installed = stock + 0x12bfa98 + site_relative;
+    memcpy(&site_relative, stock + 0x12b763c, 4);
+    assert(stock + 0x12b7640 + site_relative == installed + 64);
+    memcpy(&site_relative, stock + 0x12b73fa, 4);
+    assert(stock + 0x12b73fe + site_relative == installed + 544);
+    assert(RtlDeleteFunctionTable(&ads_unwind));
+    assert(VirtualProtect(stock, 0x1300000, PAGE_READWRITE, &protection));
+    memcpy(stock + 0x12bfa93, ads_call_guard, sizeof(ads_call_guard));
+    memcpy(stock + 0x12b763b, ads_eval_guard, sizeof(ads_eval_guard));
+    memcpy(stock + 0x12b73f9, ads_rotation_guard, sizeof(ads_rotation_guard));
+    assert(VirtualProtect(stock, 0x1300000, PAGE_EXECUTE_READ, &protection));
+    assert(ResetEvent(retire_event));
+    retiring_thread = CreateThread(NULL, 0, retire_worker, NULL, 0, NULL); assert(retiring_thread);
+    forced_open_failures = 100; denied_opens = 0;
+    InterlockedExchange(&ads_enabled, 0); ads_install(stock);
+    assert(!InterlockedCompareExchange(&ads_enabled, 0, 0) && denied_opens == 20 && forced_open_failures == 80);
+    assert(!memcmp(stock + 0x12bfa93, ads_call_guard, sizeof(ads_call_guard)));
+    assert(!memcmp(stock + 0x12b763b, ads_eval_guard, sizeof(ads_eval_guard)));
+    assert(!memcmp(stock + 0x12b73f9, ads_rotation_guard, sizeof(ads_rotation_guard)));
+    assert(RtlDeleteFunctionTable(&ads_unwind));
+    forced_open_failures = 0;
+    assert(SetEvent(retire_event) && WaitForSingleObject(retiring_thread, 5000) == WAIT_OBJECT_0);
+    CloseHandle(retiring_thread); CloseHandle(retire_event);
+    VirtualFree(stock, 0, MEM_RELEASE);
+    puts("PASS: ADS ordering, fallback, rollback input, gates, guarded commit, emitted bridge and Windows unwind; install retries a thread that exits during the snapshot and stops after 20 attempts.");
     return 0;
 }

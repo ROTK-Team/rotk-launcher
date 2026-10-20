@@ -135,7 +135,11 @@ static SIZE_T ads_build_eval(BYTE *out) {
     return (SIZE_T)(p - out);
 }
 
-static BOOL ads_commit(BYTE *base, const BYTE *call_patch, const BYTE *eval_patch, const BYTE *rotation_patch) {
+typedef enum {
+    ADS_REFUSED, ADS_BUSY, ADS_INSTALLED
+} ads_commit_result;
+
+static ads_commit_result ads_commit(BYTE *base, const BYTE *call_patch, const BYTE *eval_patch, const BYTE *rotation_patch) {
     HANDLE handles[256], snapshot; THREADENTRY32 row; unsigned int count = 0, stopped = 0, i;
     DWORD self = GetCurrentThreadId(), process = GetCurrentProcessId(), old[3] = {0,0,0};
     BYTE *sites[] = {base + 0x12bfa93, base + 0x12b763b, base + 0x12b73f9};
@@ -143,17 +147,19 @@ static BOOL ads_commit(BYTE *base, const BYTE *call_patch, const BYTE *eval_patc
     const BYTE *replacement[] = {call_patch, eval_patch, rotation_patch};
     SIZE_T sizes[] = {sizeof(ads_call_guard), sizeof(ads_eval_guard), sizeof(ads_rotation_guard)};
     BOOL writable[3] = {FALSE,FALSE,FALSE}, ok = FALSE;
+    ads_commit_result result = ADS_BUSY;
     snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return FALSE;
+    if (snapshot == INVALID_HANDLE_VALUE) return result;
     row.dwSize = sizeof(row);
-    if (!Thread32First(snapshot, &row)) { CloseHandle(snapshot); return FALSE; }
+    if (!Thread32First(snapshot, &row)) { CloseHandle(snapshot); return result; }
     do {
         if (row.th32OwnerProcessID != process || row.th32ThreadID == self) continue;
-        if (count == ARRAYSIZE(handles)) goto close_handles;
+        if (count == ARRAYSIZE(handles)) { result = ADS_REFUSED; goto close_handles; }
         handles[count] = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, row.th32ThreadID);
         if (!handles[count]) goto close_handles;
         ++count;
     } while (Thread32Next(snapshot, &row));
+    if (GetLastError() != ERROR_NO_MORE_FILES) goto close_handles;
     CloseHandle(snapshot); snapshot = INVALID_HANDLE_VALUE;
     for (i = 0; i < count; ++i) {
         CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
@@ -163,6 +169,9 @@ static BOOL ads_commit(BYTE *base, const BYTE *call_patch, const BYTE *eval_patc
         for (unsigned int j = 0; j < ARRAYSIZE(sites); ++j)
             if (ctx.Rip >= (uintptr_t)sites[j] && ctx.Rip < (uintptr_t)sites[j] + sizes[j]) goto resume_threads;
     }
+    /* Once signatures/protections are involved, a refusal is terminal: a
+     * retry must never treat a partially installed bridge as original code. */
+    result = ADS_REFUSED;
     for (i = 0; i < ARRAYSIZE(sites); ++i)
         if (!exact_bytes(sites[i], original[i], sizes[i])) goto resume_threads;
     for (i = 0; i < ARRAYSIZE(sites); ++i) writable[i] = VirtualProtect(sites[i], sizes[i], PAGE_EXECUTE_READWRITE, &old[i]);
@@ -184,13 +193,14 @@ resume_threads:
 close_handles:
     if (snapshot != INVALID_HANDLE_VALUE) CloseHandle(snapshot);
     while (count) CloseHandle(handles[--count]);
-    return ok;
+    return ok ? ADS_INSTALLED : result;
 }
 
 static void ads_install(BYTE *base) {
     BYTE *memory = NULL, call_patch[sizeof(ads_call_guard)], eval_patch[sizeof(ads_eval_guard)];
     BYTE rotation_patch[sizeof(ads_rotation_guard)];
-    DWORD protection; SYSTEM_INFO info; int32_t relative; SIZE_T length;
+    DWORD protection; int32_t relative; SIZE_T length;
+    ads_commit_result result = ADS_BUSY;
     const BYTE solver_guard[] = {0x48,0x8b,0xc4,0x55,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
     const BYTE collision_guard[] = {0x48,0x8b,0xc4,0x48,0x89,0x50,0x10,0x48,0x89,0x48,0x08};
     const BYTE pose_guard[] = {0x48,0x8b,0xc4,0x4c,0x89,0x48,0x20,0x4c,0x89,0x40,0x18};
@@ -207,10 +217,8 @@ static void ads_install(BYTE *base) {
         !exact_bytes(base + 0x12b6760, rotate_guard, sizeof(rotate_guard))) {
         patch_log("ROTK ADS: native signature mismatch; skipped.\n"); return;
     }
-    GetSystemInfo(&info);
-    for (uintptr_t delta = 0x08000000; delta < 0x70000000 && !memory; delta += info.dwAllocationGranularity)
-        memory = VirtualAlloc(base + delta, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!memory) return;
+    memory = bridge_page(base);
+    if (!memory) { bridge_refused("ROTK ADS", base); return; }
     stance_jump(memory, (void *)(uintptr_t)ads_transition);
     stance_jump(memory + 544, (void *)(uintptr_t)ads_rotate);
     length = ads_build_eval(memory + 64);
@@ -219,7 +227,8 @@ static void ads_install(BYTE *base) {
     if (!VirtualProtect(memory, 4096, PAGE_EXECUTE_READ, &protection) ||
         !FlushInstructionCache(GetCurrentProcess(), memory, 4096) ||
         !RtlAddFunctionTable(&ads_unwind, 1, (DWORD64)(uintptr_t)memory)) {
-        VirtualFree(memory, 0, MEM_RELEASE); return;
+        bridge_release(memory);
+        patch_log("ROTK ADS: bridge protection or unwind registration refused; skipped.\n"); return;
     }
     memset(call_patch, 0x90, sizeof(call_patch)); call_patch[0] = 0xe8;
     relative = (int32_t)((memory - base) - 0x12bfa98); memcpy(call_patch + 1, &relative, 4);
@@ -228,11 +237,20 @@ static void ads_install(BYTE *base) {
     memset(rotation_patch, 0x90, sizeof(rotation_patch)); rotation_patch[0] = 0xe8;
     relative = (int32_t)((memory + 544 - base) - 0x12b73fe); memcpy(rotation_patch + 1, &relative, 4);
     ads_base = base;
-    if (!ads_commit(base, call_patch, eval_patch, rotation_patch)) {
+    /* Startup threads can exit after enumeration. Resume/close everything,
+     * then take a fresh snapshot; never sleep with another thread suspended. */
+    for (unsigned int attempt = 0; attempt < 20; ++attempt) {
+        if (attempt) Sleep(10);
+        result = ads_commit(base, call_patch, eval_patch, rotation_patch);
+        if (result != ADS_BUSY) break;
+    }
+    if (result != ADS_INSTALLED) {
         /* Keep registered bridges alive on a protection restoration failure;
          * disabled wrappers preserve the original solver/collision ordering.
          */
-        patch_log("ROTK ADS: guarded installation refused; disabled.\n"); return;
+        patch_log(result == ADS_BUSY ?
+                  "ROTK ADS: thread state did not stabilize; disabled.\n" :
+                  "ROTK ADS: guarded installation refused; disabled.\n"); return;
     }
     InterlockedExchange(&ads_enabled, 1);
     patch_log("ROTK ADS: collision-aware transition solver installed.\n");

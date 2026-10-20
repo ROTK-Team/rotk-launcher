@@ -7,8 +7,8 @@ import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
 export const GAMEPLAY_PATCH_FILE_NAME = "dinput8.dll";
 export const GAMEPLAY_PATCH_SHA256 =
-  "7de5b115a302a44042b7361bf31112a66b473aa8e21f21ae29572ff254eafc30";
-export const GAMEPLAY_PATCH_BYTES = 58_368;
+  "899ede1d2d773128880a9d7bb613c24b72cb28f14e74e4fb3b6b072d2355509c";
+export const GAMEPLAY_PATCH_BYTES = 61_952;
 
 /**
  * Marker next to H1Z1.exe. The proxy enables the sprint byte pair and guarded
@@ -22,6 +22,11 @@ export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
 
 /** Exact retired ROTK artifacts an automatic migration may replace. */
 export const RETIRED_GAMEPLAY_PATCHES = Object.freeze([
+  Object.freeze({
+    // Launcher 2.0.43, before the load-time bridge block, marker read debounce and Trio/ADS install retries.
+    sha256: "7de5b115a302a44042b7361bf31112a66b473aa8e21f21ae29572ff254eafc30",
+    bytes: 58_368,
+  }),
   Object.freeze({
     // Launcher 2.0.42: keep its Trio respawn recovery while adding vehicle exits and ADS transitions.
     sha256: "b1f35314f2e183cdc1ccbbc2b24ee76b8e991179e1adb653f560128d500852d9",
