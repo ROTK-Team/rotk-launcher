@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -88,7 +88,9 @@ describe("installClient flow", () => {
   it("installs into a folder right under a drive root, like G:\\ROTK", async () => {
     const { destination, request } = await fixture();
     await mkdir(dirname(destination));
-    faults.driveRoot = dirname(destination);
+    // The installer works on the physical path, and a temp folder can sit behind
+    // an 8.3 short name (C:\Users\RUNNER~1 on CI) or a junction.
+    faults.driveRoot = await realpath(dirname(destination));
 
     await installClient(request());
     expect(await inspectDestination(destination)).toBe("installed");
