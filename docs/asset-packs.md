@@ -156,4 +156,6 @@ hand (bump `version` per changed asset and `packVersion`).
   footer says the update is ready. Play, **Verify files** and an installation stop it
   first: their sync resumes the `.part` file, checks the SHA-256 and installs. A
   failure is only written to `startup.log`, and the next try waits 1 h, 2 h, then 4 h.
-  Nothing is downloaded while a game started by the launcher is running.
+  A payload that still fails its SHA-256 check after a second download is skipped by
+  later background passes until the launcher restarts; Play and **Verify files** still
+  try it. Nothing is downloaded while a game started by the launcher is running.

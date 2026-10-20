@@ -972,6 +972,28 @@ describe("ROTK asset sync", () => {
       expect(ranges).toEqual(["bytes=10-"]);
       expect((await readdir(cache)).sort()).toEqual([`${entryV1.sha256}.pack`, `${r3.entry.sha256}.pack`].sort());
     });
+
+    it("does not download a pack again in the background once it failed its SHA-256 check", async () => {
+      const { userData, root } = await installedV1();
+      const calls: string[] = [];
+      const sync = service(userData, {
+        [FEED_URL]: feedV2[FEED_URL],
+        // A proxy that changes the bytes but not the size.
+        [entryV2.url]: () => new Response(new Uint8Array(v2.length).fill(0x78)),
+      }, calls);
+
+      await expect(sync.prefetch(root)).rejects.toThrow("est corrompu");
+      expect(calls).toEqual([FEED_URL, entryV2.url, entryV2.url]);
+      calls.length = 0;
+      expect(await sync.prefetch(root)).toEqual({ packVersion: "2.0.0", pendingAssets: 0 });
+      expect(calls).toEqual([FEED_URL]);
+
+      // Play still tries it.
+      calls.length = 0;
+      await expect(sync.sync(root)).rejects.toThrow("est corrompu");
+      expect(calls).toEqual([FEED_URL, entryV2.url, entryV2.url]);
+      expect(await readFile(join(root, "data", "weapons.pack"))).toEqual(v1);
+    });
   });
 
   describe("free space check", () => {
