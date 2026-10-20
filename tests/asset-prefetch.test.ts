@@ -162,4 +162,11 @@ describe("background asset download", () => {
     expect(install.indexOf("await stopAssetPrefetch();")).toBeGreaterThan(0);
     expect(install.indexOf("await stopAssetPrefetch();")).toBeLessThan(install.indexOf("await adoptExistingClient("));
   });
+
+  it("is stopped when the automatic sync is turned off", async () => {
+    const main = await readFile(new URL("../electron/main.ts", import.meta.url), "utf8");
+    const setting = main.slice(main.indexOf("IPC_CHANNELS.setAssetSyncEnabled,"));
+    const handler = setting.slice(0, setting.indexOf("ipcMain.handle("));
+    expect(handler).toMatch(/if \(enabled\) assetPrefetch\.poke\(\);\s*else await stopAssetPrefetch\(\);/);
+  });
 });

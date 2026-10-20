@@ -382,6 +382,13 @@ class DownloadStalledError extends Error {
   }
 }
 
+/** A download that still did not match its SHA-256 after a clean second try. */
+class AssetHashMismatchError extends Error {
+  constructor(assetName: string) {
+    super(`L’asset ${assetName} est corrompu (empreinte SHA-256 inattendue).`);
+  }
+}
+
 const NETWORK_ERROR_CODES = new Set([
   "ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EAI_AGAIN", "ENOTFOUND", "EPIPE", "ENETUNREACH", "EHOSTUNREACH",
 ]);
@@ -412,6 +419,10 @@ export class AssetSyncService {
   private readonly fetchImpl: typeof fetch;
   private readonly onProgress: (progress: AssetSyncProgress) => void;
   private lastProgressAt = 0;
+  // Payloads a background pass downloaded twice without a SHA-256 match.
+  // Later background passes skip them until the launcher restarts; Play and
+  // Verify files still try them.
+  private readonly prefetchHashFailures = new Set<string>();
 
   constructor(options: AssetSyncServiceOptions) {
     this.statePath = join(options.userDataDirectory, STATE_FILE_NAME);
@@ -592,8 +603,10 @@ export class AssetSyncService {
     await this.pruneCache(new Set([...manifest.assets, ...(state?.assets ?? [])]
       .flatMap(({ sha256 }) => [`${sha256}.pack`, `${sha256}.pack.part`])));
     const records = new Map((state?.assets ?? []).map((asset) => [asset.name, asset]));
-    // Same test as sync(); an installed pack that only needs a repair is left to it.
+    // Same test as sync(), minus the payloads that already failed their hash
+    // check here. An installed pack that only needs a repair is left to sync().
     const pending = manifest.assets.filter((asset) => {
+      if (this.prefetchHashFailures.has(asset.sha256)) return false;
       const record = records.get(asset.name);
       return !record || record.version !== asset.version || record.sha256 !== asset.sha256;
     });
@@ -628,10 +641,15 @@ export class AssetSyncService {
         continue;
       }
       emit(asset.name, true);
-      await this.ensureCachedAsset(asset, options.signal, (amount) => {
-        completedBytes += amount;
-        emit(asset.name);
-      });
+      try {
+        await this.ensureCachedAsset(asset, options.signal, (amount) => {
+          completedBytes += amount;
+          emit(asset.name);
+        });
+      } catch (error) {
+        if (error instanceof AssetHashMismatchError) this.prefetchHashFailures.add(asset.sha256);
+        throw error;
+      }
       assetsCompleted += 1;
       emit(asset.name, true);
     }
@@ -785,7 +803,7 @@ export class AssetSyncService {
       }
       if (await sha256File(partialPath) === asset.sha256) break;
       await rm(partialPath, { force: true });
-      if (pass >= 2) throw new Error(`L’asset ${asset.name} est corrompu (empreinte SHA-256 inattendue).`);
+      if (pass >= 2) throw new AssetHashMismatchError(asset.name);
     }
     await retryFs(() => rename(partialPath, cachePath));
     return cachePath;
