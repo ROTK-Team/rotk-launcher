@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -171,6 +171,26 @@ describe("atomicCopyFile", () => {
     expect(io.events.some((event) => event.startsWith("rename "))).toBe(false);
     expect(await readFile(target, "utf8")).toBe("previous bytes");
     expect((await readdir(directory)).sort()).toEqual(["active.dll", "bundled.dll"]);
+  });
+
+  it("copies a read-only file, whose copy cannot be opened for the flush", async () => {
+    const directory = await temporaryDirectory();
+    const source = join(directory, "ClientConfig.ini");
+    const target = join(directory, "ClientConfig.original.ini");
+    await writeFile(source, "[Client]\nLocale=en_us\n");
+    // Some players lock their settings this way; copyFile keeps the attribute.
+    await chmod(source, 0o444);
+    try {
+      await atomicCopyFile(source, target);
+
+      // No flush for that copy: it goes straight to the rename, as before.
+      expect(io.events).toEqual([expect.stringMatching(/^rename .+\.rotk-[0-9a-f-]{36}\.tmp -> .+ClientConfig\.original\.ini$/)]);
+      expect(await readFile(target)).toEqual(await readFile(source));
+      expect((await readdir(directory)).sort()).toEqual(["ClientConfig.ini", "ClientConfig.original.ini"]);
+    } finally {
+      // Windows refuses to delete read-only files: give write access back first.
+      for (const path of [source, target]) await chmod(path, 0o666).catch(() => undefined);
+    }
   });
 });
 

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { copyFile, open, rename, rm } from "node:fs/promises";
+import { copyFile, open, rename, rm, stat } from "node:fs/promises";
 
 // Antivirus, indexer and sync clients hold freshly written files for a moment,
 // so rename/replace/delete can fail with EPERM/EBUSY/EACCES. Retry those.
@@ -56,8 +56,20 @@ export async function writeFileDurably(
 
 /** Flush a file written by something else (copyFile, a stream) to the disk. */
 export async function syncFile(path: string): Promise<void> {
-  // FlushFileBuffers needs a handle with write access.
-  const handle = await retryFs(() => open(path, "r+"));
+  // FlushFileBuffers needs a handle with write access. copyFile carries the
+  // read-only attribute over to the copy (a locked ClientConfig.ini, say), and
+  // that copy cannot be opened for writing: skip the flush for it, as before.
+  const handle = await retryFs(async () => {
+    try {
+      return await open(path, "r+");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const details = code === "EPERM" || code === "EACCES" ? await stat(path).catch(() => null) : null;
+      if (details && (details.mode & 0o200) === 0) return null;
+      throw error;
+    }
+  });
+  if (!handle) return;
   try {
     await handle.sync();
   } finally {
