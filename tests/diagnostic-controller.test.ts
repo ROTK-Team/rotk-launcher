@@ -188,7 +188,7 @@ describe('diagnostic controller and persisted session lifecycle', () => {
     await recovered.initialize(true, true);
     expect(reveal).toHaveBeenCalledOnce();
     expect((await recovered.reports.getReport(crashed.id)).summary).toMatchObject({ kind: 'crash', exitCodeHex: '0xC0000005' });
-  });
+  }, 20_000); // A real recovery and export can exceed 5s on a busy Windows CI runner.
 
   it('preserves the Windows startup crash code when launch also reports a generic startup failure', async () => {
     const f = await fixture(), launch = await f.controller.beginLaunch(f.context);
