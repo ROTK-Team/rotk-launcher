@@ -188,14 +188,17 @@ describe("launcher locales", () => {
     expect(refused).not.toContain("AppLocker");
     expect(refused).toContain("%APPDATA%\\ROTK Launcher\\startup.log");
     expect(copy.rendererGone("crashed")).not.toContain(noRetry);
+    expect(copy.rendererGone("launch-failed")).not.toContain(noRetry);
   });
 
-  it("keeps the restart advice for renderers that stopped after starting", async () => {
+  it("keeps the restart advice for every renderer failure but the refused sandbox of #151", async () => {
     const main = await readFile(new URL("../electron/main.ts", import.meta.url), "utf8");
-    // One match for the condition and both branches, so a swap fails.
+    // One match for the condition and both branches, so a swap fails. A launch
+    // failure with another exit code may not repeat and keeps the advice.
     expect(main).toMatch(
-      /details\.reason === "launch-failed" && process\.platform === "win32"\s*\?\s*copy\.rendererLaunchRefused\(details\.exitCode\)\s*:\s*copy\.rendererGone\(details\.reason\)/,
+      /details\.reason === "launch-failed"\s*&& details\.exitCode === SANDBOX_CREATE_PROCESS_EXIT_CODE\s*&& process\.platform === "win32"\s*\?\s*copy\.rendererLaunchRefused\(details\.exitCode\)\s*:\s*copy\.rendererGone\(details\.reason\)/,
     );
+    expect(main).toContain("const SANDBOX_CREATE_PROCESS_EXIT_CODE = 18;");
     expect(main).toContain("new Error(`${details.reason} exitCode=${details.exitCode}`)");
   });
 });
