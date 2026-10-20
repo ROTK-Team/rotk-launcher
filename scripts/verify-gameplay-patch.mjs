@@ -3,8 +3,8 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const expectedHash =
-  "7de5b115a302a44042b7361bf31112a66b473aa8e21f21ae29572ff254eafc30";
-const expectedBytes = 58_368;
+  "91da7eb47ce3acfc830342f20b4f657861a43e1a6056f2e0d8af2913b4c39bbe";
+const expectedBytes = 59_392;
 const builtPath = resolve(
   process.argv[2] ?? "native/gameplaypatch/dist/dinput8.dll",
 );
