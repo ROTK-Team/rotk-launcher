@@ -228,6 +228,14 @@ function serviceError(status: number, value: unknown, attestationUnavailableReas
       "This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.",
     );
   }
+  if (errorCode === "steam_level_required") {
+    const minimum = typeof payload?.minimumLevel === "number" && Number.isInteger(payload.minimumLevel)
+      && payload.minimumLevel >= 1 && payload.minimumLevel <= 1_000_000 ? payload.minimumLevel : 1;
+    return new Error(`Steam level ${minimum} or higher is required to play ROTK with this account.`);
+  }
+  if (errorCode === "steam_level_unavailable") {
+    return new Error("Your Steam level could not be verified. Make sure your Steam profile is public, then try again shortly.");
+  }
   if (status === 401 || errorCode === "invalid_credentials") {
     return new Error("The ROTK launcher key was rejected");
   }

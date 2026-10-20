@@ -8,7 +8,7 @@
 #define REBOOT_ACTOR_STOLEN 18U
 #define REBOOT_RESPONSE_RVA 0x00ef4dfbU
 #define REBOOT_RESPONSE_STOLEN 10U
-#define REBOOT_PENDING_MS 5000U
+#define REBOOT_RETRY_MS 250U
 static const BYTE reboot_actor_guard[] = {
     0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,
     0x48,0x8d,0x6c,0x24,0xd8,0x48,0x81,0xec,0x28,0x01,0x00,0x00
@@ -29,6 +29,12 @@ static const BYTE reboot_hidden_guard[] = {
     0x40,0x53,0x56,0x57,0x41,0x56,0x48,0x83,0xec,0x28,
     0x41,0xb9,0x07,0x00,0x00,0x00
 };
+/* UIBindingMatch.GetMatchId at 1416d5100 reads the full u64 at history+3d8.
+ * Validate that reader too: a reused history allocation is not the same match. */
+static const BYTE reboot_match_guard[] = {
+    0x48,0x8b,0x05,0x80,0x95,0x09,0x03,0x48,0x85,0xc0,0x74,0x22,
+    0x4c,0x8b,0x80,0xd8,0x03,0x00,0x00
+};
 typedef void (*reboot_actor_fn)(BYTE *);
 static BYTE *reboot_base;
 static reboot_actor_fn reboot_original_actor;
@@ -36,15 +42,15 @@ static volatile LONG reboot_enabled;
 static unsigned int reboot_reports;
 static struct {
     BYTE *game, *context, *actor, *flags_owner, *history, *mode;
-    uint64_t actor_id, character;
-    unsigned int controller_type;
-    ULONGLONG until;
+    uint64_t actor_id, character, match;
+    BOOL team_hidden, applying;
+    ULONGLONG next_attempt;
     unsigned int reasons;
 } reboot_pending;
 
 static void reboot_clear(void) { memset(&reboot_pending, 0, sizeof(reboot_pending)); }
 static void reboot_report(const char *text) {
-    if (reboot_reports++ < 24U) patch_log(text);
+    if (reboot_reports < 24U) { ++reboot_reports; patch_log(text); }
 }
 static void reboot_note(unsigned int reason, const char *text) {
     if (!(reboot_pending.reasons & reason)) {
@@ -87,6 +93,33 @@ static BYTE *reboot_br_mode(void) {
     BYTE *mode = (BYTE *)stance_ptr(reboot_base + 0x476e308);
     return mode && stance_u32(mode + 0x28) == 1 ? mode : NULL;
 }
+/* An accepted next life outlives a frame stall or a death -> teammate camera
+ * change. Its lifetime ends on a new death, match/history/mode/identity change,
+ * patch disable, or a verified player camera. Never time out a paid respawn. */
+static BOOL reboot_same_life(void) {
+    BYTE *game = (BYTE *)stance_ptr(reboot_base + 0x476dc08);
+    BYTE *context = game ? (BYTE *)stance_ptr(game + 0x382a0) : NULL;
+    BYTE *owner = game ? (BYTE *)stance_ptr(game + 0x37680) : NULL;
+    owner = owner ? (BYTE *)stance_ptr(owner + 0x1710) : NULL;
+    return reboot_pending.game && InterlockedCompareExchange(&reboot_enabled, 0, 0) &&
+        game == reboot_pending.game && context == reboot_pending.context &&
+        owner == reboot_pending.flags_owner &&
+        (BYTE *)stance_ptr(reboot_base + 0x476e6b8) == reboot_pending.history &&
+        (uint64_t)stance_ptr(reboot_pending.history + 0x3d8) == reboot_pending.match &&
+        reboot_br_mode() == reboot_pending.mode && context &&
+        (BYTE *)stance_ptr(context + 0x780) == reboot_pending.actor && reboot_unfinished() &&
+        stance_ptr(reboot_pending.actor) == (uintptr_t)(reboot_base + 0x387fdb0) &&
+        (uint64_t)stance_ptr(reboot_pending.actor + 0x338) == reboot_pending.actor_id &&
+        (uint64_t)stance_ptr(reboot_pending.actor + 0x1d8) == reboot_pending.actor_id &&
+        (uint64_t)stance_ptr(reboot_pending.actor + 0x728) == reboot_pending.character;
+}
+static BOOL reboot_player_type(unsigned int type) {
+    return type == 1 || type == 0x13 || type == 0x18;
+}
+static unsigned int reboot_view_type(BYTE *view) {
+    uintptr_t fn = view ? reboot_virtual(view, 8) : 0;
+    return fn ? ((unsigned int (*)(BYTE *))fn)(view) : 0;
+}
 /* The response gate is reached only after native parsing and its local
  * owner check. UseNewUI (game+38951) skips the stock UI response event.
  * The bridge supplies R15, BL and the parsed character ID at RBP+420.
@@ -94,10 +127,13 @@ static BYTE *reboot_br_mode(void) {
  */
 static BOOL reboot_arm(BYTE success, BYTE *game, uint64_t character) {
     BYTE *context, *actor, *owner, *view, *history, *mode; BYTE flags, finished[2];
-    unsigned int type; uint64_t actor_id;
-    reboot_clear();
+    uint64_t actor_id, match;
     if (!InterlockedCompareExchange(&reboot_enabled, 0, 0) || success != 1 || !game ||
         game != (BYTE *)stance_ptr(reboot_base + 0x476dc08)) return FALSE;
+    /* A second reply must not erase the first accepted life after its two
+     * history latches were cleared. Invalid/rejected replies grant nothing. */
+    if (reboot_pending.applying) return FALSE;
+    if (reboot_same_life() && character == reboot_pending.character) return TRUE;
     mode = reboot_br_mode();
     if (!mode) return FALSE;
     context = (BYTE *)stance_ptr(game + 0x382a0);
@@ -105,11 +141,9 @@ static BOOL reboot_arm(BYTE success, BYTE *game, uint64_t character) {
     owner = (BYTE *)stance_ptr(game + 0x37680);
     owner = owner ? (BYTE *)stance_ptr(owner + 0x1710) : NULL;
     view = (BYTE *)stance_ptr(game + 0x382d8);
-    type = reboot_dead_type(view);
     if (!actor || stance_ptr(actor) != (uintptr_t)(reboot_base + 0x387fdb0) || !owner ||
-        !type || !reboot_byte(owner + 0x108fc, &flags) ||
-        (flags & 0x18) != (type == 0x1e ? 0x08 : type == 0x1b ? 0x18 : 0)) {
-        reboot_report("ROTK trio reboot: response refused (local actor/controller guard).\n"); return FALSE;
+        !reboot_byte(owner + 0x108fc, &flags)) {
+        reboot_report("ROTK trio reboot: response refused (local actor guard).\n"); return FALSE;
     }
     actor_id = (uint64_t)stance_ptr(actor + 0x338);
     if (!actor_id || actor_id != (uint64_t)stance_ptr(actor + 0x1d8) ||
@@ -117,11 +151,12 @@ static BOOL reboot_arm(BYTE success, BYTE *game, uint64_t character) {
         reboot_report("ROTK trio reboot: response refused (native actor/character identity).\n"); return FALSE;
     }
     history = (BYTE *)stance_ptr(reboot_base + 0x476e6b8);
-    if (!history || !stance_read(history + 0x438, finished, sizeof(finished)) ||
+    match = history ? (uint64_t)stance_ptr(history + 0x3d8) : 0;
+    if (!match || !stance_read(history + 0x438, finished, sizeof(finished)) ||
         finished[0] != 1 || finished[1] > 1 ||
         !reboot_data_byte(history + 0x438) || !reboot_data_byte(history + 0x439)) {
         reboot_report("ROTK trio reboot: local respawn refused (match-history guard).\n");
-        reboot_clear(); return FALSE;
+        return FALSE;
     }
     /* 5c/08 publishes current booleans, but native 141ad2b30 only sets these
      * death-notification latches to one; packet false never clears them.
@@ -132,13 +167,17 @@ static BOOL reboot_arm(BYTE success, BYTE *game, uint64_t character) {
      * camera state; the Lua response event is not an AS3 notification. No
      * match data, scores, inventory or other history bytes are changed here.
      */
+    reboot_clear();
+    reboot_reports = 0;
     history[0x438] = history[0x439] = 0;
     reboot_pending.game = game; reboot_pending.context = context; reboot_pending.actor = actor;
     reboot_pending.flags_owner = owner; reboot_pending.history = history;
     reboot_pending.mode = mode;
     reboot_pending.actor_id = actor_id; reboot_pending.character = character;
-    reboot_pending.controller_type = type;
-    reboot_pending.until = GetTickCount64() + REBOOT_PENDING_MS;
+    reboot_pending.match = match;
+    /* Native e9/03 sets flags before the deferred camera is installed. They
+     * are presentation, not authority for the authenticated next life. */
+    reboot_pending.team_hidden = reboot_team_type(view) != 0 || (flags & 8) != 0;
     reboot_report("ROTK trio reboot: successful local respawn; camera reset armed.\n");
     return TRUE;
 }
@@ -152,29 +191,15 @@ static BYTE reboot_response(BYTE *game, BYTE success, uint64_t character) {
     return !new_ui ? 1 : 0;
 }
 static void reboot_after_actor(BYTE *actor) {
-    BYTE *game, *context, *owner, *view; BYTE flags;
-    uintptr_t is_dead, visibility, view_type; unsigned int desired, type; BYTE original_flags;
-    if (!reboot_pending.game) return;
-    if (GetTickCount64() > reboot_pending.until) {
-        reboot_report("ROTK trio reboot: pending expired (deadline).\n"); reboot_clear(); return;
-    }
-    game = (BYTE *)stance_ptr(reboot_base + 0x476dc08);
-    context = game ? (BYTE *)stance_ptr(game + 0x382a0) : NULL;
-    owner = game ? (BYTE *)stance_ptr(game + 0x37680) : NULL;
-    owner = owner ? (BYTE *)stance_ptr(owner + 0x1710) : NULL;
-    if (!InterlockedCompareExchange(&reboot_enabled, 0, 0) ||
-        game != reboot_pending.game || context != reboot_pending.context || owner != reboot_pending.flags_owner ||
-        (BYTE *)stance_ptr(reboot_base + 0x476e6b8) != reboot_pending.history ||
-        reboot_br_mode() != reboot_pending.mode ||
-        !context || (BYTE *)stance_ptr(context + 0x780) != reboot_pending.actor || !reboot_unfinished() ||
-        (uint64_t)stance_ptr(reboot_pending.actor + 0x338) != reboot_pending.actor_id ||
-        (uint64_t)stance_ptr(reboot_pending.actor + 0x1d8) != reboot_pending.actor_id ||
-        (uint64_t)stance_ptr(reboot_pending.actor + 0x728) != reboot_pending.character) {
+    BYTE *game, *owner, *view; BYTE flags, original_flags;
+    uintptr_t is_dead, visibility; unsigned int desired, type;
+    BOOL already_player;
+    if (!reboot_pending.game || reboot_pending.applying) return;
+    if (!reboot_same_life()) {
         reboot_report("ROTK trio reboot: pending cancelled (identity/state changed).\n"); reboot_clear(); return;
     }
-    if (actor != reboot_pending.actor || stance_ptr(actor) != (uintptr_t)(reboot_base + 0x387fdb0)) return;
-    view = (BYTE *)stance_ptr(game + 0x382d8); type = reboot_dead_type(view);
-    if (type != reboot_pending.controller_type) { reboot_report("ROTK trio reboot: pending cancelled (controller changed).\n"); reboot_clear(); return; }
+    if (actor != reboot_pending.actor) return;
+    game = reboot_pending.game; owner = reboot_pending.flags_owner;
     if (stance_u32(game + 0x382d0) != 0) { reboot_note(2, "ROTK trio reboot: waiting (native transition pending).\n"); return; }
     is_dead = reboot_virtual(actor + 0x310, 0xb0);
     visibility = reboot_virtual(actor, 0x380);
@@ -184,35 +209,48 @@ static void reboot_after_actor(BYTE *actor) {
     if (((BYTE (*)(BYTE *))is_dead)(actor + 0x310)) {
         reboot_note(8, "ROTK trio reboot: waiting (native actor still dead).\n"); return;
     }
-    if (!reboot_byte(owner + 0x108fc, &flags) || !reboot_data_byte(owner + 0x108fc) ||
-        (flags & 0x18) != (type == 0x1e ? 0x08 : type == 0x1b ? 0x18 : 0)) {
-        reboot_note(16, "ROTK trio reboot: waiting (spectator flags mismatch).\n"); return;
+    view = (BYTE *)stance_ptr(game + 0x382d8); type = reboot_dead_type(view);
+    already_player = !type && reboot_player_type(reboot_view_type(view));
+    if (!type && !already_player) {
+        reboot_note(64, "ROTK trio reboot: waiting (camera transition).\n"); return;
     }
-    /* Inverse of e9/03 and e9/04's exact masks. Preserve every other bit.
-     * The selector can return DeathCam (0x15) until the alive state is applied.
-     */
+    if (!reboot_byte(owner + 0x108fc, &flags) || !reboot_data_byte(owner + 0x108fc)) return;
+    reboot_pending.team_hidden |= reboot_team_type(view) != 0 || (flags & 8) != 0;
+    if (GetTickCount64() < reboot_pending.next_attempt) return;
+    /* Inverse of e9/03 and e9/04. The recognized current camera may differ
+     * from the one at the response; its flags may already be cleared. */
     original_flags = flags;
-    if (type != 0x15) owner[0x108fc] = (BYTE)(flags & 0xe7);
+    owner[0x108fc] = (BYTE)(flags & 0xe7);
+    if (already_player) goto restored;
     desired = ((unsigned int (*)(BYTE *))(uintptr_t)(reboot_base + 0xee0f20))(game);
-    if (desired != 1 && desired != 0x13 && desired != 0x18) {
+    if (!reboot_player_type(desired)) {
         owner[0x108fc] = original_flags;
         reboot_note(32, "ROTK trio reboot: waiting (native selector not a player view).\n"); return;
     }
-    reboot_clear(); /* Native Exit sends e9/05: prevent any callback re-entry. */
+    /* Native Exit sends e9/05. Block re-entry without discarding the recovery
+     * before the fallible setter has actually installed a player controller. */
+    reboot_pending.applying = TRUE;
     ((void (*)(BYTE *, unsigned int))(uintptr_t)(reboot_base + 0xf71710))(game, desired);
+    reboot_pending.applying = FALSE;
+    if (!reboot_same_life()) { reboot_clear(); return; }
     view = (BYTE *)stance_ptr(game + 0x382d8);
-    view_type = view ? reboot_virtual(view, 8) : 0;
-    if (!view_type || ((unsigned int (*)(BYTE *))view_type)(view) != desired) {
-        owner[0x108fc] = original_flags;
-        reboot_report("ROTK trio reboot: native camera transition refused (unexpected final view).\n"); return;
+    if (!reboot_player_type(reboot_view_type(view))) {
+        /* Roll back only our two bits; a native call may change other flags. */
+        if (reboot_byte(owner + 0x108fc, &flags) && reboot_data_byte(owner + 0x108fc))
+            owner[0x108fc] = (BYTE)((flags & 0xe7) | (original_flags & 0x18));
+        reboot_pending.next_attempt = GetTickCount64() + REBOOT_RETRY_MS;
+        reboot_note(128, "ROTK trio reboot: camera setter deferred; retry pending.\n"); return;
     }
+restored:
     /* TeamSpectator::Enter adds hidden reason zero independently of 0f/3e.
      * Invert that native call, preserving every other hidden reason, then
      * re-evaluate the model through the same virtual used by 0f/3e.
      */
-    if (type != 0x15)
+    reboot_pending.applying = TRUE;
+    if (reboot_pending.team_hidden)
         ((void (*)(BYTE *, BYTE, unsigned int))(uintptr_t)(reboot_base + 0x10876b0))(actor, 0, 0);
     ((void (*)(BYTE *))visibility)(actor);
+    reboot_clear();
     reboot_report("ROTK trio reboot: native player camera and visibility restored.\n");
 }
 static void reboot_actor(BYTE *actor) {
@@ -288,7 +326,8 @@ static void reboot_install(BYTE *base) {
         !exact_bytes(base + REBOOT_RESPONSE_RVA, reboot_response_guard, sizeof(reboot_response_guard)) ||
         !exact_bytes(base + 0xee0f20, reboot_selector_guard, sizeof(reboot_selector_guard)) ||
         !exact_bytes(base + 0xf71710, reboot_setter_guard, sizeof(reboot_setter_guard)) ||
-        !exact_bytes(base + 0x10876b0, reboot_hidden_guard, sizeof(reboot_hidden_guard))) {
+        !exact_bytes(base + 0x10876b0, reboot_hidden_guard, sizeof(reboot_hidden_guard)) ||
+        !exact_bytes(base + 0x16d5131, reboot_match_guard, sizeof(reboot_match_guard))) {
         patch_log("ROTK trio reboot: native signature mismatch; skipped.\n"); return;
     }
     GetSystemInfo(&info);

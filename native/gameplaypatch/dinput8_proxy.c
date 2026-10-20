@@ -644,6 +644,8 @@ static BOOL install_patch_pair(BYTE *image_base) {
 #include "trio_reboot_camera.h"
 #include "spectator_nameplate_color.h"
 #include "render_fps.h"
+#include "vehicle_exit.h"
+#include "ads_collision.h"
 
 static DWORD WINAPI watchdog_worker(LPVOID parameter) {
     (void)parameter;
@@ -655,6 +657,8 @@ static DWORD WINAPI watchdog_worker(LPVOID parameter) {
         InterlockedExchange(&stance_enabled, 0);
         InterlockedExchange(&reboot_enabled, 0);
         InterlockedExchange(&fps_enabled, 0);
+        InterlockedExchange(&vehicle_exit_enabled, 0);
+        InterlockedExchange(&ads_enabled, 0);
         if (!nameplate_restore()) {
             patch_log("ROTK spectator names: original formatter restore refused.\n");
         }
@@ -724,6 +728,8 @@ static DWORD WINAPI patch_worker(LPVOID parameter) {
         reboot_install(image_base);
         nameplate_install(image_base);
         fps_install(image_base);
+        vehicle_exit_install(image_base);
+        ads_install(image_base);
         start_watchdog(image_base);
     } else {
         patch_log(
