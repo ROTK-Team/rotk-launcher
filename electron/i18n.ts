@@ -267,7 +267,7 @@ const DYNAMIC_FRENCH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]
   [/^ROTK could not verify your game files: (.+?)\.? Check your connection and try again\.$/, (match) => `ROTK n’a pas pu vérifier tes fichiers de jeu : ${FRENCH_ATTESTATION_REASONS.get(match[1]) ?? "la vérification n’a pas pu aboutir."} Vérifie ta connexion puis réessaie.`],
   [/^This ROTK account is suspended until (.+?)\.(?: Reason: (.+))?$/, (match) => `Ce compte ROTK est suspendu jusqu’au ${match[1]}.${match[2] ? ` Raison : ${match[2]}` : ""}`],
   [/^This ROTK account is permanently banned\.(?: Reason: (.+))?$/, (match) => `Ce compte ROTK est banni définitivement.${match[1] ? ` Raison : ${match[1]}` : ""}`],
-  [/^Steam level (\d+) or higher is required to play ROTK with this account\.$/, (match) => `Il faut un niveau Steam ${match[1]} ou plus pour jouer à ROTK avec ce compte.`],
+  [/^Steam level (\d+) or higher is required to play ROTK with this account\.$/, (match) => `Il faut un niveau Steam de ${match[1]} ou plus pour jouer à ROTK avec ce compte.`],
 ];
 
 const DYNAMIC_ENGLISH_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
@@ -318,7 +318,7 @@ const CHINESE_ERRORS = new Map<string, string>([
   ["The ROTK account service refused the launch request", "ROTK 账号服务拒绝了本次启动。"],
   ["The game files do not match the official ROTK installation. Use Verify files, then try again.", "游戏文件与 ROTK 官方版本不一致。请点击“验证文件”后重试。"],
   ["This ROTK account is not ready to play yet. Sign in on the ROTK website, then try again.", "此 ROTK 账号还不能进入游戏。请先登录 ROTK 网站，然后重试。"],
-  ["Your Steam level could not be verified. Make sure your Steam profile is public, then try again shortly.", "无法验证你的 Steam 等级。请确认你的 Steam 个人资料为公开，然后稍后重试。"],
+  ["Your Steam level could not be verified. Make sure your Steam profile is public, then try again shortly.", "无法验证你的 Steam 等级。请确认你的 Steam 个人资料已设为公开，稍后再试。"],
   ["Unable to reach the ROTK integrity service", "无法连接 ROTK 校验服务，请检查网络。"],
   ["The ROTK integrity service is temporarily unavailable", "ROTK 校验服务暂时不可用。"],
   ["Too many ROTK integrity checks. Wait a moment and try again", "校验请求过于频繁，请稍后再试。"],
