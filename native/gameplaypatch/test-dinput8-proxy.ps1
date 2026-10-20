@@ -89,6 +89,9 @@ foreach ($required in @(
     "restore_patch_pair(g_image_base)",
     "result = g_direct_input8_create(",
     "start_patch_worker();",
+    "report_direct_input();",
+    "DirectInput8Create reached; system dinput8 %s; ",
+    "bridge_block_reserve();",
     "return result;"
 )) {
     if ($sourceText.IndexOf(
@@ -107,6 +110,13 @@ $returnIndex = $sourceText.LastIndexOf("return result;")
 if ($forwardIndex -lt 0 -or $workerIndex -le $forwardIndex -or
     $returnIndex -le $workerIndex) {
     throw "DirectInput forwarding must happen before worker startup."
+}
+# The smoke test does not run inside H1Z1, so only the source shows that
+# DllMain still reserves the bridge block.
+$dllMainIndex = $sourceText.IndexOf("BOOL WINAPI DllMain(")
+$reserveIndex = $sourceText.LastIndexOf("bridge_block_reserve();")
+if ($dllMainIndex -lt 0 -or $reserveIndex -le $dllMainIndex) {
+    throw "DllMain must reserve the bridge block."
 }
 
 $binary = [System.IO.File]::ReadAllBytes($proxy)
