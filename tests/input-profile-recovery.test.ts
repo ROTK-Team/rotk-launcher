@@ -1,11 +1,14 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAIN_COPY } from "../electron/i18n.js";
+import { synchronizeUserOptions } from "../electron/services/client-config.js";
+import { writeFileDurably } from "../electron/services/fs-safe.js";
 import { gameLauncherInternals, type LaunchRequest } from "../electron/services/game-launcher.js";
 import { isUsableInputProfile, recoverInputProfile } from "../electron/services/input-profile-recovery.js";
+import { cleanupInstallLeftovers } from "../electron/services/installer.js";
 import { prepareInterfaceInputProfile, synchronizeInterfaceInputProfile } from "../electron/services/interface-input-profile.js";
 import type { LaunchTicketIdentity } from "../electron/services/launch-ticket.js";
 import { RUNTIME_CONFIGS } from "../electron/services/runtime-config.js";
@@ -17,8 +20,12 @@ vi.mock("../electron/services/vivox-client.js", () => ({ deployVivoxCompatibilit
 vi.mock("../electron/services/gameplay-patch.js", () => ({ assertGameplayPatchState: async () => undefined }));
 vi.mock("../electron/services/client-config.js", () => ({ synchronizeClientConfig: (current: string) => current,
   synchronizeGraphicsOptions: (current: string) => current,
-  synchronizeUserOptions: (current: string) => current, GAME_LOCALE: { en: "en_us", fr: "en_us", zh: "en_us" },
+  synchronizeUserOptions: vi.fn((current: string) => current), GAME_LOCALE: { en: "en_us", fr: "en_us", zh: "en_us" },
   validateLocalCreateSessionUrl: (url: string) => url }));
+vi.mock("../electron/services/fs-safe.js", async (original) => {
+  const fsSafe = await original<typeof import("../electron/services/fs-safe.js")>();
+  return { ...fsSafe, writeFileDurably: vi.fn(fsSafe.writeFileDurably) };
+});
 
 const defaults = [
   '<?xml version="1.0" encoding="utf-8"?>',
@@ -205,8 +212,8 @@ describe("input profile recovery", () => {
 });
 
 describe("client preparation", () => {
-  it("recovers the profile before the input-profile steps and reports it once", async () => {
-    const f = await fixture(damaged["truncated inside a later ActionSet"]);
+  async function preparation(profile: string) {
+    const f = await fixture(profile);
     // steam_api64.dll already holds the bundled shim, as it does once the launch
     // path has deployed it (#135 moves that copy before attestation).
     for (const name of ["bundled-shim.dll", "bundled-rotkc.dll", "steam_api64.dll"]) await writeFile(join(f.root, name), "fixture bytes");
@@ -224,15 +231,40 @@ describe("client preparation", () => {
     };
     const identity = { ticket: "test-only-ticket", displayName: "FixturePlayer", steamId: "76561190000000000" } as LaunchTicketIdentity;
     const prepare = () => gameLauncherInternals.prepareClient(request, f.root, "http://127.0.0.1:45678/createsession", identity, "clean");
-    await prepare();
-    expect(onInputProfileRecovered).toHaveBeenCalledOnce();
-    const [recovery] = onInputProfileRecovered.mock.calls[0];
+    return { ...f, onInputProfileRecovered, prepare };
+  }
+
+  it("recovers the profile before the input-profile steps and reports it once", async () => {
+    const f = await preparation(damaged["truncated inside a later ActionSet"]);
+    await f.prepare();
+    expect(f.onInputProfileRecovered).toHaveBeenCalledOnce();
+    const [recovery] = f.onInputProfileRecovered.mock.calls[0];
     expect(recovery).toMatchObject({ restored: false });
     expect(dirname(recovery.damagedCopy)).toBe(f.state);
     expect(await readFile(f.profile, "utf8")).toContain("<Trigger>Shift+M</Trigger>");
     // A refreshed ticket prepares the client again: the profile is usable now.
-    await prepare();
-    expect(onInputProfileRecovered).toHaveBeenCalledOnce();
+    await f.prepare();
+    expect(f.onInputProfileRecovered).toHaveBeenCalledOnce();
+  });
+
+  it("names the UserOptions.ini temporary file so the install cleanup removes it", async () => {
+    const f = await preparation(user);
+    const options = join(f.root, "UserOptions.ini");
+    await writeFile(options, "[UI]\n");
+    vi.mocked(synchronizeUserOptions).mockImplementationOnce((current) => `${current}Language=en_us\n`);
+    vi.mocked(writeFileDurably).mockClear();
+    await f.prepare();
+    expect(await readFile(options, "utf8")).toBe("[UI]\nLanguage=en_us\n");
+    expect(writeFileDurably).toHaveBeenCalledOnce();
+    const [temporary] = vi.mocked(writeFileDurably).mock.calls[0];
+    expect(dirname(temporary)).toBe(f.root);
+    // A launch cut off between the write and the rename leaves it in the game folder.
+    await writeFile(temporary, "[UI]\n");
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await utimes(temporary, old, old);
+    await cleanupInstallLeftovers(f.root);
+    expect(existsSync(temporary)).toBe(false);
+    expect(await readFile(options, "utf8")).toBe("[UI]\nLanguage=en_us\n");
   });
 });
 

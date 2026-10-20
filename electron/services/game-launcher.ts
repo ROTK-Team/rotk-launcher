@@ -288,7 +288,7 @@ async function prepareClient(
 async function updateUserOptions(root: string, update: (options: string) => string): Promise<void> {
   const path = join(root, "UserOptions.ini");
   if (!existsSync(path)) return;
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  const temporaryPath = `${path}.rotk-${randomUUID()}.tmp`;
   try {
     const current = await readFile(path, "utf8");
     const next = update(current);
