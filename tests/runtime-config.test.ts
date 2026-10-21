@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { gameLauncherInternals } from "../electron/services/game-launcher.js";
 import {
   DEFAULT_RUNTIME_CONFIG,
@@ -9,6 +9,8 @@ import {
 } from "../electron/services/runtime-config.js";
 
 describe("public ROTK runtime", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it("targets the GAME 2 gateway and every public login listener", () => {
     expect(DEFAULT_RUNTIME_CONFIG.environment).toBe("production");
     expect(DEFAULT_RUNTIME_CONFIG.label).toBe("ROTK LIVE");
@@ -143,6 +145,10 @@ describe("public ROTK runtime", () => {
   });
 
   it("uses only the account-service Steam identity for the shim environment", () => {
+    vi.stubEnv("STEAMID", "untrusted-player");
+    vi.stubEnv("H1Z1_OVERRIDE_STEAMID", "untrusted-player");
+    vi.stubEnv("H1Z1_OVERRIDE_PERSONA", "untrusted-name");
+    vi.stubEnv("H1Z1_OTHER_OVERRIDE", "untrusted-override");
     const environment = gameLauncherInternals.sanitizedEnvironment({
       steamId: "76561198000000001",
       displayName: "ROTK Player",
@@ -151,6 +157,28 @@ describe("public ROTK runtime", () => {
     expect(environment.STEAMID).toBe("76561198000000001");
     expect(environment.H1Z1_OVERRIDE_STEAMID).toBe("76561198000000001");
     expect(environment.H1Z1_OVERRIDE_PERSONA).toBe("ROTK Player");
+    expect(environment.H1Z1_OTHER_OVERRIDE).toBeUndefined();
+    expect(process.env.STEAMID).toBe("untrusted-player");
+  });
+
+  it.each([
+    ["SteamAppId", "SteamGameId", "SteamOverlayGameId"],
+    ["STEAMAPPID", "STEAMGAMEID", "STEAMOVERLAYGAMEID"],
+    ["steamappid", "steamgameid", "steamoverlaygameid"],
+  ])("preserves inherited Steam session IDs (%s, %s, %s)", (appId, gameId, overlayGameId) => {
+    vi.stubEnv(appId, "480");
+    vi.stubEnv(gameId, "12345678901234567890");
+    vi.stubEnv(overlayGameId, "12345678901234567890");
+
+    const environment = gameLauncherInternals.sanitizedEnvironment({
+      steamId: "76561198000000001",
+      displayName: "ROTK Player",
+    });
+
+    expect(environment[appId]).toBe("480");
+    expect(environment[gameId]).toBe("12345678901234567890");
+    expect(environment[overlayGameId]).toBe("12345678901234567890");
+    expect(environment.STEAMID).toBe("76561198000000001");
   });
 
   it("formats native startup failures as unsigned Windows exception codes", () => {
