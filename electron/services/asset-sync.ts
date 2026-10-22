@@ -126,7 +126,8 @@ export interface AssetSyncOutcome {
 
 export interface AssetSyncServiceOptions {
   userDataDirectory: string;
-  feedUrl?: string;
+  /** A function is read at every sync, so the feed can follow the selected server. */
+  feedUrl?: string | (() => string);
   fetchImpl?: typeof fetch;
   onProgress?(progress: AssetSyncProgress): void;
 }
@@ -398,7 +399,7 @@ export class AssetSyncService {
   private readonly legacyBackupDirectory: string;
   private cacheDirectory: string;
   private backupDirectory: string;
-  private readonly feedUrl: string;
+  private readonly feedUrl: () => string;
   private readonly fetchImpl: typeof fetch;
   private readonly onProgress: (progress: AssetSyncProgress) => void;
   private lastProgressAt = 0;
@@ -409,7 +410,8 @@ export class AssetSyncService {
     this.legacyBackupDirectory = join(options.userDataDirectory, BACKUP_DIRECTORY_NAME);
     this.cacheDirectory = this.legacyCacheDirectory;
     this.backupDirectory = this.legacyBackupDirectory;
-    this.feedUrl = options.feedUrl ?? ASSET_FEED_URL;
+    const feedUrl = options.feedUrl ?? ASSET_FEED_URL;
+    this.feedUrl = typeof feedUrl === "function" ? feedUrl : () => feedUrl;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.onProgress = options.onProgress ?? (() => undefined);
   }
@@ -607,7 +609,7 @@ export class AssetSyncService {
     if (signal?.aborted) abortUpstream();
     try {
       // feed.json is the only catalog: the GitHub releases API is never read.
-      const response = await this.fetchFollowingRedirects(this.feedUrl, controller.signal);
+      const response = await this.fetchFollowingRedirects(this.feedUrl(), controller.signal);
       const body = await response.text();
       if (Buffer.byteLength(body, "utf8") > MAX_FEED_BYTES) throw new Error("Feed too large");
       return parseAssetManifest(JSON.parse(stripByteOrderMark(body)));

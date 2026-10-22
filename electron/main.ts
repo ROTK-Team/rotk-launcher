@@ -1530,6 +1530,7 @@ async function initialize(): Promise<void> {
   updateFeed = new UpdateFeedService(app.getPath("userData"));
   assetSync = new AssetSyncService({
     userDataDirectory: app.getPath("userData"),
+    feedUrl: () => runtimeConfigFor(selectedServerId).assetFeedUrl,
     onProgress: (value) => {
       assetSyncStatus = value.phase === "checking"
         ? "checking"

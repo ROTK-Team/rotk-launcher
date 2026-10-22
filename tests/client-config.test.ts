@@ -20,6 +20,7 @@ const runtime: RuntimeConfig = {
   attestationChallengeUrl: "https://accounts.rotk.app/beginLauncherAttestation",
   tpmEnrolBeginUrl: "https://accounts.rotk.app/api/launcher/tpm/enroll-begin",
   tpmEnrolCompleteUrl: "https://accounts.rotk.app/api/launcher/tpm/enroll-complete",
+  assetFeedUrl: "https://raw.githubusercontent.com/ROTK-Team/assets/main/feed.json",
 };
 const authKey = "0123456789abcdef0123456789abcdef";
 const localCreateSessionUrl = "http://127.0.0.1:49152/rest/auth/session/create";

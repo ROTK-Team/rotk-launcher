@@ -4,6 +4,7 @@ import {
   isServerId,
   type ServerId,
 } from "../../shared/launch-profile.js";
+import { ASSET_FEED_URL } from "./asset-sync.js";
 
 export interface RuntimeConfig {
   id: ServerId;
@@ -21,6 +22,8 @@ export interface RuntimeConfig {
   /** Level-2 TPM anchor (#320 §A): enrolment of the identity key under the endorsement key. */
   tpmEnrolBeginUrl: string;
   tpmEnrolCompleteUrl: string;
+  /** feed.json the asset sync installs from: the packs follow the server. */
+  assetFeedUrl: string;
 }
 
 /**
@@ -52,6 +55,7 @@ export const RUNTIME_CONFIGS: Readonly<Record<ServerId, RuntimeConfig>> = Object
     attestationChallengeUrl: "https://rotk.app/api/launcher/attestation/challenge",
     tpmEnrolBeginUrl: "https://rotk.app/api/launcher/tpm/enroll-begin",
     tpmEnrolCompleteUrl: "https://rotk.app/api/launcher/tpm/enroll-complete",
+    assetFeedUrl: ASSET_FEED_URL,
   }),
   test: Object.freeze({
     id: "test",
@@ -70,6 +74,8 @@ export const RUNTIME_CONFIGS: Readonly<Record<ServerId, RuntimeConfig>> = Object
     attestationChallengeUrl: "https://test.rotk.app/api/launcher/attestation/challenge",
     tpmEnrolBeginUrl: "https://test.rotk.app/api/launcher/tpm/enroll-begin",
     tpmEnrolCompleteUrl: "https://test.rotk.app/api/launcher/tpm/enroll-complete",
+    // The packs under test: the public feed stays what LIVE installs.
+    assetFeedUrl: "https://raw.githubusercontent.com/ROTK-Team/assets/beta/feed.json",
   }),
 } satisfies Record<ServerId, RuntimeConfig>);
 

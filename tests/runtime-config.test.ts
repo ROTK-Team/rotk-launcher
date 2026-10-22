@@ -42,6 +42,8 @@ describe("public ROTK runtime", () => {
     expect(test.voiceGrantOrigin).toBe("https://test.rotk.app");
     expect(test.websiteOrigin).toBe("https://test.rotk.app");
     expect(test.launchTicketUrl).toBe("https://test.rotk.app/api/launcher/ticket");
+    expect(test.assetFeedUrl).toBe("https://raw.githubusercontent.com/ROTK-Team/assets/beta/feed.json");
+    expect(RUNTIME_CONFIGS.game2.assetFeedUrl).toBe("https://raw.githubusercontent.com/ROTK-Team/assets/main/feed.json");
     expect(test.attestationChallengeUrl).toBe(
       "https://test.rotk.app/api/launcher/attestation/challenge",
     );
