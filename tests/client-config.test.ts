@@ -25,15 +25,15 @@ const authKey = "0123456789abcdef0123456789abcdef";
 const localCreateSessionUrl = "http://127.0.0.1:49152/rest/auth/session/create";
 
 describe("UserOptions synchronization", () => {
-  it("keeps the social menu in English without resetting unrelated options", () => {
+  it("removes obsolete Social language overrides without resetting unrelated options", () => {
     const original = "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=fr\n";
     const synchronized = synchronizeUserOptions(original);
     expect(synchronized).toBe(
-      "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\nROTKSocialLanguage=en\n",
+      "[Display]\nWidth=1920\n\n[UI]\nHideNames=0\n",
     );
     expect(synchronizeUserOptions(synchronized)).toBe(synchronized);
     expect(synchronizeUserOptions("[Display]\nWidth=1920\n")).toBe(
-      "[Display]\nWidth=1920\n\n[UI]\nROTKSocialLanguage=en\n",
+      "[Display]\nWidth=1920\n",
     );
   });
 });
