@@ -215,7 +215,7 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File native/vivoxproxy/build-v5-compat.ps1 -OutputPath $alternateProxy
           if ($LASTEXITCODE -ne 0) { throw "Second reference Vivox build failed." }
           $alternateHash = (Get-FileHash -LiteralPath $alternateProxy -Algorithm SHA256).Hash
-          if ($hash -ne $alternateHash -or $hash -ne "CB8C49C75EDEA732F2445DF0F0A936D24F31662EB17BF0C761D27745D9EB1FC6") {
+          if ($hash -ne $alternateHash -or $hash -ne "84781CF35CD106362D3883A54D7E4E30D8EDDBD3E7525BE06B856EF1EFFE76AD") {
             throw "The reference Vivox source build changed: $hash / $alternateHash"
           }
           $bundledHash = (Get-FileHash -LiteralPath "resources\patches\vivoxsdk_x64.dll" -Algorithm SHA256).Hash
