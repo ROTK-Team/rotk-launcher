@@ -92,10 +92,10 @@ int main(int argc, char **argv) {
     uint64_t config[512] = {0}; assert(LOAD(config_fn, "vx_get_default_config3")(config, sizeof(config)) == 0);
     assert(vx_initialize3(config, sizeof(config)) == 0);
     g_config.valid = TRUE; wcscpy(g_config.host, L"127.0.0.1"); wcscpy(g_config.session_id, L"audit-only");
-    for (unsigned mode = 0; mode < 2U; ++mode) for (unsigned test = 0; test < 17U; ++test) {
+    for (unsigned mode = 0; mode < 2U; ++mode) for (unsigned test = 0; test < 18U; ++test) {
         if (argc == 3 && test != (unsigned)atoi(argv[2])) continue;
-        static const unsigned statuses[] = {409U, 503U, 403U, 500U, 502U, 504U, 200U, 200U, 200U, 200U, 200U, 200U, 200U, 200U, 200U,403U,200U};
-        test_case = test; joining = mode != 0; failures = test >= 15U ? 1U : test >= 8U ? 0U : test == 0 ? 4U : 1U; failure_status = statuses[test];
+        static const unsigned statuses[] = {409U, 503U, 403U, 500U, 502U, 504U, 200U, 200U, 200U, 200U, 200U, 200U, 200U, 200U, 200U,403U,200U,200U};
+        test_case = test; joining = mode != 0; failures = test == 17U ? 0U : test >= 15U ? 1U : test >= 8U ? 0U : test == 0 ? 4U : 1U; failure_status = statuses[test];
         http_requests = sdk_requests = 0; compat_begin_login_epoch(); voice_async_reset_login_signature(); strcpy(g_account, ".audit.");
         struct sockaddr_in address = {0}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); assert(listener != INVALID_SOCKET);
@@ -126,12 +126,16 @@ int main(int argc, char **argv) {
         if (test == 12U || test == 13U || test >= 15U) {
             AcquireSRWLockExclusive(&g_async_lock);
             for (unsigned i = 0; i < VOICE_ASYNC_LIMIT; ++i) if (g_async_jobs[i].request == original) {
-                if (test != 13U) g_async_jobs[i].until = 1U;
-                else g_async_jobs[i].grant.expires = unix_time_seconds() - 1U;
+                /* 13: the grant's time ran out while its expiry still lies ahead on the
+                 * wall clock (PC clock stepped back). 17: the wall clock stepped past
+                 * the expiry while the grant still has time (stepped forward). */
+                if (test == 13U) g_async_jobs[i].grant.deadline = GetTickCount64() - 1U;
+                else if (test == 17U) g_async_jobs[i].grant.expires = unix_time_seconds() - 1U;
+                else g_async_jobs[i].until = 1U;
             }
             ReleaseSRWLockExclusive(&g_async_lock);
         }
-        if (test >= 8U) {
+        if (test >= 8U && test != 17U) {
             if (test >= 11U) {
                 void *failure = voice_async_poll(); assert(failure && sdk_requests == (test == 11U ? 1U : 0U)); assert(g_async_destroy_response(failure) == 0);
             } else { assert(voice_async_poll() == NULL && sdk_requests == 1U); sdk_complete(original,test == 8U ? 5024 : test == 10U ? 20127 : 20122); }
@@ -148,7 +152,7 @@ int main(int argc, char **argv) {
                 assert(g_async_destroy_request(retry) == 0 && http_requests == 1U);
             }
         }
-        else if (test == 0 || (test >= 3U && test <= 6U)) { assert(http_requests == failures + 1U); success(original); }
+        else if (test == 0 || (test >= 3U && test <= 6U) || test == 17U) { assert(http_requests == failures + 1U); success(original); }
         else {
             void *failure = voice_async_poll(); assert(failure && sdk_requests == 0U); assert(g_async_destroy_response(failure) == 0);
             void *retry = request(create); assert(vx_issue_request3(retry, &count) == VOICE_ERROR);
@@ -169,8 +173,9 @@ int main(int argc, char **argv) {
             test == 2 ? "403 stays blocked" : test == 6 ? "truncated HTTP 200 recovers" : test == 7 ? "malformed HTTP 200 stays blocked" :
             test == 8 ? "SDK network failure permits cooldown retry" : test == 9 ? "SDK invalid signature stays blocked" :
             test == 10 ? "SDK VAT unavailable permits fresh-grant cooldown retry" : test == 11 ? "immediate SDK network refusal permits cooldown retry" :
-            test == 12 ? "ready completion deadline permits fresh retry" : test == 13 ? "grant expires before SDK poll; fresh retry" : test == 14 ? "queued deadline expires before first fetch; fresh retry" :
-            test == 15 ? "expired ready 403 remains blocked" : test == 16 ? "expired malformed grant remains blocked" : "transient 5xx recovers", http_requests, sdk_requests);
+            test == 12 ? "ready completion deadline permits fresh retry" : test == 13 ? "grant time runs out before SDK poll while the wall clock says valid; fresh retry" : test == 14 ? "queued deadline expires before first fetch; fresh retry" :
+            test == 15 ? "expired ready 403 remains blocked" : test == 16 ? "expired malformed grant remains blocked" :
+            test == 17U ? "wall clock steps past expiry before SDK poll; grant still used" : "transient 5xx recovers", http_requests, sdk_requests);
     }
     assert(vx_uninitialize() == 0); WSACleanup(); return 0;
 }
