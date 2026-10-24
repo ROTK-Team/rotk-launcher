@@ -1,9 +1,9 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { retryFs } from "./fs-safe.js";
+import { atomicWriteFile, retryFs, writeFileDurably } from "./fs-safe.js";
 import { promisify } from "node:util";
 import type { InstalledClientConfig, LauncherConfig } from "./config-store.js";
 import type { RuntimeConfig } from "./runtime-config.js";
@@ -267,8 +267,8 @@ async function prepareClient(
   const currentConfig = await readFile(configPath, "utf8");
   const synchronized = synchronizeClientConfig(currentConfig, request.runtime, localCreateSessionUrl);
   // utf8, not ascii: an ascii write turned a BOM into a stray 0xFF byte.
-  if (synchronized !== currentConfig) await writeFile(configPath, synchronized, "utf8");
-  await writeFile(join(root, "steam_persona_name.txt"), `${launchIdentity.displayName}\n`, "utf8");
+  if (synchronized !== currentConfig) await atomicWriteFile(configPath, synchronized, "utf8");
+  await atomicWriteFile(join(root, "steam_persona_name.txt"), `${launchIdentity.displayName}\n`, "utf8");
 
   await updateUserOptions(root, synchronizeUserOptions);
 
@@ -276,7 +276,7 @@ async function prepareClient(
   if (existsSync(battleyePath)) {
     const current = await readFile(battleyePath, "utf8");
     const patched = current.replace(/MasterPort\s+\d+/i, "MasterPort 20099");
-    if (patched !== current) await writeFile(battleyePath, patched, "utf8");
+    if (patched !== current) await atomicWriteFile(battleyePath, patched, "utf8");
   }
 
   await updateUserOptions(root, synchronizeGraphicsOptions);
@@ -288,12 +288,12 @@ async function prepareClient(
 async function updateUserOptions(root: string, update: (options: string) => string): Promise<void> {
   const path = join(root, "UserOptions.ini");
   if (!existsSync(path)) return;
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
+  const temporaryPath = `${path}.rotk-${randomUUID()}.tmp`;
   try {
     const current = await readFile(path, "utf8");
     const next = update(current);
     if (next === current) return;
-    await writeFile(temporaryPath, next, "utf8");
+    await writeFileDurably(temporaryPath, next, { encoding: "utf8" });
     await rename(temporaryPath, path);
   } catch (error) {
     console.warn("UserOptions.ini was not updated; launching anyway.", error);
