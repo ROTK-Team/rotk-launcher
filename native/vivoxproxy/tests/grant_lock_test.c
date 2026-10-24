@@ -89,13 +89,26 @@ static DWORD WINAPI serve(void *unused) {
         } else {
             BYTE wire[256] = {0}; const char *account = scenario == 8 ? ".wrong." : ".a.", *token = "new-token";
             const char *channel = scenario == 7 ? "sip:confctl-g-wrong.group@domain" : scenario >= 4 ? "sip:confctl-g-test.group@domain" : "";
-            uint32_t expires = unix_time_seconds() + (scenario == 3 ? 0U : 60U);
+            /* Server Date: 13 an hour behind the PC (grant valid by it), 14 an hour ahead
+             * (grant already expired by it), 15 two days ahead (ignored, PC clock used). */
+            uint32_t local = unix_time_seconds(), server = scenario == 13 ? local - 3600U : scenario == 14 ? local + 3600U : scenario == 15 ? local + 172800U : local;
+            uint32_t expires = (scenario >= 14 ? local : server) + (scenario == 3 ? 0U : 60U);
+            char date[64] = "";
+            if (scenario >= 13) {
+                ULARGE_INTEGER ticks; FILETIME file_time; SYSTEMTIME system_time;
+                WCHAR wide[WINHTTP_TIME_FORMAT_BUFSIZE / sizeof(WCHAR)] = {0}; char ascii[WINHTTP_TIME_FORMAT_BUFSIZE / sizeof(WCHAR)] = {0};
+                ticks.QuadPart = (ULONGLONG)server * 10000000U + UINT64_C(116444736000000000);
+                file_time.dwLowDateTime = ticks.LowPart; file_time.dwHighDateTime = ticks.HighPart;
+                assert(FileTimeToSystemTime(&file_time, &system_time) && WinHttpTimeFromSystemTime(&system_time, wide));
+                for (unsigned i = 0; i + 1U < sizeof(ascii) && wide[i] != L'\0'; ++i) ascii[i] = (char)wide[i];
+                assert(snprintf(date, sizeof(date), "Date: %s\r\n", ascii) > 0);
+            }
             uint16_t a = (uint16_t)strlen(account), c = (uint16_t)strlen(channel), t = (uint16_t)strlen(token);
             memcpy(wire, "RVG1", 4U); memcpy(wire + 4U, &expires, 4U);
             memcpy(wire + 8U, &a, 2U); memcpy(wire + 10U, &c, 2U); memcpy(wire + 12U, &t, 2U);
             memcpy(wire + 16U, account, a); memcpy(wire + 16U + a, channel, c); memcpy(wire + 16U + a + c, token, t);
-            size_t size = 16U + a + c + t; char headers[200];
-            int n = snprintf(headers, sizeof(headers), "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %u\r\nConnection: close\r\n\r\n", (unsigned)size);
+            size_t size = 16U + a + c + t; char headers[256];
+            int n = snprintf(headers, sizeof(headers), "HTTP/1.1 200 OK\r\n%sContent-Type: application/octet-stream\r\nContent-Length: %u\r\nConnection: close\r\n\r\n", date, (unsigned)size);
             assert(n > 0); send_all(client, headers, (size_t)n); send_all(client, wire, size);
         }
         closesocket(client);
@@ -152,7 +165,7 @@ int main(int argc, char **argv) {
     assert(LOAD(voice_destroy_fn, "destroy_resp")(message) == 0);
     g_config.valid = TRUE; g_config.secure = FALSE; wcscpy(g_config.host, L"127.0.0.1"); wcscpy(g_config.session_id, L"test-only");
     application_thread = GetCurrentThreadId();
-    for (scenario = 0; scenario < 13; ++scenario) {
+    for (scenario = 0; scenario < 16; ++scenario) {
         compat_begin_login_epoch(); voice_async_reset_login_signature(); strcpy(g_account, ".a.");
         strcpy(g_account_handle, ".a.");
         struct sockaddr_in address = {0}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -174,7 +187,8 @@ int main(int argc, char **argv) {
         }
         SetEvent(release_response);
         assert(WaitForSingleObject(notified, scenario == 9 ? 25000U : 6000U) == WAIT_OBJECT_0);
-        BOOL success = scenario == 0 || scenario == 1 || scenario == 4 || scenario == 6 || scenario == 11 || scenario == 12;
+        BOOL success = scenario == 0 || scenario == 1 || scenario == 4 || scenario == 6 || scenario == 11 || scenario == 12 ||
+            scenario == 13 || scenario == 15;
         if (scenario == 12) {
             assert(voice_async_poll() == NULL && sdk_response);
         } else {

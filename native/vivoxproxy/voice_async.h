@@ -404,8 +404,10 @@ static void *voice_async_poll(void) {
     if (slot == VOICE_ASYNC_LIMIT) return NULL;
     BOOL mutated = FALSE;
     AcquireSRWLockExclusive(&g_voice_lock);
-    if (work.valid && work.epoch == g_login_epoch && work.grant.expires <= unix_time_seconds()) work.retryable = TRUE;
-    if (work.valid && work.epoch == g_login_epoch && work.grant.expires > unix_time_seconds()) {
+    /* Monotonic: the grant's lifetime was taken from the server clock at receipt. */
+    ULONGLONG grant_now = GetTickCount64();
+    if (work.valid && work.epoch == g_login_epoch && grant_now >= work.grant.expires_tick) work.retryable = TRUE;
+    if (work.valid && work.epoch == g_login_epoch && grant_now < work.grant.expires_tick) {
         if (work.type == REQUEST_LOGIN) mutated = mutate_login(work.request, &work.grant);
         else if (work.type == REQUEST_SESSION) mutated = mutate_join(work.request, SESSION_REQUEST_BYTES, SESSION_URI_OFFSET, SESSION_TOKEN_OFFSET, &work.grant);
         else mutated = mutate_sessiongroup_context(work.request, &work.grant) &&
