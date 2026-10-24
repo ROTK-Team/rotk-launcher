@@ -463,7 +463,7 @@ describe("ROTK asset sync", () => {
     calls.length = 0;
     expect(await sync.sync(root)).toEqual({ status: "up-to-date", packVersion: "1.0.0" });
     expect(calls).toEqual([FEED_URL]);
-  });
+  }, 20_000); // Two real syncs with backups can exceed 5s on a busy Windows CI runner.
 
   it("repairs a missing installed file from the local cache without re-downloading", async () => {
     const { userData, root } = await setup();
