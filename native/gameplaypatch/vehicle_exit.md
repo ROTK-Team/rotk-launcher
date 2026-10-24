@@ -20,11 +20,13 @@ the other door. When the reply finds that cached point, the proxy reruns the
 native seat search against the current vehicle pose; if nothing is found any
 more, the cached point is kept.
 
-Installation guards four sites (three CALLs and the cached-point lookup) and the native frame instruction. It opens
-thread handles, suspends them and refuses an instruction pointer in an overwrite
-window before modifying executable memory. Startup threads can disappear after
-the snapshot: pre-write thread failures resume and close everything, then retry
-with a fresh snapshot, at most 20 attempts with a 10 ms pause. Signature,
+Installation guards four sites (three CALLs and the cached-point lookup) and the native frame instruction. Through the
+shared gate in `thread_gate.h` it opens thread handles (no fixed count; NVIDIA
+drivers push H1Z1 above 256 threads), suspends them and refuses an instruction
+pointer in an overwrite window before modifying executable memory. Startup
+threads can disappear after the snapshot: pre-write thread failures resume and
+close everything, then retry with a fresh snapshot, at most 20 attempts with a
+10 ms pause. Signature,
 protection and cache failures remain terminal; partially installed bridges are
 never retried and remain disabled. No pause holds another thread suspended.
 

@@ -7,7 +7,7 @@ import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
 export const GAMEPLAY_PATCH_FILE_NAME = "dinput8.dll";
 export const GAMEPLAY_PATCH_SHA256 =
-  "3d2319e6ac4f598ffe90c9389129e56d4e892896276b639d2d1eeb9b16d6dc6a";
+  "f3a66a96f5ddcd7018098948e46b34ba64eecc68d7a12c6fc8d8654055126a74";
 export const GAMEPLAY_PATCH_BYTES = 59_904;
 
 /**
@@ -22,6 +22,11 @@ export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
 
 /** Exact retired ROTK artifacts an automatic migration may replace. */
 export const RETIRED_GAMEPLAY_PATCHES = Object.freeze([
+  Object.freeze({
+    // Launcher 2.0.45: guarded writes refused above 256 other threads (NVIDIA drivers).
+    sha256: "3d2319e6ac4f598ffe90c9389129e56d4e892896276b639d2d1eeb9b16d6dc6a",
+    bytes: 59_904,
+  }),
   Object.freeze({
     // Launcher 2.0.44: moving exits refreshed on reply, before the sprint readers kept InstantADS.
     sha256: "ffe3456b095832bb2dd2c97893e074fe07b34af6dd8afb1b410bb9110ca387e0",
