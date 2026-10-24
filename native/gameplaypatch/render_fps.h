@@ -148,7 +148,7 @@ static BOOL fps_hook_option(BYTE *base) {
     fps_base = base;
     fps_original_option = (fps_option_fn)(uintptr_t)bridge;
     /* Reuse the existing thread gate: reject a thread inside the old prologue. */
-    return stance_commit(base + 0x1c18b10, original, replacement,
+    return stance_commit("FPS", base + 0x1c18b10, original, replacement,
         base + 0x8bc0f, getter_thunk, getter_thunk);
 }
 

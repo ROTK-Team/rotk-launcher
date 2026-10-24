@@ -265,49 +265,28 @@ static void reboot_actor(BYTE *actor) {
  * Neither window contains RIP-relative instructions in its displaced prologue.
  */
 static BOOL reboot_commit(BYTE *base, const BYTE *actor_jump, const BYTE *response_call) {
-    HANDLE handles[256], snapshot; THREADENTRY32 row; unsigned int count = 0, stopped = 0, i;
-    DWORD self = GetCurrentThreadId(), process = GetCurrentProcessId(), p1 = 0, p2 = 0;
-    BOOL ok = FALSE, writable1 = FALSE, writable2 = FALSE;
     BYTE *actor = base + REBOOT_ACTOR_RVA, *call = base + REBOOT_RESPONSE_RVA;
-    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return FALSE;
-    row.dwSize = sizeof(row);
-    if (!Thread32First(snapshot, &row)) { CloseHandle(snapshot); return FALSE; }
-    do {
-        if (row.th32OwnerProcessID != process || row.th32ThreadID == self) continue;
-        if (count == ARRAYSIZE(handles)) goto close_handles;
-        handles[count] = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, row.th32ThreadID);
-        if (!handles[count]) goto close_handles;
-        ++count;
-    } while (Thread32Next(snapshot, &row));
-    CloseHandle(snapshot); snapshot = INVALID_HANDLE_VALUE;
-    for (i = 0; i < count; ++i) {
-        CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
-        if (SuspendThread(handles[i]) == (DWORD)-1) goto resume_threads;
-        ++stopped;
-        if (!GetThreadContext(handles[i], &ctx) ||
-            (ctx.Rip >= (uintptr_t)actor && ctx.Rip < (uintptr_t)actor + REBOOT_ACTOR_STOLEN) ||
-            (ctx.Rip >= (uintptr_t)call && ctx.Rip < (uintptr_t)call + REBOOT_RESPONSE_STOLEN)) goto resume_threads;
-    }
-    if (!exact_bytes(actor, reboot_actor_guard, sizeof(reboot_actor_guard)) ||
-        !exact_bytes(call, reboot_response_guard, sizeof(reboot_response_guard))) goto resume_threads;
-    writable1 = VirtualProtect(actor, REBOOT_ACTOR_STOLEN, PAGE_EXECUTE_READWRITE, &p1);
-    writable2 = VirtualProtect(call, REBOOT_RESPONSE_STOLEN, PAGE_EXECUTE_READWRITE, &p2);
-    if (writable1 && writable2) {
-        memcpy(actor, actor_jump, REBOOT_ACTOR_STOLEN); memcpy(call, response_call, REBOOT_RESPONSE_STOLEN);
-        ok = FlushInstructionCache(GetCurrentProcess(), actor, REBOOT_ACTOR_STOLEN) && FlushInstructionCache(GetCurrentProcess(), call, REBOOT_RESPONSE_STOLEN);
-        if (!ok) {
-            memcpy(actor, reboot_actor_guard, REBOOT_ACTOR_STOLEN);
-            memcpy(call, reboot_response_guard, REBOOT_RESPONSE_STOLEN); FlushInstructionCache(GetCurrentProcess(), NULL, 0);
+    const thread_gate_window windows[] = {{actor, REBOOT_ACTOR_STOLEN}, {call, REBOOT_RESPONSE_STOLEN}};
+    thread_gate gate;
+    DWORD p1 = 0, p2 = 0;
+    BOOL ok = FALSE, writable1 = FALSE, writable2 = FALSE;
+    if (!thread_gate_freeze(&gate, "trio reboot", windows, ARRAYSIZE(windows))) return FALSE;
+    if (exact_bytes(actor, reboot_actor_guard, sizeof(reboot_actor_guard)) &&
+        exact_bytes(call, reboot_response_guard, sizeof(reboot_response_guard))) {
+        writable1 = VirtualProtect(actor, REBOOT_ACTOR_STOLEN, PAGE_EXECUTE_READWRITE, &p1);
+        writable2 = VirtualProtect(call, REBOOT_RESPONSE_STOLEN, PAGE_EXECUTE_READWRITE, &p2);
+        if (writable1 && writable2) {
+            memcpy(actor, actor_jump, REBOOT_ACTOR_STOLEN); memcpy(call, response_call, REBOOT_RESPONSE_STOLEN);
+            ok = FlushInstructionCache(GetCurrentProcess(), actor, REBOOT_ACTOR_STOLEN) && FlushInstructionCache(GetCurrentProcess(), call, REBOOT_RESPONSE_STOLEN);
+            if (!ok) {
+                memcpy(actor, reboot_actor_guard, REBOOT_ACTOR_STOLEN);
+                memcpy(call, reboot_response_guard, REBOOT_RESPONSE_STOLEN); FlushInstructionCache(GetCurrentProcess(), NULL, 0);
+            }
         }
+        if (writable1 && !restore_page_protection(actor, REBOOT_ACTOR_STOLEN, p1)) ok = FALSE;
+        if (writable2 && !restore_page_protection(call, REBOOT_RESPONSE_STOLEN, p2)) ok = FALSE;
     }
-    if (writable1 && !restore_page_protection(actor, REBOOT_ACTOR_STOLEN, p1)) ok = FALSE;
-    if (writable2 && !restore_page_protection(call, REBOOT_RESPONSE_STOLEN, p2)) ok = FALSE;
-resume_threads:
-    while (stopped) ResumeThread(handles[--stopped]);
-close_handles:
-    if (snapshot != INVALID_HANDLE_VALUE) CloseHandle(snapshot);
-    while (count) CloseHandle(handles[--count]);
+    thread_gate_thaw(&gate);
     return ok;
 }
 static void reboot_install(BYTE *base) {
