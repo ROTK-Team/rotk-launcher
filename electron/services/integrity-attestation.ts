@@ -41,6 +41,11 @@ const CACHE_SCHEMA_VERSION = 1;
 const MAX_CACHE_ENTRIES = 100_000;
 const MAX_REPORTED_DEVIATIONS = 50;
 const DEFAULT_TIMEOUT_MS = 10_000;
+// The server issues 120 s challenges; a Date further out than this is not its clock.
+const MAX_CHALLENGE_LIFETIME_MS = 3_600_000;
+
+// Monotonic deadline of each challenge, measured against the server's Date.
+const challengeDeadlines = new WeakMap<AttestationChallenge, number>();
 
 export interface AttestationChallenge {
   challengeId: string;
@@ -235,6 +240,7 @@ export async function requestAttestationChallenge(
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const requestedAtMonotonicMs = performance.now();
   try {
     let response: Response;
     try {
@@ -284,10 +290,32 @@ export async function requestAttestationChallenge(
       }
       throw attestationError("The ROTK integrity service is temporarily unavailable");
     }
-    return parseChallenge(payload, options.trustedKeys ?? TRUSTED_ATTESTATION_KEYS);
+    const challenge = parseChallenge(payload, options.trustedKeys ?? TRUSTED_ATTESTATION_KEYS);
+    // expiresAt is on the server's clock and the PC's can be minutes off.
+    // Like launch tickets, keep what the server says is left on the monotonic
+    // clock from the request start; the second covers Date's truncation.
+    const lifetimeMs = Date.parse(challenge.expiresAt) - Date.parse(response.headers.get("date") ?? "");
+    if (Number.isFinite(lifetimeMs) && lifetimeMs <= MAX_CHALLENGE_LIFETIME_MS) {
+      challengeDeadlines.set(challenge, requestedAtMonotonicMs + lifetimeMs - 1_000);
+    }
+    return challenge;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * How long the challenge stays valid for the server. Without a usable Date
+ * on its response, the PC clock is all there is.
+ */
+export function attestationChallengeRemainingMs(
+  challenge: AttestationChallenge,
+  nowMonotonicMs = performance.now(),
+): number {
+  const deadline = challengeDeadlines.get(challenge);
+  return deadline === undefined
+    ? Date.parse(challenge.expiresAt) - Date.now()
+    : deadline - nowMonotonicMs;
 }
 
 function sha256File(path: string): Promise<string> {
