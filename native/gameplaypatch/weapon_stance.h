@@ -4,7 +4,7 @@
  * Crouch/Vivox/Steam and the existing CanSprint v3 edits are independent.
  * Removing the marker disables behavior; restart removes every native hook.
  */
-#include <tlhelp32.h>
+#include "thread_gate.h"
 
 typedef void (*stance_idle_fn)(BYTE *);
 static BYTE *stance_base;
@@ -132,49 +132,27 @@ static void stance_jump(BYTE *out, const void *target) {
     uintptr_t address = (uintptr_t)target;
     out[0] = 0xff; out[1] = 0x25; memset(out + 2, 0, 4); memcpy(out + 6, &address, 8);
 }
-/* The main thread must never execute a half-written multi-byte branch. All
- * handles are opened before suspension; failures resume every suspended thread.
+/* The main thread must never execute a half-written multi-byte branch.
  * Refuse when any instruction pointer is inside either overwrite window. */
-static BOOL stance_commit(BYTE *idle, const BYTE *old_idle, const BYTE *new_idle,
+static BOOL stance_commit(const char *name, BYTE *idle, const BYTE *old_idle, const BYTE *new_idle,
                           BYTE *call, const BYTE *old_call, const BYTE *new_call) {
-    HANDLE handles[256], snapshot; unsigned int count = 0, stopped = 0, i; THREADENTRY32 row;
-    DWORD self = GetCurrentThreadId(), process = GetCurrentProcessId(), p1 = 0, p2 = 0;
+    const thread_gate_window windows[] = {{idle, 15}, {call, 5}};
+    thread_gate gate;
+    DWORD p1 = 0, p2 = 0;
     BOOL ok = FALSE, idle_writable = FALSE, call_writable = FALSE;
-    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return FALSE;
-    row.dwSize = sizeof(row);
-    if (!Thread32First(snapshot, &row)) { CloseHandle(snapshot); return FALSE; }
-    do {
-        if (row.th32OwnerProcessID != process || row.th32ThreadID == self) continue;
-        if (count == ARRAYSIZE(handles)) goto close_handles;
-        handles[count] = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, row.th32ThreadID);
-        if (!handles[count]) goto close_handles;
-        ++count;
-    } while (Thread32Next(snapshot, &row));
-    CloseHandle(snapshot); snapshot = INVALID_HANDLE_VALUE;
-    for (i = 0; i < count; ++i) {
-        CONTEXT context; memset(&context, 0, sizeof(context)); context.ContextFlags = CONTEXT_CONTROL;
-        if (SuspendThread(handles[i]) == (DWORD)-1) goto resume_threads;
-        ++stopped;
-        if (!GetThreadContext(handles[i], &context) ||
-            (context.Rip >= (uintptr_t)idle && context.Rip < (uintptr_t)idle + 15) ||
-            (context.Rip >= (uintptr_t)call && context.Rip < (uintptr_t)call + 5)) goto resume_threads;
+    if (!thread_gate_freeze(&gate, name, windows, ARRAYSIZE(windows))) return FALSE;
+    if (exact_bytes(idle, old_idle, 15) && exact_bytes(call, old_call, 5)) {
+        idle_writable = VirtualProtect(idle, 15, PAGE_EXECUTE_READWRITE, &p1);
+        call_writable = VirtualProtect(call, 5, PAGE_EXECUTE_READWRITE, &p2);
+        if (idle_writable && call_writable) {
+            memcpy(idle, new_idle, 15); memcpy(call, new_call, 5);
+            ok = FlushInstructionCache(GetCurrentProcess(), idle, 15) && FlushInstructionCache(GetCurrentProcess(), call, 5);
+            if (!ok) { memcpy(idle, old_idle, 15); memcpy(call, old_call, 5); FlushInstructionCache(GetCurrentProcess(), NULL, 0); }
+        }
+        if (idle_writable && !restore_page_protection(idle, 15, p1)) ok = FALSE;
+        if (call_writable && !restore_page_protection(call, 5, p2)) ok = FALSE;
     }
-    if (!exact_bytes(idle, old_idle, 15) || !exact_bytes(call, old_call, 5)) goto resume_threads;
-    idle_writable = VirtualProtect(idle, 15, PAGE_EXECUTE_READWRITE, &p1);
-    call_writable = VirtualProtect(call, 5, PAGE_EXECUTE_READWRITE, &p2);
-    if (idle_writable && call_writable) {
-        memcpy(idle, new_idle, 15); memcpy(call, new_call, 5);
-        ok = FlushInstructionCache(GetCurrentProcess(), idle, 15) && FlushInstructionCache(GetCurrentProcess(), call, 5);
-        if (!ok) { memcpy(idle, old_idle, 15); memcpy(call, old_call, 5); FlushInstructionCache(GetCurrentProcess(), NULL, 0); }
-    }
-    if (idle_writable && !restore_page_protection(idle, 15, p1)) ok = FALSE;
-    if (call_writable && !restore_page_protection(call, 5, p2)) ok = FALSE;
-resume_threads:
-    while (stopped) ResumeThread(handles[--stopped]);
-close_handles:
-    if (snapshot != INVALID_HANDLE_VALUE) CloseHandle(snapshot);
-    while (count) CloseHandle(handles[--count]);
+    thread_gate_thaw(&gate);
     return ok;
 }
 #include "weapon_stance_guards.h"
@@ -193,7 +171,7 @@ static void stance_install(BYTE *base) {
     }
     stance_base = base; stance_original_idle = (stance_idle_fn)(uintptr_t)memory;
     memset(idle_jump, 0x90, sizeof(idle_jump)); stance_jump(idle_jump, (void *)(uintptr_t)stance_idle);
-    if (!stance_commit(base + 0x1659000, memory, idle_jump, base + 0xf4341d, stance_console_call_guard, stance_console_call_guard)) {
+    if (!stance_commit("stance", base + 0x1659000, memory, idle_jump, base + 0xf4341d, stance_console_call_guard, stance_console_call_guard)) {
         /* Do not free a bridge which may have become visible if protection
          * restoration failed. Disabled wrappers safely call the native path. */
         patch_log("ROTK stance: guarded installation refused; disabled.\n"); return;

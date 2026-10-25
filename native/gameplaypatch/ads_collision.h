@@ -136,35 +136,17 @@ static SIZE_T ads_build_eval(BYTE *out) {
 }
 
 static BOOL ads_commit(BYTE *base, const BYTE *call_patch, const BYTE *eval_patch, const BYTE *rotation_patch) {
-    HANDLE handles[256], snapshot; THREADENTRY32 row; unsigned int count = 0, stopped = 0, i;
-    DWORD self = GetCurrentThreadId(), process = GetCurrentProcessId(), old[3] = {0,0,0};
+    DWORD old[3] = {0,0,0}; unsigned int i;
     BYTE *sites[] = {base + 0x12bfa93, base + 0x12b763b, base + 0x12b73f9};
     const BYTE *original[] = {ads_call_guard, ads_eval_guard, ads_rotation_guard};
     const BYTE *replacement[] = {call_patch, eval_patch, rotation_patch};
     SIZE_T sizes[] = {sizeof(ads_call_guard), sizeof(ads_eval_guard), sizeof(ads_rotation_guard)};
+    const thread_gate_window windows[] = {{sites[0], sizes[0]}, {sites[1], sizes[1]}, {sites[2], sizes[2]}};
     BOOL writable[3] = {FALSE,FALSE,FALSE}, ok = FALSE;
-    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return FALSE;
-    row.dwSize = sizeof(row);
-    if (!Thread32First(snapshot, &row)) { CloseHandle(snapshot); return FALSE; }
-    do {
-        if (row.th32OwnerProcessID != process || row.th32ThreadID == self) continue;
-        if (count == ARRAYSIZE(handles)) goto close_handles;
-        handles[count] = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, row.th32ThreadID);
-        if (!handles[count]) goto close_handles;
-        ++count;
-    } while (Thread32Next(snapshot, &row));
-    CloseHandle(snapshot); snapshot = INVALID_HANDLE_VALUE;
-    for (i = 0; i < count; ++i) {
-        CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
-        if (SuspendThread(handles[i]) == (DWORD)-1) goto resume_threads;
-        ++stopped;
-        if (!GetThreadContext(handles[i], &ctx)) goto resume_threads;
-        for (unsigned int j = 0; j < ARRAYSIZE(sites); ++j)
-            if (ctx.Rip >= (uintptr_t)sites[j] && ctx.Rip < (uintptr_t)sites[j] + sizes[j]) goto resume_threads;
-    }
+    thread_gate gate;
+    if (!thread_gate_freeze(&gate, "ADS", windows, ARRAYSIZE(windows))) return FALSE;
     for (i = 0; i < ARRAYSIZE(sites); ++i)
-        if (!exact_bytes(sites[i], original[i], sizes[i])) goto resume_threads;
+        if (!exact_bytes(sites[i], original[i], sizes[i])) goto thaw;
     for (i = 0; i < ARRAYSIZE(sites); ++i) writable[i] = VirtualProtect(sites[i], sizes[i], PAGE_EXECUTE_READWRITE, &old[i]);
     if (writable[0] && writable[1] && writable[2]) {
         for (i = 0; i < ARRAYSIZE(sites); ++i) memcpy(sites[i], replacement[i], sizes[i]);
@@ -179,11 +161,8 @@ static BOOL ads_commit(BYTE *base, const BYTE *call_patch, const BYTE *eval_patc
     /* Evaluation and rotation share a page; unwind protection changes in reverse. */
     for (i = ARRAYSIZE(sites); i-- > 0;)
         if (writable[i] && !restore_page_protection(sites[i], sizes[i], old[i])) ok = FALSE;
-resume_threads:
-    while (stopped) ResumeThread(handles[--stopped]);
-close_handles:
-    if (snapshot != INVALID_HANDLE_VALUE) CloseHandle(snapshot);
-    while (count) CloseHandle(handles[--count]);
+thaw:
+    thread_gate_thaw(&gate);
     return ok;
 }
 
