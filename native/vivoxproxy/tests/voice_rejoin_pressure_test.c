@@ -61,5 +61,39 @@ int main(int argc,char **argv) {
         g_strdup = original_strdup;
         }
     }
+    if (argc == 2 || !strcmp(argv[2],"budget")) {
+        voice_room *room = &g_voice_rooms[0];
+        memset(room,0,sizeof(*room));
+        room->occupied = room->desired = room->accepted = TRUE; room->rejoins = VOICE_REJOIN_LIMIT;
+        voice_room_media(room,1,5024,500U);
+        assert(room->media_failed && room->rejoins == VOICE_REJOIN_LIMIT && room->rejoin_after == 500U + VOICE_REJOIN_SLOW_MS);
+        voice_room_media(room,2,0,1000U); voice_room_media(room,1,5024,1000U + VOICE_STABLE_MS - 1U);
+        assert(room->media_failed && room->rejoins == VOICE_REJOIN_LIMIT);
+        voice_room_media(room,2,0,100000U); assert(!room->media_failed && !room->removed);
+        voice_room_media(room,1,5024,100000U + VOICE_STABLE_MS);
+        assert(room->media_failed && !room->exhausted && room->rejoins == 0U);
+        assert(room->rejoin_after == 100000U + VOICE_STABLE_MS + VOICE_REJOIN_DELAY_MS);
+        room->rejoins = VOICE_REJOIN_LIMIT;
+        voice_room_media(room,1,5024,300000U);
+        assert(room->rejoins == VOICE_REJOIN_LIMIT);
+        room->desired = FALSE;
+        puts("PASS: media that held a minute gives the next drop a full rejoin budget; flapping or unconnected media does not");
+    }
+    if (argc == 2 || !strcmp(argv[2],"slow")) {
+        vx_strdup_fn original_strdup = g_strdup;
+        voice_room *room = &g_voice_rooms[0];
+        memset(room,0,sizeof(*room));
+        room->occupied = room->desired = room->accepted = room->media_failed = room->removed = TRUE;
+        room->generation = 7U; room->epoch = g_login_epoch; wcscpy(room->channel,L"sip:confctl-g-slow@domain");
+        strcpy(room->group,"slow-group"); room->connect_audio = 1; room->rejoins = VOICE_REJOIN_LIMIT;
+        g_strdup = refuse_string; voice_async_rejoin(); g_strdup = original_strdup;
+        assert(room->media_failed && room->removed && room->rejoins == VOICE_REJOIN_LIMIT);
+        assert(room->rejoin_after + 1000U >= GetTickCount64() + VOICE_REJOIN_SLOW_MS);
+        room->rejoins = VOICE_REJOIN_MAX; room->rejoin_after = 0U;
+        g_strdup = refuse_string; voice_async_rejoin(); g_strdup = original_strdup;
+        assert(room->rejoins == VOICE_REJOIN_MAX && room->rejoin_after == 0U);
+        memset(g_async_jobs,0,sizeof(g_async_jobs)); room->desired = FALSE;
+        puts("PASS: a drop that used its quick rejoins keeps trying once a minute, ten minutes at most");
+    }
     assert(vx_uninitialize() == 0); return 0;
 }

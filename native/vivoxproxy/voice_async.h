@@ -7,13 +7,21 @@
 #define VOICE_RECOVERY_MS 20000U
 #define VOICE_ATTEMPT_MS 4000U
 #define VOICE_RETRY_COOLDOWN_MS 5000U
+/* A media drop gets two quick rejoins, then one a minute while the failure
+ * stays transient, ten minutes at most. Media that holds a minute ends the
+ * drop; a permanent failure, a leave or a new login ends it at once. */
+#define VOICE_REJOIN_LIMIT 2U
+#define VOICE_REJOIN_MAX 12U
+#define VOICE_REJOIN_DELAY_MS 10000U
+#define VOICE_REJOIN_SLOW_MS 60000U
+#define VOICE_STABLE_MS 60000U
 static void compat_begin_login_epoch(void);
 typedef int (__cdecl *voice_parse_response_fn)(const char *, void **, char **);
 typedef int (__cdecl *voice_destroy_fn)(void *);
 typedef struct voice_room {
     BOOL occupied, desired, exhausted, accepted, media_failed, removed, wake_announced;
     uint64_t generation, epoch;
-    ULONGLONG rejoin_after, retry_after;
+    ULONGLONG rejoin_after, retry_after, connected_at;
     unsigned rejoins;
     int connect_audio, connect_text;
     BOOL restore_audio, has_mute, has_volume;
@@ -172,6 +180,23 @@ static BOOL voice_sdk_retryable(int status) {
         status == 10006 || status == 10007 || status == 10028 || status == 10056 || status == 10100 ||
         status == 20127; /* VAT service unavailable: a new episode still requires a fresh grant. */
 }
+static ULONGLONG voice_rejoin_at(const voice_room *room, ULONGLONG now) {
+    return now + (room->rejoins < VOICE_REJOIN_LIMIT ? VOICE_REJOIN_DELAY_MS : VOICE_REJOIN_SLOW_MS);
+}
+/* MediaStreamUpdatedEvent: state 2 connected, 1 disconnected with status. */
+static void voice_room_media(voice_room *room, int state, int status, ULONGLONG now) {
+    if (state == 2) { room->media_failed = FALSE; room->removed = FALSE; room->connected_at = now; }
+    if (state == 1) {
+        /* A drop after stable media is a new drop with a full budget; one that
+         * follows a rejoin within VOICE_STABLE_MS keeps counting. */
+        if (room->connected_at != 0U && now - room->connected_at >= VOICE_STABLE_MS) room->rejoins = 0U;
+        room->connected_at = 0U;
+        room->media_failed = voice_sdk_retryable(status);
+        room->rejoin_after = voice_rejoin_at(room, now);
+        room->wake_announced = FALSE;
+        if (status >= 400 && !room->media_failed) room->exhausted = TRUE;
+    }
+}
 static DWORD WINAPI voice_network_worker(void *unused) {
     (void)unused;
     for (;;) {
@@ -182,7 +207,7 @@ static DWORD WINAPI voice_network_worker(void *unused) {
         for (unsigned r = 0; r < VOICE_ROOM_LIMIT; ++r) {
             voice_room *room = &g_voice_rooms[r];
             if (!room->desired || !room->media_failed || !room->removed || room->exhausted ||
-                room->rejoins >= 2U || room->wake_announced) continue;
+                room->rejoins >= VOICE_REJOIN_MAX || room->wake_announced) continue;
             if (now >= room->rejoin_after) { room->wake_announced = TRUE; room_ready = TRUE; }
             else if (room->rejoin_after - now < wait) wait = (DWORD)(room->rejoin_after - now);
         }
@@ -448,7 +473,8 @@ static void *voice_async_poll(void) {
                     room->retry_after = retry_at;
                     if (work.internal) {
                         room->media_failed = room->removed = TRUE;
-                        room->rejoin_after = retry_at > now + 10000U ? retry_at : now + 10000U;
+                        ULONGLONG rejoin_at = voice_rejoin_at(room, now);
+                        room->rejoin_after = retry_at > rejoin_at ? retry_at : rejoin_at;
                         room->wake_announced = FALSE;
                         if (g_async_wake != NULL) SetEvent(g_async_wake);
                     }
@@ -505,7 +531,7 @@ static BOOL voice_async_observe_response(void *message) {
                         room->retry_after = retry_at;
                         if (job->internal) {
                             room->media_failed = room->removed = TRUE;
-                            room->rejoin_after = now + 10000U; room->wake_announced = FALSE;
+                            room->rejoin_after = voice_rejoin_at(room, now); room->wake_announced = FALSE;
                             if (g_async_wake != NULL) SetEvent(g_async_wake);
                         }
                     }
@@ -600,13 +626,7 @@ static void voice_async_observe_event(void *message) {
             memcpy(restored_channel, channel, sizeof(restored_channel));
             if (room->restore_audio) { restore = *room; restore_pending = TRUE; room->restore_audio = FALSE; }
         }
-        if (type == 20U && state == 2) { room->media_failed = FALSE; room->removed = FALSE; }
-        if (type == 20U && state == 1) {
-            room->media_failed = voice_sdk_retryable(status);
-            room->rejoin_after = GetTickCount64() + 10000U;
-            room->wake_announced = FALSE;
-            if (status >= 400 && !room->media_failed) room->exhausted = TRUE;
-        }
+        if (type == 20U) voice_room_media(room, state, status, GetTickCount64());
         if (type == 25U) room->removed = TRUE;
         if (g_async_wake != NULL) SetEvent(g_async_wake);
         if (InterlockedIncrement(&g_media_trace_count) <= 32L) {
@@ -634,7 +654,7 @@ static void voice_async_rejoin(void) {
     for (unsigned i = 0; i < VOICE_ROOM_LIMIT; ++i) {
         voice_room *room = &g_voice_rooms[i];
         if (room->desired && room->accepted && room->media_failed && room->removed && !room->exhausted &&
-            room->rejoins < 2U && room->group[0] != '\0' && GetTickCount64() >= room->rejoin_after) {
+            room->rejoins < VOICE_REJOIN_MAX && room->group[0] != '\0' && GetTickCount64() >= room->rejoin_after) {
             snapshot = *room; room->media_failed = FALSE; room->removed = FALSE; room->restore_audio = TRUE;
             ++room->rejoins; selected = i; break;
         }
@@ -658,7 +678,7 @@ static void voice_async_rejoin(void) {
     if (room->desired && room->generation == snapshot.generation && room->epoch == snapshot.epoch) {
         /* Queue/allocation pressure has not started a recovery episode. */
         room->media_failed = room->removed = TRUE; room->restore_audio = snapshot.restore_audio;
-        room->rejoins = snapshot.rejoins; room->rejoin_after = GetTickCount64() + 10000U; room->wake_announced = FALSE;
+        room->rejoins = snapshot.rejoins; room->rejoin_after = voice_rejoin_at(room, GetTickCount64()); room->wake_announced = FALSE;
         if (g_async_wake != NULL) SetEvent(g_async_wake);
     }
     ReleaseSRWLockExclusive(&g_async_lock);
