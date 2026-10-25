@@ -2,9 +2,10 @@ import { createHash, generateKeyPairSync, sign as signPayload } from "node:crypt
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { challengeSigningInput, computeAttestationEvidence, computeManifestRoot } from "../shared/attestation";
 import {
+  attestationChallengeRemainingMs,
   buildAttestationResult,
   integrityAttestationInternals,
   measureInstallation,
@@ -613,5 +614,82 @@ describe("client patch challenge directive", () => {
       fetchImpl: responder(challenge, privateKey),
       trustedKeys: { "test-key": publicKeyRaw },
     })).rejects.toThrow(/Invalid attestation challenge/);
+  });
+});
+
+describe("challenge freshness", () => {
+  // Server time at issue, and the 120 s challenge it signs.
+  const SERVER_NOW = Date.parse("2026-10-25T12:00:00.000Z");
+  const EXPIRES_AT = "2026-10-25T12:02:00.000Z";
+
+  async function fetchChallenge(date: string | null) {
+    const { privateKey, publicKeyRaw } = keyPair();
+    const challenge = {
+      challengeId: CHALLENGE_ID,
+      nonce: "dGVzdC1ub25jZS0xMjM0NTY3ODkw",
+      policyVersion: "2026.08.01-1",
+      packVersion: "1.1.0",
+      baseBuildId: "1.0.326.439939",
+      minLauncherVersion: "1.4.0",
+      expiresAt: EXPIRES_AT,
+      keyId: "test-key",
+    };
+    const signature = signPayload(
+      null,
+      Buffer.from(challengeSigningInput(challenge), "utf8"),
+      privateKey,
+    ).toString("base64url");
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (date !== null) headers.date = date;
+    const fetchImpl = (async () => new Response(
+      JSON.stringify({ ok: true, ...challenge, signature }),
+      { status: 200, headers },
+    )) as unknown as typeof fetch;
+    const parsed = await requestAttestationChallenge(PLAYER_KEY, ENDPOINT, LAUNCHER_VERSION, {
+      fetchImpl,
+      trustedKeys: { "test-key": publicKeyRaw },
+    });
+    return { parsed, receivedAt: performance.now() };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("times a challenge on the server's clock when the PC is behind", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SERVER_NOW - 10 * 60_000);
+    const { parsed, receivedAt } = await fetchChallenge(new Date(SERVER_NOW).toUTCString());
+    // After 90 s of hashing the server has 30 s left, minus Date's truncation.
+    vi.setSystemTime(SERVER_NOW - 10 * 60_000 + 90_000);
+    const remaining = attestationChallengeRemainingMs(parsed, receivedAt + 90_000);
+    expect(remaining).toBeLessThanOrEqual(29_000);
+    expect(remaining).toBeGreaterThan(28_000);
+  });
+
+  it("times a challenge on the server's clock when the PC is ahead", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SERVER_NOW + 10 * 60_000);
+    const { parsed, receivedAt } = await fetchChallenge(new Date(SERVER_NOW).toUTCString());
+    const remaining = attestationChallengeRemainingMs(parsed, receivedAt);
+    expect(remaining).toBeLessThanOrEqual(119_000);
+    expect(remaining).toBeGreaterThan(118_000);
+  });
+
+  it("ignores wall-clock steps after the challenge arrived", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SERVER_NOW);
+    const { parsed, receivedAt } = await fetchChallenge(new Date(SERVER_NOW).toUTCString());
+    vi.setSystemTime(SERVER_NOW + 3_600_000);
+    expect(attestationChallengeRemainingMs(parsed, receivedAt + 10_000)).toBeGreaterThan(108_000);
+  });
+
+  it("falls back to the PC clock without a usable Date", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(SERVER_NOW + 20_000);
+    for (const date of [null, "not a date", new Date(SERVER_NOW - 7_200_000).toUTCString()]) {
+      const { parsed } = await fetchChallenge(date);
+      expect(attestationChallengeRemainingMs(parsed)).toBe(100_000);
+    }
   });
 });

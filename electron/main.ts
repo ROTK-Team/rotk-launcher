@@ -94,6 +94,7 @@ import {
 } from "./services/base-manifest.js";
 import {
   AttestationUnavailableError,
+  attestationChallengeRemainingMs,
   buildAttestationResult,
   measureInstallation,
   requestAttestationChallenge,
@@ -578,7 +579,7 @@ async function attestInstallation(
     // The measurement does not depend on it, so a fresh one with the same
     // build, policy, pack, patch mode and slots can be used as is. A failed
     // renewal keeps the old one, which the server may still accept.
-    if (Date.parse(challenge.expiresAt) - Date.now() < CHALLENGE_MARGIN_MS) {
+    if (attestationChallengeRemainingMs(challenge) < CHALLENGE_MARGIN_MS) {
       const fresh = await requestAttestationChallenge(playerKey, runtime.attestationChallengeUrl, launcherVersion)
         .catch(() => challenge);
       if (
