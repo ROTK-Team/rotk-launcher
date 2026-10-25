@@ -68,6 +68,17 @@ static void send_all(SOCKET client, const void *data, size_t size) {
     const char *p = data;
     while (size) { int n = send(client, p, (int)size, 0); assert(n > 0); p += n; size -= (size_t)n; }
 }
+/* RFC 1123 Date for a Unix time, the format grant servers send. */
+static void http_date(uint32_t unix_seconds, char *out, size_t bytes) {
+    static const char *const days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    ULARGE_INTEGER ticks; FILETIME file; SYSTEMTIME time;
+    ticks.QuadPart = UINT64_C(116444736000000000) + (uint64_t)unix_seconds * UINT64_C(10000000);
+    file.dwLowDateTime = ticks.LowPart; file.dwHighDateTime = ticks.HighPart;
+    assert(FileTimeToSystemTime(&file, &time));
+    assert(snprintf(out, bytes, "Date: %s, %02u %s %04u %02u:%02u:%02u GMT\r\n", days[time.wDayOfWeek], time.wDay,
+        months[time.wMonth - 1U], time.wYear, time.wHour, time.wMinute, time.wSecond) > 0);
+}
 static DWORD WINAPI serve(void *unused) {
     (void)unused;
     unsigned expected = scenario == 1 ? 3U : scenario == 6 || scenario == 11 || scenario == 12 ? 2U : scenario == 9 ? 4U : 1U;
@@ -89,13 +100,19 @@ static DWORD WINAPI serve(void *unused) {
         } else {
             BYTE wire[256] = {0}; const char *account = scenario == 8 ? ".wrong." : ".a.", *token = "new-token";
             const char *channel = scenario == 7 ? "sip:confctl-g-wrong.group@domain" : scenario >= 4 ? "sip:confctl-g-test.group@domain" : "";
-            uint32_t expires = unix_time_seconds() + (scenario == 3 ? 0U : 60U);
+            /* 13: PC an hour ahead of the server, grant valid for 60 s by the server.
+             * 14: PC an hour behind, grant already expired by the server.
+             * 15: Date incoherent with the grant (2 h old), PC clock decides. */
+            uint32_t pc = unix_time_seconds(), expires = pc + (scenario == 3 ? 0U : 60U); char date[64] = "";
+            if (scenario == 13) { http_date(pc - 3600U, date, sizeof(date)); expires = pc - 3600U + 60U; }
+            if (scenario == 14) http_date(pc + 3600U, date, sizeof(date));
+            if (scenario == 15) http_date(pc - 7200U, date, sizeof(date));
             uint16_t a = (uint16_t)strlen(account), c = (uint16_t)strlen(channel), t = (uint16_t)strlen(token);
             memcpy(wire, "RVG1", 4U); memcpy(wire + 4U, &expires, 4U);
             memcpy(wire + 8U, &a, 2U); memcpy(wire + 10U, &c, 2U); memcpy(wire + 12U, &t, 2U);
             memcpy(wire + 16U, account, a); memcpy(wire + 16U + a, channel, c); memcpy(wire + 16U + a + c, token, t);
-            size_t size = 16U + a + c + t; char headers[200];
-            int n = snprintf(headers, sizeof(headers), "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %u\r\nConnection: close\r\n\r\n", (unsigned)size);
+            size_t size = 16U + a + c + t; char headers[256];
+            int n = snprintf(headers, sizeof(headers), "HTTP/1.1 200 OK\r\n%sContent-Type: application/octet-stream\r\nContent-Length: %u\r\nConnection: close\r\n\r\n", date, (unsigned)size);
             assert(n > 0); send_all(client, headers, (size_t)n); send_all(client, wire, size);
         }
         closesocket(client);
@@ -152,7 +169,7 @@ int main(int argc, char **argv) {
     assert(LOAD(voice_destroy_fn, "destroy_resp")(message) == 0);
     g_config.valid = TRUE; g_config.secure = FALSE; wcscpy(g_config.host, L"127.0.0.1"); wcscpy(g_config.session_id, L"test-only");
     application_thread = GetCurrentThreadId();
-    for (scenario = 0; scenario < 13; ++scenario) {
+    for (scenario = 0; scenario < 16; ++scenario) {
         compat_begin_login_epoch(); voice_async_reset_login_signature(); strcpy(g_account, ".a.");
         strcpy(g_account_handle, ".a.");
         struct sockaddr_in address = {0}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -174,7 +191,8 @@ int main(int argc, char **argv) {
         }
         SetEvent(release_response);
         assert(WaitForSingleObject(notified, scenario == 9 ? 25000U : 6000U) == WAIT_OBJECT_0);
-        BOOL success = scenario == 0 || scenario == 1 || scenario == 4 || scenario == 6 || scenario == 11 || scenario == 12;
+        BOOL success = scenario == 0 || scenario == 1 || scenario == 4 || scenario == 6 || scenario == 11 || scenario == 12 ||
+            scenario == 13 || scenario == 15;
         if (scenario == 12) {
             assert(voice_async_poll() == NULL && sdk_response);
         } else {
