@@ -224,7 +224,7 @@ int main(int argc, char **argv) {
             assert(g_voice_rooms[0].desired && g_voice_rooms[0].accepted && !g_voice_rooms[0].media_failed && !g_voice_rooms[0].removed);
         }
         if (scenario == 6) {
-            const int transient[] = {1058,1095,5003,5020,5024,5043,5045,5050,10006,10007,10028,10056,10100};
+            const int transient[] = {1058,1095,5003,5020,5024,5043,5045,5050,10006,10007,10028,10056,10100,10101};
             for (unsigned t = 0; t < sizeof(transient)/sizeof(transient[0]); ++t) {
                 char xml[320]; snprintf(xml,sizeof(xml),
                     "<Event type=\"MediaStreamUpdatedEvent\"><SessionGroupHandle>test-group</SessionGroupHandle><SessionHandle>sip:confctl-g-test.group@domain</SessionHandle><StatusCode>%d</StatusCode><State>1</State></Event>",transient[t]);

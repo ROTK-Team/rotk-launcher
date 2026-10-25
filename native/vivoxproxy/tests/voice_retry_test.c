@@ -138,7 +138,7 @@ int main(int argc, char **argv) {
         if (test >= 8U && test != 17U) {
             if (test >= 11U) {
                 void *failure = voice_async_poll(); assert(failure && sdk_requests == (test == 11U ? 1U : 0U)); assert(g_async_destroy_response(failure) == 0);
-            } else { assert(voice_async_poll() == NULL && sdk_requests == 1U); sdk_complete(original,test == 8U ? 5024 : test == 10U ? 20127 : 20122); }
+            } else { assert(voice_async_poll() == NULL && sdk_requests == 1U); sdk_complete(original,test == 8U ? (joining ? 5024 : 10101) : test == 10U ? 20127 : 20122); }
             void *retry = request(create); assert(vx_issue_request3(retry,&count) == VOICE_ERROR);
             if (test != 9U && test < 15U) {
                 AcquireSRWLockExclusive(&g_async_lock);

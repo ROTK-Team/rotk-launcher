@@ -178,6 +178,7 @@ static BOOL voice_sdk_retryable(int status) {
         status == 1058 || status == 1095 || status == 5003 || status == 5020 ||
         status == 5024 || status == 5043 || status == 5045 || status == 5050 ||
         status == 10006 || status == 10007 || status == 10028 || status == 10056 || status == 10100 ||
+        status == 10101 || /* Automatic reconnection failure: the SDK gave up, a fresh login can still work. */
         status == 20127; /* VAT service unavailable: a new episode still requires a fresh grant. */
 }
 static ULONGLONG voice_rejoin_at(const voice_room *room, ULONGLONG now) {
