@@ -3,18 +3,14 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const expectedHash =
-  "f3a66a96f5ddcd7018098948e46b34ba64eecc68d7a12c6fc8d8654055126a74";
-const expectedBytes = 59_904;
+  "48268b1080ef1caa7314c45513620d7af3e1db058ba6a43305eb1829095f1eec";
+const expectedBytes = 55_808;
 const builtPath = resolve(
   process.argv[2] ?? "native/gameplaypatch/dist/dinput8.dll",
 );
 const bundledPath = resolve(
   process.argv[3] ?? "resources/patches/dinput8.dll",
 );
-
-if ((await readFile(resolve("native/gameplaypatch/vehicle_exit.h"), "utf8")).includes("ROTK_VEHICLE_EXIT_TRACE")) {
-  throw new Error("Vehicle exit test tracing remains in the source.");
-}
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const built = await readFile(builtPath);
@@ -72,10 +68,6 @@ for (const sequence of requiredBinarySequences) {
         + sequence.toString("hex") + ".",
     );
   }
-}
-
-if (built.includes(Buffer.from("ROTK vehicle exit: bone="))) {
-  throw new Error("Vehicle exit test tracing remains in the binary.");
 }
 
 for (const forbidden of [
