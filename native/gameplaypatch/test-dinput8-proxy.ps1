@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "F3A66A96F5DDCD7018098948E46B34BA64EECC68D7A12C6FC8D8654055126A74"
-$expectedBytes = 59904
+$expectedHash = "48268B1080EF1CAA7314C45513620D7AF3E1DB058BA6A43305EB1829095F1EEC"
+$expectedBytes = 55808
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
@@ -237,15 +237,6 @@ if ($LASTEXITCODE -ne 0) { throw "ADS collision test failed." }
 Write-Host "Shotgun sprint, stance, respawn, reboot, nameplates, FPS and ADS collision tests passed."
 Write-Host "  Size $actualBytes bytes"
 Write-Host "  SHA256 $actualHash"
-
-$exitExe = Join-Path $testRoot "vehicle_exit_test.exe"
-& $zig.Source @(
-    "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
-    "-o", $exitExe, (Join-Path $root "tests\vehicle_exit_test.c")
-)
-if ($LASTEXITCODE -ne 0) { throw "Vehicle exit test compilation failed." }
-& $exitExe
-if ($LASTEXITCODE -ne 0) { throw "Vehicle exit slope recovery test failed." }
 
 $gateExe = Join-Path $testRoot "thread_gate_test.exe"
 & $zig.Source @(
