@@ -175,6 +175,8 @@ const discordPresence = new DiscordPresence();
 const LAUNCHER_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000;
 // The window is shown at the latest this long after its creation, painted or not.
 const WINDOW_SHOW_DEADLINE_MS = 5_000;
+// Chromium's SBOX_ERROR_CREATE_PROCESS: the renderer exit code of issue #151.
+const SANDBOX_CREATE_PROCESS_EXIT_CODE = 18;
 let installAbortController: AbortController | null = null;
 let phase: LauncherPhase = "unconfigured";
 let sourceRoot: string | null = null;
@@ -1471,9 +1473,20 @@ function createWindow(): BrowserWindow {
     startupLog.mark("render-process-gone", `${details.reason} exitCode=${details.exitCode}`);
     if (details.reason === "clean-exit" || rendererFailureReported) return;
     rendererFailureReported = true;
-    void diagnostics?.recordLauncherError("launcher_renderer_gone", new Error(details.reason)).catch(() => undefined);
+    const failure = new Error(`${details.reason} exitCode=${details.exitCode}`);
+    void diagnostics?.recordLauncherError("launcher_renderer_gone", failure).catch(() => undefined);
     const copy = MAIN_COPY[currentLocale];
-    dialog.showErrorBox(copy.startupTitle, `${copy.rendererGone(details.reason)}\n\n${copy.startupSafety}`);
+    // On Windows the window only exists once the launcher runs elevated. A
+    // renderer that Windows refuses to create there (issue #151: exitCode=18,
+    // the sandbox could not create its process) is refused again on every
+    // restart, so asking the player to restart would only send them in a loop.
+    // Other launch failures may not repeat and keep the restart advice.
+    const message = details.reason === "launch-failed"
+      && details.exitCode === SANDBOX_CREATE_PROCESS_EXIT_CODE
+      && process.platform === "win32"
+      ? copy.rendererLaunchRefused(details.exitCode)
+      : copy.rendererGone(details.reason);
+    dialog.showErrorBox(copy.startupTitle, `${message}\n\n${copy.startupSafety}`);
   });
   window.on("closed", () => {
     clearTimeout(showDeadline);
