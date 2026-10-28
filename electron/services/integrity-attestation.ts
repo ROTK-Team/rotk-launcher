@@ -10,9 +10,9 @@
  *   4. return the evidence, which the ticket request carries (phase B).
  *
  * Hashing several GB is slow, so `(path, size, mtimeMs) -> sha256` results are
- * cached in userData. The cache is a UX optimization only: the server never
- * trusts the client anyway, and a stale entry can only ever cause a *rejection*
- * (wrong digest), never a false acceptance.
+ * cached in userData. Only the large archives (see isCachedArchive) take their
+ * digest from the cache; every other declared file is small next to them and is
+ * hashed again on every launch.
  */
 
 import { createHash } from "node:crypto";
@@ -328,6 +328,19 @@ function sha256File(path: string): Promise<string> {
   });
 }
 
+/**
+ * The large archives: packs and sound banks, about 17.3 GB of an honest
+ * install. Everything else declared (executables, fonts, UI and locale files,
+ * single sounds) is about 350 MB, so it is always read from disk.
+ */
+const CACHED_ARCHIVE_EXTENSIONS = new Set(["pack2", "pack", "bnk_pc"]);
+
+function isCachedArchive(path: string): boolean {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 && CACHED_ARCHIVE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
 async function loadCache(userDataDirectory: string): Promise<CacheMap> {
   try {
     const raw = JSON.parse(await readFile(join(userDataDirectory, CACHE_FILE_NAME), "utf8")) as unknown;
@@ -458,7 +471,8 @@ export async function measureInstallation(options: MeasureOptions): Promise<Meas
       continue;
     }
     const cacheKey = manifestPathKey(entry.path);
-    const cached = cache.get(cacheKey);
+    // Only an archive may take its digest from the cache; see isCachedArchive.
+    const cached = isCachedArchive(entry.path) ? cache.get(cacheKey) : undefined;
     const digest = cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs
       ? cached.sha256
       : await sha256File(absolute);
@@ -534,5 +548,6 @@ export const integrityAttestationInternals = {
   validateEndpoint,
   loadCache,
   saveCache,
+  isCachedArchive,
   CACHE_FILE_NAME,
 };
