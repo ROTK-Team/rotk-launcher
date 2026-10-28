@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir } from "node:fs/promises";
+import { lstat, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import type { DiagnosticCaptureRequest, DiagnosticState } from "../../shared/diagnostics.js";
 import type { DebugReportFailureReason, DebugSessionSummary } from "../../shared/contracts.js";
@@ -38,6 +38,43 @@ async function binaryInventory(root: string | undefined): Promise<Record<string,
     } catch { results.push({ name, status: "unavailable" }); }
   }
   return results;
+}
+
+// The voice proxy writes one line per game process about rotkc.dll to its
+// trace file in the game folder (vivoxsdk_x64_proxy.c, load_rotkc_module).
+const PROXY_TRACE_NAME = "rotk-vivox-v5-compat.log";
+const PROXY_TRACE_TAIL_BYTES = 64 * 1024;
+const ROTKC_TRACE_LINE = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z) pid=(\d+) tid=\d+ \[rotk-vivoxproxy\] rotkc: (loaded with legacy import search|loaded|load failed error=(\d+)|path failed)\r?$/gmu;
+
+/**
+ * What the proxy logged about loading rotkc.dll in this game process, for the
+ * report only; nothing depends on it. Lines older than the session or from
+ * another process are ignored.
+ */
+async function rotkcModuleStatus(root: string | undefined, pid: number | null, since: string): Promise<Record<string, unknown>> {
+  if (!root || pid === null) return { status: "unknown" };
+  let tail: string;
+  try {
+    const path = join(root, PROXY_TRACE_NAME);
+    const info = await lstat(path);
+    if (!info.isFile()) return { status: "log-unavailable" };
+    const file = await open(path, "r");
+    try {
+      const length = Math.min(info.size, PROXY_TRACE_TAIL_BYTES);
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await file.read(buffer, 0, length, info.size - length);
+      tail = buffer.subarray(0, bytesRead).toString("latin1");
+    } finally { await file.close(); }
+  } catch { return { status: "log-unavailable" }; }
+  let status: Record<string, unknown> = { status: "not-logged" };
+  for (const [, at, linePid, outcome, error] of tail.matchAll(ROTKC_TRACE_LINE)) {
+    if (Number(linePid) !== pid || at < since) continue;
+    if (outcome === "loaded") status = { status: "loaded", at };
+    else if (outcome === "path failed") status = { status: "path-failed", at };
+    else if (error === undefined) status = { status: "loaded-legacy-imports", at };
+    else status = { status: "load-failed", error: Number(error), at };
+  }
+  return status;
 }
 
 const NETWORK_ERROR = /^(?:ENOTFOUND|EAI_AGAIN|ECONN(?:RESET|REFUSED|ABORTED)|ETIMEDOUT|ENET(?:UNREACH|DOWN)|EHOST(?:UNREACH|DOWN)|EPIPE|EPROTO|CERT_|UNABLE_TO_|SELF_SIGNED_|DEPTH_ZERO_|ERR_TLS_|ERR_SSL_)/;
@@ -257,7 +294,8 @@ export class DiagnosticController {
         }
         await active.systemInfo;
         const windowsEvents = await collectGameWindowsEvents(active.pid, active.startedAt, endedAt);
-        await this.reports.updateSession(active.id, { windowsEvents, processEndedAt: endedAt });
+        const rotkcModule = await rotkcModuleStatus(finalRecord.context.installationRoot, active.pid, active.startedAt);
+        await this.reports.updateSession(active.id, { windowsEvents, rotkcModule, processEndedAt: endedAt });
         await this.reports.collectSession(active.id);
         if (active.debug) await this.exportDebugSession(active.id);
       } finally {
@@ -400,4 +438,4 @@ export class DiagnosticController {
   }
 }
 
-export const diagnosticControllerInternals = { binaryInventory, debugFailure };
+export const diagnosticControllerInternals = { binaryInventory, debugFailure, rotkcModuleStatus };
