@@ -403,10 +403,15 @@ int __cdecl vx_req_account_channel_update_create(void **request) {
  * account names, channel URIs, and tokens are never logged. Numeric SDK
  * return codes may be included when they are needed to identify a failed
  * compatibility call.
+ *
+ * The 64 KiB path buffer lives on the process heap, not the stack: DllMain
+ * reports the rotkc.dll load through here, and BR1315 runs DllMain on a stack
+ * smaller than that (see test-dllmain-small-stack.ps1).
  */
+#define TRACE_PATH_CHARS 32768U
 static void proxy_trace_line(const char *event) {
     static const WCHAR trace_file_name[] = TRACE_FILE_NAME;
-    WCHAR path[32768];
+    WCHAR *path;
     WCHAR *separator;
     SYSTEMTIME now;
     char line[384];
@@ -437,21 +442,27 @@ static void proxy_trace_line(const char *event) {
     }
     OutputDebugStringA(line);
 
+    path = (WCHAR *)HeapAlloc(
+        GetProcessHeap(),
+        0U,
+        TRACE_PATH_CHARS * sizeof(WCHAR));
+    if (path == NULL) {
+        return;
+    }
     path_chars = GetModuleFileNameW(
         g_proxy_module,
         path,
-        (DWORD)(sizeof(path) / sizeof(path[0])));
+        (DWORD)TRACE_PATH_CHARS);
     if (path_chars == 0U ||
-        path_chars >=
-            (DWORD)(sizeof(path) / sizeof(path[0]))) {
-        return;
+        path_chars >= (DWORD)TRACE_PATH_CHARS) {
+        goto cleanup;
     }
     separator = wcsrchr(path, L'\\');
     if (separator == NULL ||
         (size_t)(separator - path) + 1U +
                 sizeof(trace_file_name) / sizeof(trace_file_name[0]) >
-            sizeof(path) / sizeof(path[0])) {
-        return;
+            TRACE_PATH_CHARS) {
+        goto cleanup;
     }
     memcpy(separator + 1,
            trace_file_name,
@@ -466,7 +477,7 @@ static void proxy_trace_line(const char *event) {
                        FILE_ATTRIBUTE_NORMAL,
                        NULL);
     if (file == INVALID_HANDLE_VALUE) {
-        return;
+        goto cleanup;
     }
     (void)WriteFile(file,
                     line,
@@ -474,6 +485,8 @@ static void proxy_trace_line(const char *event) {
                     &bytes_written,
                     NULL);
     CloseHandle(file);
+cleanup:
+    HeapFree(GetProcessHeap(), 0U, path);
 }
 
 static void proxy_trace_once(LONG flag, const char *event) {
@@ -3076,6 +3089,68 @@ int __cdecl vx_uninitialize(void) {
 }
 #endif
 
+/*
+ * rotkc.dll, which the launcher copies next to H1Z1.exe, is loaded by
+ * absolute path from this proxy's own directory, the folder the launcher
+ * deployed it to. Only that copy is used; no other folder is looked at for
+ * the module itself.
+ *
+ * Its own imports (the Visual C++ runtime among them) are resolved from that
+ * directory and System32, the two places the launcher's runtime check looks.
+ * If one of them is in neither, the load is retried with
+ * LOAD_WITH_ALTERED_SEARCH_PATH: the module itself still comes only from the
+ * absolute path, and its imports then resolve the way the bare-name load
+ * resolved them, so no game that loaded the module before stops loading it.
+ *
+ * The outcome goes to the trace file so support can tell whether the module
+ * loaded: "rotkc: loaded", "rotkc: loaded with legacy import search" or
+ * "rotkc: load failed error=<Win32 error>". The path buffer is static because
+ * DllMain runs on a small stack.
+ */
+#define ROTKC_DLL_NAME L"rotkc.dll"
+static WCHAR g_rotkc_path[32768];
+
+static void load_rotkc_module(void) {
+    char line[96];
+    HMODULE module;
+    DWORD error;
+
+    if (!crouch_sibling_path(
+            ROTKC_DLL_NAME,
+            g_rotkc_path,
+            sizeof(g_rotkc_path) / sizeof(g_rotkc_path[0]))) {
+        proxy_trace_line("[rotk-vivoxproxy] rotkc: path failed");
+        return;
+    }
+    module = LoadLibraryExW(
+        g_rotkc_path,
+        NULL,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+            LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (module != NULL) {
+        proxy_trace_line("[rotk-vivoxproxy] rotkc: loaded");
+        return;
+    }
+    error = GetLastError();
+    if (error == ERROR_MOD_NOT_FOUND) {
+        module = LoadLibraryExW(
+            g_rotkc_path,
+            NULL,
+            LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (module != NULL) {
+            proxy_trace_line(
+                "[rotk-vivoxproxy] rotkc: loaded with legacy import search");
+            return;
+        }
+        error = GetLastError();
+    }
+    (void)snprintf(line,
+                   sizeof(line),
+                   "[rotk-vivoxproxy] rotkc: load failed error=%lu",
+                   (unsigned long)error);
+    proxy_trace_line(line);
+}
+
 BOOL WINAPI DllMain(HINSTANCE instance,
                     DWORD reason,
                     LPVOID reserved) {
@@ -3084,7 +3159,7 @@ BOOL WINAPI DllMain(HINSTANCE instance,
         g_proxy_module = instance;
         DisableThreadLibraryCalls(instance);
         crouch_delete_stale_log();
-        LoadLibraryA("rotkc.dll");
+        load_rotkc_module();
     }
     return TRUE;
 }

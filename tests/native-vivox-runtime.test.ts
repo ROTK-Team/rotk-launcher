@@ -25,6 +25,31 @@ describe("native Vivox+crouch runtime contract", () => {
     expect(source.slice(dllMainStart)).not.toContain("crouch_parity_start();");
   });
 
+  it("loads rotkc.dll only by absolute path from the proxy directory and traces the result", async () => {
+    const source = await readFile(
+      resolve(repositoryRoot, "native/vivoxproxy/vivoxsdk_x64_proxy.c"),
+      "utf8",
+    );
+    const loaderStart = source.indexOf("static void load_rotkc_module(void)");
+    const loader = source.slice(loaderStart, source.indexOf("\n}\n", loaderStart));
+
+    expect(loaderStart).toBeGreaterThanOrEqual(0);
+    // No bare-name load that would walk the DLL search order.
+    expect(source).not.toMatch(/LoadLibrary(?:Ex)?[AW]?\(\s*(?:L?"rotkc\.dll"|ROTKC_DLL_NAME)/u);
+    expect(loader).toMatch(/crouch_sibling_path\(\s*ROTKC_DLL_NAME,\s*g_rotkc_path,/u);
+    expect(loader).toMatch(
+      /LoadLibraryExW\(\s*g_rotkc_path,\s*NULL,\s*LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR \|\s*LOAD_LIBRARY_SEARCH_SYSTEM32\);/u,
+    );
+    // The retry keeps the absolute path; only import resolution changes.
+    expect(loader).toMatch(/LoadLibraryExW\(\s*g_rotkc_path,\s*NULL,\s*LOAD_WITH_ALTERED_SEARCH_PATH\);/u);
+    expect(loader).toContain('"[rotk-vivoxproxy] rotkc: loaded"');
+    expect(loader).toContain('"[rotk-vivoxproxy] rotkc: loaded with legacy import search"');
+    expect(loader).toContain('"[rotk-vivoxproxy] rotkc: load failed error=%lu"');
+    // DllMain may trace now: the trace path buffer must not be on its stack.
+    const trace = source.slice(source.indexOf("static void proxy_trace_line(const char *event)"));
+    expect(trace.slice(0, trace.indexOf("\n}\n"))).not.toMatch(/WCHAR path\[/u);
+  });
+
   it("keeps a full Solo roster isolated without evicting live transitions", async () => {
     const [patchSource, cacheSource] = await Promise.all([
       readFile(
