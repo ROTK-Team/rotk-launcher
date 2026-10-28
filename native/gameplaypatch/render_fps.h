@@ -3,6 +3,7 @@
 #define COBJMACROS
 #include <d3d11.h>
 #include <dxgi.h>
+#include "image_pass.h"
 
 /* Count successful presentations, independently of Scaleform's frame rate. */
 typedef HRESULT (STDMETHODCALLTYPE *fps_present_fn)(IDXGISwapChain *, UINT, UINT);
@@ -21,11 +22,20 @@ static UINT fps_reference;
 #endif
 
 static HRESULT STDMETHODCALLTYPE fps_present(IDXGISwapChain *chain, UINT interval, UINT flags) {
-    HRESULT result = fps_original_present(chain, interval, flags);
+    HRESULT result;
     DXGI_SWAP_CHAIN_DESC desc;
     RECT size;
     DWORD pid = 0;
     LARGE_INTEGER now;
+    /* Player image settings go into the main chain's frame before it is shown; a repeated frame is left alone. */
+    if (InterlockedCompareExchange(&image_enabled, 0, 0) && !(flags & (DXGI_PRESENT_TEST | DXGI_PRESENT_DO_NOT_SEQUENCE))) {
+        BOOL main;
+        AcquireSRWLockShared(&fps_lock);
+        main = chain == fps_chain;
+        ReleaseSRWLockShared(&fps_lock);
+        if (main) image_apply(chain);
+    }
+    result = fps_original_present(chain, interval, flags);
     if (!InterlockedCompareExchange(&fps_enabled, 0, 0) || result != S_OK || (flags & DXGI_PRESENT_TEST)) return result;
     QueryPerformanceCounter(&now);
     AcquireSRWLockExclusive(&fps_lock);
