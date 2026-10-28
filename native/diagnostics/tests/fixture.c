@@ -63,15 +63,35 @@ __declspec(noinline) static void exhaust_stack(unsigned depth) {
     sink += page[depth % sizeof(page)];
 }
 
+/* Loads a test DLL by full path, as the game loads its own modules, so the
+ * passive image inventory has a known module to find and lose. */
+static HMODULE loaded_module;
+
+static void load_module(char *path) {
+    size_t length = strlen(path);
+    while (length && (path[length - 1] == '\n' || path[length - 1] == '\r')) path[--length] = 0;
+    wchar_t wide[1024];
+    if (!MultiByteToWideChar(CP_UTF8, 0, path, -1, wide, 1024)) { puts("loaded:0"); fflush(stdout); return; }
+    HMODULE module = LoadLibraryW(wide);
+    if (module) loaded_module = module;
+    printf("loaded:%d\n", module != NULL); fflush(stdout);
+}
+
 int main(void) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     AddVectoredExceptionHandler(1, handled_exception);
     ULONG guarantee = 65536;
     SetThreadStackGuarantee(&guarantee);
     puts("ready"); fflush(stdout);
-    char command[64];
+    char command[1024];
     while (fgets(command, sizeof(command), stdin)) {
-        if (strncmp(command, "av", 2) == 0) {
+        if (strncmp(command, "load ", 5) == 0) {
+            load_module(command + 5);
+        } else if (strncmp(command, "unload", 6) == 0) {
+            BOOL freed = loaded_module && FreeLibrary(loaded_module);
+            loaded_module = NULL;
+            printf("unloaded:%d\n", freed); fflush(stdout);
+        } else if (strncmp(command, "av", 2) == 0) {
             volatile ULONG_PTR bad_address = 1;
             *(volatile unsigned *)bad_address = 0xDEAD;
         } else if (strncmp(command, "stack", 5) == 0) {
