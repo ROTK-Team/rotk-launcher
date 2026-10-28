@@ -58,6 +58,7 @@ function snapshot(overrides: Partial<LauncherSnapshot> = {}): LauncherSnapshot {
       progress: null,
       warning: null,
     },
+    playerFont: { selected: "original", launcherSelected: "original", options: [] },
     integrityCheck: null,
     progress: null,
     error: null,

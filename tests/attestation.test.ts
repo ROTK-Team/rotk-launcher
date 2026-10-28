@@ -145,6 +145,18 @@ const CANONICAL = {
     "rotkc.dll",
     "steam_api64.original.dll",
     "steam_persona_name.txt",
+    "ui/resource/fonts/montserrat-bold.ttf",
+    "ui/resource/fonts/montserrat-extrabold.ttf",
+    "ui/resource/fonts/montserrat-medium.ttf",
+    "ui/resource/fonts/montserrat-regular.ttf",
+    "ui/resource/fonts/montserrat-semibold.ttf",
+    "ui/resource/fonts/oswald-bold_0.ttf",
+    "ui/resource/fonts/oswald-light_0.ttf",
+    "ui/resource/fonts/oswald-regular_0.ttf",
+    "ui/resource/fonts/roboto-bold.ttf",
+    "ui/resource/fonts/roboto-light.ttf",
+    "ui/resource/fonts/roboto-medium.ttf",
+    "ui/resource/fonts/roboto-regular.ttf",
     "useroptions.ini",
     "vivoxsdk_x64.original.dll",
   ],
@@ -189,6 +201,10 @@ describe("canonical exclusion contract", () => {
     expect(isAttestationExcluded("LaunchPad.bat")).toBe(false);
     expect(isAttestationExcluded("H1Z1.exe")).toBe(false);
     expect(isAttestationExcluded("Browser/Resources/libcef.dll")).toBe(false);
+    expect(isAttestationExcluded("UI/Resource/Fonts/Roboto-Regular.ttf")).toBe(true);
+    for (const path of ["UI/Resource/Fonts/ARIALUNI.TTF", "UI/Resource/Fonts/RobotoMono-Regular.ttf", "UI/Resource/Fonts/simhei.ttf", "UI/Resource/Fonts/GoogleFonts/RockSalt.ttf"]) {
+      expect(isAttestationExcluded(path)).toBe(false);
+    }
     expect(isAttestationExcluded("rotkc.dll")).toBe(true);
     expect(isAttestationExcluded("ROTKC.DLL")).toBe(true);
     for (const path of ["plugins/rotkc.dll", "rotkc.dll/", "rotkc.dll/other.dll", "rotkc.dll.bak.dll", "other.dll"]) {

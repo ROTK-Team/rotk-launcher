@@ -69,7 +69,7 @@ async function fixture() {
     identity: { playerKey: 'test-only-player-key' } as LaunchRequest['identity'],
     runtime: RUNTIME_CONFIGS.test, locale: 'en', logsRoot: join(root, 'logs'), bundledShimPath: join(root, 'bundled-shim.dll'),
     bundledVivoxProxyPath: join(root, 'unused-proxy.dll'), bundledVivoxRuntimePath: join(root, 'unused-runtime.dll'),
-    bundledGameplayPatchPath: join(root, 'unused-dinput8.dll'), bundledRotkcPath: join(root, 'bundled-rotkc.dll'), clientPatchModeFallback: 'clean',
+    bundledGameplayPatchPath: join(root, 'unused-dinput8.dll'), bundledRotkcPath: join(root, 'bundled-rotkc.dll'), bundledFontsPath: join(root, 'unused-fonts'), clientPatchModeFallback: 'clean',
     diagnostics, onExit: vi.fn(),
   };
   return { launcher: new GameLauncher(), request, diagnostics, child: () => children.at(-1)! };

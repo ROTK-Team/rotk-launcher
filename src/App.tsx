@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { applyLauncherFont } from "./player-font-faces";
 import type { LauncherSnapshot, OperationResult } from "../shared/contracts";
 import { GlobalActivityCenter } from "./components/GlobalActivityCenter";
 import { InstallPanel } from "./components/InstallPanel";
@@ -32,6 +33,11 @@ export default function App() {
   useEffect(() => {
     setTransientError(null);
   }, [locale]);
+
+  const launcherFont = snapshot?.playerFont.launcherSelected;
+  useEffect(() => {
+    if (launcherFont) applyLauncherFont(launcherFont);
+  }, [launcherFont]);
 
   useEffect(() => {
     let mounted = true;
@@ -204,6 +210,8 @@ export default function App() {
         onVerifyAssets={() => void perform(() => window.rotk.verifyAssets())}
         onRestoreAssets={() => void perform(() => window.rotk.restoreVanillaAssets())}
         onToggleAssetSync={(enabled) => void perform(() => window.rotk.setAssetSyncEnabled(enabled))}
+        onSelectFont={(id) => void perform(() => window.rotk.setPlayerFont(id))}
+        onSelectLauncherFont={(id) => void perform(() => window.rotk.setLauncherFont(id))}
         debugSessionBusy={debugSessionBusy}
         debugSessionFailed={debugSessionFailed}
         debugSessionLocked={debugSessionLocked}

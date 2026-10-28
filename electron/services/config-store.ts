@@ -39,6 +39,10 @@ export interface LauncherConfig {
   serverId?: ServerId;
   /** Launch as the player account or the admin/moderator one. Defaults to player. */
   role?: PlayerRole;
+  /** Interface font id from resources/fonts/manifest.json; absent means the stock fonts. */
+  playerFont?: string;
+  /** Same ids, for the launcher's own interface; absent means its stock fonts. */
+  launcherFont?: string;
 }
 
 interface StoredConfigCandidate {
@@ -75,6 +79,8 @@ function isValidConfig(value: unknown): value is LauncherConfig {
     (candidate.debugSessionEnabled === undefined || typeof candidate.debugSessionEnabled === "boolean") &&
     (candidate.diagnosticUploadConsent === undefined || candidate.diagnosticUploadConsent === 1) &&
     (candidate.serverId === undefined || isServerId(candidate.serverId)) &&
+    (candidate.playerFont === undefined || (typeof candidate.playerFont === "string" && /^[a-z0-9]{1,32}$/.test(candidate.playerFont))) &&
+    (candidate.launcherFont === undefined || (typeof candidate.launcherFont === "string" && /^[a-z0-9]{1,32}$/.test(candidate.launcherFont))) &&
     (candidate.role === undefined || isPlayerRole(candidate.role))
   );
 }
@@ -202,6 +208,20 @@ export class ConfigStore {
   async setAssetSyncEnabled(assetSyncEnabled: boolean): Promise<LauncherConfig> {
     const current = await this.load();
     const next: LauncherConfig = { ...current, assetSyncEnabled };
+    await this.save(next);
+    return next;
+  }
+
+  async setPlayerFont(playerFont: string): Promise<LauncherConfig> {
+    const current = await this.load();
+    const next: LauncherConfig = { ...current, playerFont };
+    await this.save(next);
+    return next;
+  }
+
+  async setLauncherFont(launcherFont: string): Promise<LauncherConfig> {
+    const current = await this.load();
+    const next: LauncherConfig = { ...current, launcherFont };
     await this.save(next);
     return next;
   }

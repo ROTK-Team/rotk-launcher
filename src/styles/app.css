@@ -1970,6 +1970,134 @@ button:focus-visible {
   accent-color: var(--signal);
 }
 
+.font-section {
+  margin-top: 16px;
+  padding: 15px 18px;
+  border: 1px solid var(--line);
+  background: #0c0c0b;
+}
+
+.font-section__targets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 10px 0 8px;
+  border: 1px solid var(--line);
+}
+
+.font-section__targets button {
+  padding: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.font-section__targets button[data-selected="true"] {
+  background: var(--surface-2);
+  color: var(--paper);
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+.font-section__list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.font-section__option {
+  padding: 7px 6px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--paper-dim);
+  font-family: var(--display);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.font-section__option[data-shown="true"] {
+  border-color: var(--paper-dim);
+  color: var(--paper);
+}
+
+.font-section__option[data-selected="true"] {
+  border-color: var(--signal);
+  background: var(--signal-dark);
+  color: var(--paper);
+}
+
+.font-section__preview {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  height: 168px;
+  overflow: hidden;
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.font-section__preview strong {
+  height: 34px;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 34px;
+}
+
+.font-section__preview > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.font-section__preview--launcher {
+  align-content: center;
+}
+
+.font-section .asset-section__description {
+  min-height: 3em;
+}
+
+.font-section__warning {
+  display: block;
+  min-height: 3.2em;
+}
+
+.font-section__preview--launcher strong {
+  font-weight: 700;
+  letter-spacing: 0.025em;
+}
+
+.font-section__preview--launcher .font-section__buttons {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.font-section__buttons {
+  height: 20px;
+  line-height: 20px;
+  color: var(--paper-dim);
+  font-size: 14px;
+}
+
+.font-section__preview p {
+  height: 20px;
+  margin: 0;
+  line-height: 20px;
+  color: var(--paper-dim);
+  font-size: 13px;
+}
+
 /* Shared surfaces keep the same black / white / red hierarchy as rotk.app. */
 .window-chrome { height: 72px; background: rgba(6,6,6,.94); }
 .window-chrome__drag { padding-left: var(--gutter); gap: 25px; }
