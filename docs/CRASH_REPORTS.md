@@ -57,7 +57,7 @@ La présence de chaque pièce dépend de ce qui était disponible pour la sessio
 | `report.json` | Schéma version 1 : `summary`, `context`, `timezoneOffsetMinutes`, `exit`, `issues`. |
 | `manifest.json` | Identifiant et date d’export, fichiers avec taille et SHA-256, limites, problèmes de collecte et omissions, indicateur `containsUnredactedProcessMemory`. Le manifeste ne contient pas sa propre empreinte. |
 | `events.jsonl` | Chronologie du launcher pour cette session : démarrage du jeu, sortie, demande de capture, portions de stdout/stderr, erreurs du launcher enregistrées. |
-| `native-events.jsonl` et éventuellement `.1` | Attachement du helper, exceptions, compteurs, modules et versions, mesures mémoire/CPU, captures réussies ou échouées et sortie native. `.1` est le journal précédent. |
+| `native-events.jsonl` et éventuellement `.1` | Attachement du helper, exceptions, compteurs, modules et versions, inventaire des images chargées dans le jeu (nom du fichier, classe d’emplacement, signature, jamais le chemin), mesures mémoire/CPU, captures réussies ou échouées et sortie native. `.1` est le journal précédent. Le résumé de l’inventaire est aussi dans `report.json`, `context.moduleInventory`. |
 | `performance-summary.json` | En mode Debug : synthèse des compteurs du processus, pics, couverture, coût de collecte et limites. |
 | `performance.jsonl` et éventuellement `.1` | En mode Debug : mesures du processus environ chaque seconde, dates UTC et horloge monotone QPC. |
 | `frame-times-summary.json` | Disponibilité de PresentMon, raisons d'échec éventuelles, statistiques des intervalles de présentation par swapchain et pics. |
