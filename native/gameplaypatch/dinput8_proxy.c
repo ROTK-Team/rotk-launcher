@@ -657,6 +657,7 @@ static DWORD WINAPI watchdog_worker(LPVOID parameter) {
         InterlockedExchange(&stance_enabled, 0);
         InterlockedExchange(&reboot_enabled, 0);
         InterlockedExchange(&fps_enabled, 0);
+        InterlockedExchange(&image_enabled, 0);
         InterlockedExchange(&ads_enabled, 0);
         if (!ads_rule_restore(g_image_base)) {
             patch_log("ROTK ADS sprint rule: stock calls restore refused.\n");
@@ -730,6 +731,7 @@ static DWORD WINAPI patch_worker(LPVOID parameter) {
         reboot_install(image_base);
         nameplate_install(image_base);
         fps_install(image_base);
+        image_install(InterlockedCompareExchange(&fps_enabled, 0, 0) != 0);
         ads_install(image_base);
         ads_rule_install(image_base);
         start_watchdog(image_base);

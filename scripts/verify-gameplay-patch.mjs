@@ -3,8 +3,8 @@ import { readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const expectedHash =
-  "48268b1080ef1caa7314c45513620d7af3e1db058ba6a43305eb1829095f1eec";
-const expectedBytes = 55_808;
+  "f6611f3ab31aa28eca251b54402ca9927efea090b94706d3e41e5c458c9b8caa";
+const expectedBytes = 69_632;
 const builtPath = resolve(
   process.argv[2] ?? "native/gameplaypatch/dist/dinput8.dll",
 );
@@ -60,6 +60,7 @@ const requiredBinarySequences = [
   Buffer.from("mode=anti-slow-v3\0", "ascii"),
   Buffer.from("patch=1046F98:8f>82,1046FE5:74>eb\0", "ascii"),
   Buffer.from("rotk-shotgun-sprint.ini\0", "utf16le"),
+  Buffer.from("rotk_img_preset\0", "utf16le"),
 ];
 for (const sequence of requiredBinarySequences) {
   if (built.indexOf(sequence) < 0) {

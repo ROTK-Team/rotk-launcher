@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "48268B1080EF1CAA7314C45513620D7AF3E1DB058BA6A43305EB1829095F1EEC"
-$expectedBytes = 55808
+$expectedHash = "F6611F3AB31AA28ECA251B54402CA9927EFEA090B94706D3E41E5C458C9B8CAA"
+$expectedBytes = 69632
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
@@ -224,6 +224,25 @@ $fpsExe = Join-Path $testRoot "render_fps_test.exe"
 if ($LASTEXITCODE -ne 0) { throw "Native FPS test compilation failed." }
 & $fpsExe
 if ($LASTEXITCODE -ne 0) { throw "Native FPS counter test failed." }
+
+# Image settings: the shadow rule on every LUT texel, then the real pass on WARP.
+$lutExe = Join-Path $testRoot "image_lut_test.exe"
+& $zig.Source @(
+    "cc", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $lutExe, (Join-Path $root "tests\image_lut_test.c")
+)
+if ($LASTEXITCODE -ne 0) { throw "Image LUT test compilation failed." }
+& $lutExe
+if ($LASTEXITCODE -ne 0) { throw "Image LUT test failed." }
+
+$imageExe = Join-Path $testRoot "image_pass_test.exe"
+& $zig.Source @(
+    "cc", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $imageExe, (Join-Path $root "tests\image_pass_test.c"), "-ld3d11", "-ldxgi", "-luser32"
+)
+if ($LASTEXITCODE -ne 0) { throw "Image pass test compilation failed." }
+& $imageExe
+if ($LASTEXITCODE -ne 0) { throw "Image pass test failed." }
 
 $adsExe = Join-Path $testRoot "ads_collision_test.exe"
 & $zig.Source @(
