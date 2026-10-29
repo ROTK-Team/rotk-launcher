@@ -124,6 +124,16 @@
         ]
       },
       {
+        "from": "resources/fonts",
+        "to": "fonts",
+        "filter": [
+          "**/*.ttf",
+          "**/OFL.txt",
+          "FONT-LICENSES.txt",
+          "manifest.json"
+        ]
+      },
+      {
         "from": "resources/diagnostics",
         "to": "diagnostics",
         "filter": [

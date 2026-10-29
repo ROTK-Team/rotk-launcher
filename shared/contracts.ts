@@ -140,6 +140,33 @@ export interface IntegrityCheckSummary {
   totalBytes: number;
 }
 
+/** An interface font the player may pick (resources/fonts/manifest.json). */
+export interface PlayerFontOption {
+  id: string;
+  name: string;
+  /** False when the font has no Cyrillic letters (Russian text falls back). */
+  cyrillic: boolean;
+}
+
+export interface PlayerFontSummary {
+  /** Font of the in-game interface, installed before each launch. */
+  selected: string;
+  /** Font of the launcher itself, applied at once. */
+  launcherSelected: string;
+  options: PlayerFontOption[];
+}
+
+/** The font files of one choice for the launcher: preview titles, buttons, text, plus a bold. */
+export interface PlayerFontPreview {
+  id: string;
+  title: Uint8Array;
+  button: Uint8Array;
+  body: Uint8Array;
+  bold: Uint8Array;
+  /** Capital H height over the em of the text font, to draw it at the launcher's size. */
+  capHeight: number;
+}
+
 export interface LauncherSnapshot {
   debugSession?: DebugSessionSummary;
   appVersion: string;
@@ -151,6 +178,7 @@ export interface LauncherSnapshot {
   playerIdentity: PlayerIdentitySummary;
   launcherUpdate: LauncherUpdateSummary;
   assetSync: AssetSyncSummary;
+  playerFont: PlayerFontSummary;
   integrityCheck: IntegrityCheckSummary | null;
   progress: InstallProgress | null;
   error: string | null;
@@ -224,6 +252,9 @@ export interface RotkLauncherApi {
   verifyAssets(): Promise<OperationResult>;
   restoreVanillaAssets(): Promise<OperationResult>;
   setAssetSyncEnabled(enabled: boolean): Promise<OperationResult>;
+  setPlayerFont(id: string): Promise<OperationResult>;
+  setLauncherFont(id: string): Promise<OperationResult>;
+  getPlayerFontPreview(id: string): Promise<OperationResult<PlayerFontPreview>>;
   minimizeWindow(): Promise<void>;
   closeWindow(): Promise<void>;
   onSnapshot(listener: (snapshot: LauncherSnapshot) => void): () => void;
@@ -261,6 +292,9 @@ export const IPC_CHANNELS = {
   verifyAssets: "asset-sync:verify",
   restoreVanillaAssets: "asset-sync:restore",
   setAssetSyncEnabled: "asset-sync:set-enabled",
+  setPlayerFont: "player-font:set",
+  setLauncherFont: "player-font:set-launcher",
+  getPlayerFontPreview: "player-font:preview",
   minimizeWindow: "window:minimize",
   closeWindow: "window:close",
   snapshotChanged: "launcher:snapshot-changed",

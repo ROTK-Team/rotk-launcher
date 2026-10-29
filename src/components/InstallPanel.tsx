@@ -3,6 +3,7 @@ import { Check, Copy, FolderOpen, HardDrive, PackageCheck, ShieldCheck, X } from
 import { useEffect, useState } from "react";
 import type { InstallDrive, LauncherSnapshot } from "../../shared/contracts";
 import { useI18n } from "../i18n";
+import { FontPicker } from "./FontPicker";
 import { LanguagePicker } from "./WindowChrome";
 
 interface InstallPanelProps {
@@ -19,6 +20,8 @@ interface InstallPanelProps {
   onVerifyAssets(): void;
   onRestoreAssets(): void;
   onToggleAssetSync(enabled: boolean): void;
+  onSelectFont(id: string): void;
+  onSelectLauncherFont(id: string): void;
   debugSessionBusy: boolean;
   debugSessionFailed: boolean;
   debugSessionLocked: boolean;
@@ -50,6 +53,8 @@ export function InstallPanel({
   onVerifyAssets,
   onRestoreAssets,
   onToggleAssetSync,
+  onSelectFont,
+  onSelectLauncherFont,
   debugSessionBusy,
   debugSessionFailed,
   debugSessionLocked,
@@ -333,6 +338,15 @@ export function InstallPanel({
                   <span>{copy.assets.autoSync}</span>
                 </label>
               </section>
+            )}
+
+            {snapshot.installationRoot && !installing && (
+              <FontPicker
+                playerFont={snapshot.playerFont}
+                busy={busy}
+                onSelect={onSelectFont}
+                onSelectLauncher={onSelectLauncherFont}
+              />
             )}
 
             <p className="install-panel__legal">

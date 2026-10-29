@@ -12,6 +12,8 @@ ROTK Launcher est distribué sous `GPL-3.0-or-later`, mais utilise des composant
 | Lucide React | ISC | <https://lucide.dev/> |
 | Barlow Condensed via Fontsource | SIL OFL 1.1 | <https://fontsource.org/fonts/barlow-condensed> |
 | Inter via Fontsource | SIL OFL 1.1 | <https://fontsource.org/fonts/inter> |
+| Polices au choix du joueur (`resources/fonts`) : Inter, Barlow, Exo 2, Titillium Web, Open Sans | SIL OFL 1.1 ; instances statiques réduites et mises à la taille des polices du jeu par `scripts/build-player-fonts.py` | <https://github.com/google/fonts/tree/main/ofl> |
+| Polices d’origine de H1Z1 : Roboto, Roboto Mono, Permanent Marker, Rock Salt, Calligraffitti (Apache-2.0) ; Montserrat, Oswald (SIL OFL 1.1). Copies identiques pour le choix « Original », mises à la taille de chaque emplacement sinon | Copyright et textes complets dans `resources/fonts/FONT-LICENSES.txt` | <https://fonts.google.com/> |
 | electron-builder | MIT | <https://www.electron.build/> |
 | Vitest | MIT | <https://vitest.dev/> |
 | yazl, export ZIP des diagnostics | MIT, Copyright (c) 2014 Josh Wolfe | <https://github.com/thejoshwolfe/yazl> |

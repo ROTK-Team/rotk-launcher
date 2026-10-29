@@ -193,6 +193,23 @@ export interface Copy {
     restore: string;
     autoSync: string;
   };
+  fonts: {
+    title: string;
+    description: string;
+    original: string;
+    sampleTitle: string;
+    sampleButtons: string;
+    sampleFeed: string;
+    sampleText: string;
+    noCyrillic: string;
+    nextLaunch: string;
+    targetGame: string;
+    targetLauncher: string;
+    launcherDescription: string;
+    launcherNow: string;
+    sampleLauncherNav: string;
+    sampleLauncherText: string;
+  };
 }
 
 const COPY: Record<AppLocale, Copy> = {
@@ -409,6 +426,23 @@ const COPY: Record<AppLocale, Copy> = {
       restore: "RESTORE VANILLA CLIENT",
       autoSync: "Update the custom assets automatically",
     },
+    fonts: {
+      title: "GAME FONT",
+      description: "Pick the font of the in-game interface. Hover a font to preview it, click to keep it.",
+      original: "Original",
+      sampleTitle: "PRESS ANY KEY",
+      sampleButtons: "PLAY · LOADOUT · SETTINGS",
+      sampleFeed: "Raven_77 knocked out xXSniperXx with an AR-15 (124 m)",
+      sampleText: "Squad 3 · Victory Royale · Bandage ×5 · Été, Ça, Ñ, Ğ",
+      noCyrillic: "This font has no Cyrillic letters: Russian text keeps a fallback font.",
+      nextLaunch: "Applied the next time you press Play.",
+      targetGame: "IN GAME",
+      targetLauncher: "LAUNCHER",
+      launcherDescription: "Pick the font of this launcher. Hover a font to preview it, click to apply it.",
+      launcherNow: "Applied to the launcher as soon as you click.",
+      sampleLauncherNav: "PLAY · NEWS · EU SERVER",
+      sampleLauncherText: "128 players online · Assets up to date · 2.0.48",
+    },
   },
   fr: {
     diagnostics: DIAGNOSTICS_COPY.fr,
@@ -623,6 +657,23 @@ const COPY: Record<AppLocale, Copy> = {
       restore: "RESTAURER LE CLIENT VANILLA",
       autoSync: "Mettre à jour les assets personnalisés automatiquement",
     },
+    fonts: {
+      title: "POLICE DU JEU",
+      description: "Choisis la police de l’interface en jeu. Survole une police pour la voir, clique pour la garder.",
+      original: "Originale",
+      sampleTitle: "APPUIE SUR UNE TOUCHE",
+      sampleButtons: "JOUER · ÉQUIPEMENT · RÉGLAGES",
+      sampleFeed: "Raven_77 a mis à terre xXSniperXx à l’AR-15 (124 m)",
+      sampleText: "Escouade 3 · Victoire royale · Bandage ×5 · Été, Ça, Ñ, Ğ",
+      noCyrillic: "Cette police n’a pas de lettres cyrilliques : le texte russe garde une police de secours.",
+      nextLaunch: "Appliquée au prochain clic sur Jouer.",
+      targetGame: "EN JEU",
+      targetLauncher: "LAUNCHER",
+      launcherDescription: "Choisis la police de ce launcher. Survole une police pour la voir, clique pour l’appliquer.",
+      launcherNow: "Appliquée au launcher dès le clic.",
+      sampleLauncherNav: "JOUER · NOUVEAUTÉS · SERVEUR EU",
+      sampleLauncherText: "128 joueurs en ligne · Assets à jour · 2.0.48",
+    },
   },
   zh: {
     diagnostics: DIAGNOSTICS_COPY.zh,
@@ -836,6 +887,23 @@ const COPY: Record<AppLocale, Copy> = {
       verify: "验证文件",
       restore: "恢复原版客户端",
       autoSync: "自动更新 ROTK 定制资源",
+    },
+    fonts: {
+      title: "游戏字体",
+      description: "选择游戏界面的字体。将鼠标悬停在字体上即可预览，点击即可保留。中文文本始终使用游戏自带的中文字体。",
+      original: "原版",
+      sampleTitle: "PRESS ANY KEY",
+      sampleButtons: "PLAY · LOADOUT · SETTINGS",
+      sampleFeed: "Raven_77 knocked out xXSniperXx with an AR-15 (124 m)",
+      sampleText: "Squad 3 · Victory Royale · Bandage ×5 · Été, Ça, Ñ, Ğ",
+      noCyrillic: "此字体不含西里尔字母：俄语文本会使用备用字体。",
+      nextLaunch: "下次点击开始游戏时生效。",
+      targetGame: "游戏内",
+      targetLauncher: "启动器",
+      launcherDescription: "选择本启动器的字体。将鼠标悬停在字体上即可预览，点击即可应用。",
+      launcherNow: "点击后立即应用到启动器。",
+      sampleLauncherNav: "开始游戏 · 新闻 · 欧洲服务器",
+      sampleLauncherText: "128 名玩家在线 · 资源已是最新 · 2.0.48",
     },
   },
 };

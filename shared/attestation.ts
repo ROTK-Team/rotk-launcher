@@ -96,6 +96,20 @@ export const ATTESTATION_EXCLUDED_PATHS: ReadonlySet<string> = new Set([
   "battleye/beclient_x64.cfg.original",
   "steam_api64.original.dll",
   "vivoxsdk_x64.original.dll",
+  // Interface fonts the launcher rewrites before every launch to the stock
+  // files or the font the player picked (resources/fonts/manifest.json).
+  "ui/resource/fonts/roboto-light.ttf",
+  "ui/resource/fonts/roboto-regular.ttf",
+  "ui/resource/fonts/roboto-medium.ttf",
+  "ui/resource/fonts/roboto-bold.ttf",
+  "ui/resource/fonts/montserrat-regular.ttf",
+  "ui/resource/fonts/montserrat-medium.ttf",
+  "ui/resource/fonts/montserrat-semibold.ttf",
+  "ui/resource/fonts/montserrat-bold.ttf",
+  "ui/resource/fonts/montserrat-extrabold.ttf",
+  "ui/resource/fonts/oswald-light_0.ttf",
+  "ui/resource/fonts/oswald-regular_0.ttf",
+  "ui/resource/fonts/oswald-bold_0.ttf",
 ]);
 
 /** Directory prefixes never part of the shipped tree (runtime output). */

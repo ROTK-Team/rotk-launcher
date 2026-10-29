@@ -53,6 +53,12 @@ export function resolveBundledGameplayPatchPath(): string {
     : join(app.getAppPath(), "resources", "patches", "dinput8.dll");
 }
 
+export function resolveBundledFontsPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, "fonts")
+    : join(app.getAppPath(), "resources", "fonts");
+}
+
 // Temporary: ships the anticheat module until it has its own distribution.
 export function resolveBundledRotkcPath(): string {
   return app.isPackaged
