@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, sign as signPayload } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -230,6 +230,58 @@ describe("measureInstallation", () => {
       expected: [declared],
     });
     expect(measurement.deviations[0]?.kind).toBe("mismatch");
+  });
+
+  it.each([
+    "H1Z1.exe",
+    "steam_api64.DLL",
+    "Browser/Resources/x64/libcef.dll",
+    "UI/Resource/Fonts/Montserrat-Bold.ttf",
+    "Locale/en_us_data.dat",
+    "Resources/Audio/pc9/footsteps.wem",
+    "InputProfile_Default.xml",
+  ])(
+    "hashes %s again even when its size and timestamps match the cache", async (path) => {
+      const declared = await writeGameFile(path, "original code bytes");
+      const absolute = join(installRoot, ...path.split("/"));
+      // Whole seconds, so the timestamp set back below is exactly the cached one.
+      await utimes(absolute, 1_700_000_000, 1_700_000_000);
+      const options = { installationRoot: installRoot, userDataDirectory: userData, expected: [declared] };
+      expect((await measureInstallation(options)).deviations).toEqual([]);
+
+      await writeFile(absolute, "changed code bytes!", "utf8");
+      await utimes(absolute, 1_700_000_000, 1_700_000_000);
+      expect((await stat(absolute)).size).toBe(declared.size);
+
+      expect((await measureInstallation(options)).deviations).toEqual([
+        { path, kind: "mismatch", observedSha256: sha256("changed code bytes!") },
+      ]);
+    },
+  );
+
+  it("hashes a cached archive again when only its modification time changed", async () => {
+    const declared = await writeGameFile("Resources/Assets/assets_x64_0.pack2", "pack bytes v1");
+    const absolute = join(installRoot, "Resources", "Assets", "assets_x64_0.pack2");
+    await utimes(absolute, 1_700_000_000, 1_700_000_000);
+    const options = { installationRoot: installRoot, userDataDirectory: userData, expected: [declared] };
+    await measureInstallation(options);
+
+    await writeFile(absolute, "pack bytes v2", "utf8");
+    await utimes(absolute, 1_700_000_100, 1_700_000_100);
+
+    expect((await measureInstallation(options)).deviations).toEqual([
+      { path: declared.path, kind: "mismatch", observedSha256: sha256("pack bytes v2") },
+    ]);
+  });
+
+  it("takes only the large archives from the cache", () => {
+    const { isCachedArchive } = integrityAttestationInternals;
+    for (const path of ["Resources/Assets/assets_x64_0.pack2", "a.PACK", "Resources/Audio/pc9/Weapons_SFX.bnk_pc", ".pack2"]) {
+      expect(isCachedArchive(path)).toBe(true);
+    }
+    for (const path of ["H1Z1.exe", "x.dll", "UI/Resource/Fonts/a.ttf", "Locale/en_us_data.dat", "a.wem", "packs.pack2/readme", "pack2"]) {
+      expect(isCachedArchive(path)).toBe(false);
+    }
   });
 
   it("reports progress while measuring", async () => {
