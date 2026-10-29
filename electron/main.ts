@@ -634,6 +634,7 @@ async function attestInstallation(
       block: buildAttestationResult(challenge, measurement, launcherVersion, tpmProof, anchor?.proof ?? null),
       hwid,
       clientPatchMode,
+      measuredCode: measurement.code,
     };
   } catch (error) {
     attestationProgress = null;

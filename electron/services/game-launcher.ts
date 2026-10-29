@@ -15,6 +15,7 @@ import type { PlayerIdentity } from "./player-identity.js";
 import { startLocalSessionGateway } from "./session-gateway.js";
 import { readInstallationMarker } from "./installer.js";
 import { assertVisualCppRuntime } from "./visual-cpp-runtime.js";
+import { findCodeChangedSinceMeasurement, type MeasuredCodeFile } from "./integrity-attestation.js";
 import {
   assertLaunchTicketFresh,
   createLaunchTicket,
@@ -60,6 +61,12 @@ export type AttestationOutcome =
       readonly hwid?: Record<string, string>;
       /** Server-directed shotgun sprint client-patch mode for this launch. */
       readonly clientPatchMode: GameplayPatchMode;
+      /**
+       * The executable files (.dll, .exe, .asi) the measurement saw in the
+       * attested tree, through links too, with their digests. Read again right
+       * before H1Z1 starts: none may have changed, gone or been added.
+       */
+      readonly measuredCode?: readonly MeasuredCodeFile[];
     }
   | { readonly status: "not-applicable"; readonly clientPatchMode: GameplayPatchMode }
   | {
@@ -214,6 +221,19 @@ export async function assertExecutableNotRunning(executablePath: string, attempt
       if (attempt >= attempts) throw new Error("H1Z1 est déjà lancé depuis cette installation.");
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 100 * 2 ** (attempt - 1)));
     }
+  }
+}
+
+// The ticket request, the client preparation and a possible ticket refresh all
+// happen after the measurement. Nothing executable may change in that window.
+async function assertCodeUnchangedSinceMeasurement(root: string, outcome: AttestationOutcome): Promise<void> {
+  if (outcome.status !== "attested" || outcome.measuredCode === undefined) return;
+  const changed = await findCodeChangedSinceMeasurement(root, outcome.measuredCode);
+  if (changed !== null) {
+    throw new Error(
+      `Le fichier ${changed} a changé après la vérification des fichiers du jeu. `
+      + "Relance le jeu ; si ça recommence, un autre programme modifie peut-être le dossier du jeu.",
+    );
   }
 }
 
@@ -470,6 +490,7 @@ export class GameLauncher {
       await ticketRequestOptions(request, outcome),
     );
     let sessionGateway = await startLocalSessionGateway(launchIdentity.ticket);
+    let measured: AttestationOutcome = outcome;
 
     try {
       await prepareClient(
@@ -496,6 +517,7 @@ export class GameLauncher {
         const refreshed = request.attest
           ? await request.attest()
           : { status: "not-applicable", clientPatchMode: request.clientPatchModeFallback } as const;
+        measured = refreshed;
         launchIdentity = await createLaunchTicket(
           request.identity.playerKey,
           request.runtime.launchTicketUrl,
@@ -511,6 +533,8 @@ export class GameLauncher {
         );
         assertLaunchTicketFresh(launchIdentity);
       }
+
+      await assertCodeUnchangedSinceMeasurement(installationRoot, measured);
 
       const args = buildLaunchArguments(
         launchIdentity.ticket,

@@ -10,15 +10,16 @@
  *   4. return the evidence, which the ticket request carries (phase B).
  *
  * Hashing several GB is slow, so `(path, size, mtimeMs) -> sha256` results are
- * cached in userData. The cache is a UX optimization only: the server never
- * trusts the client anyway, and a stale entry can only ever cause a *rejection*
- * (wrong digest), never a false acceptance.
+ * cached in userData. Only the large archives (see isCachedArchive) take their
+ * digest from the cache; every other declared file is small next to them and is
+ * hashed again on every launch.
  */
 
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
+import { retryFs } from "./fs-safe.js";
 import { launcherUpdateRequiredError } from "./launch-ticket.js";
 import {
   HWID_SLOT_NAME,
@@ -328,6 +329,19 @@ function sha256File(path: string): Promise<string> {
   });
 }
 
+/**
+ * The large archives: packs and sound banks, about 17.3 GB of an honest
+ * install. Everything else declared (executables, fonts, UI and locale files,
+ * single sounds) is about 350 MB, so it is always read from disk.
+ */
+const CACHED_ARCHIVE_EXTENSIONS = new Set(["pack2", "pack", "bnk_pc"]);
+
+function isCachedArchive(path: string): boolean {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 && CACHED_ARCHIVE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
 async function loadCache(userDataDirectory: string): Promise<CacheMap> {
   try {
     const raw = JSON.parse(await readFile(join(userDataDirectory, CACHE_FILE_NAME), "utf8")) as unknown;
@@ -390,6 +404,71 @@ const UNEXPECTED_EXTENSIONS = new Set([
   "pack2", "pack", "dll", "exe", "asset", "bundle", "dat", "bin",
 ]);
 
+// Far above an honest install (about 700 entries); bounds a link to a huge folder.
+const MAX_WALKED_ENTRIES = 100_000;
+
+type EntryKind = "directory" | "file" | "other";
+
+/** What a junction or symbolic link points to; a broken link is "other". */
+async function linkTargetKind(path: string): Promise<EntryKind> {
+  const target = await stat(path).catch(() => null);
+  if (target?.isDirectory()) return "directory";
+  return target?.isFile() ? "file" : "other";
+}
+
+/**
+ * Walks the installation as the game opens it: a junction or symbolic link
+ * counts as what it points to, and attestation exclusions apply to the path
+ * inside the installation. Real folders are read before linked ones and each
+ * physical folder only once, so a folder reachable both ways keeps its real
+ * path and a link loop ends. Stops after `maxEntries` entries, or as soon as
+ * `visit` returns false. `visit` gets each file's relative, `/`-separated path.
+ */
+export async function walkInstallation(
+  installationRoot: string,
+  visit: (relativePath: string) => boolean | void,
+  maxEntries = MAX_WALKED_ENTRIES,
+): Promise<void> {
+  const visited = new Set<string>();
+  const linkedFolders: string[] = [];
+  let walkedEntries = 0;
+  let stopped = false;
+  const read = async (directory: string): Promise<void> => {
+    const physical = await realpath(directory).catch(() => null);
+    if (physical === null || visited.has(physical)) return;
+    visited.add(physical);
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (stopped) return;
+      if (++walkedEntries > maxEntries) {
+        stopped = true;
+        return;
+      }
+      const absolute = join(directory, entry.name);
+      const relative = installationRelativePath(installationRoot, absolute);
+      const kind: EntryKind = entry.isSymbolicLink()
+        ? await linkTargetKind(absolute)
+        : entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other";
+      // File exemptions must not hide a directory with the same name. The
+      // trailing slash still lets directory-prefix exclusions skip their tree.
+      if (isAttestationExcluded(kind === "directory" ? `${relative}/` : relative)) continue;
+      if (kind === "directory") {
+        if (entry.isSymbolicLink()) linkedFolders.push(absolute);
+        else await read(absolute);
+        continue;
+      }
+      if (kind === "file" && visit(relative) === false) {
+        stopped = true;
+        return;
+      }
+    }
+  };
+  await read(installationRoot);
+  // Linked folders last: one also reachable directly was read under its real
+  // path above and is skipped here.
+  while (!stopped && linkedFolders.length > 0) await read(linkedFolders.shift()!);
+}
+
 /** Enumerates undeclared files of interest under the installation root. */
 async function findUnexpectedFiles(
   installationRoot: string,
@@ -422,11 +501,71 @@ async function findUnexpectedFiles(
   return found;
 }
 
+/** Executable code: what the game, or a module loader, can run from the tree. */
+const CODE_EXTENSIONS = new Set(["dll", "exe", "asi"]);
+
+function isCodePath(path: string): boolean {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 && CODE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
+/**
+ * Executable files in the attested tree, through links too, as walkInstallation
+ * sees them. A folder link whose name ends in .dll is a folder, not a module.
+ */
+async function listCodeFiles(installationRoot: string): Promise<string[]> {
+  const found: string[] = [];
+  await walkInstallation(installationRoot, (relativePath) => {
+    if (isCodePath(relativePath)) found.push(relativePath);
+  });
+  return found;
+}
+
+/** An executable file as the measurement saw it. */
+export interface MeasuredCodeFile {
+  /** Relative to the installation root, `/`-separated, as found on disk. */
+  path: string;
+  size: number;
+  /** Null when the file could not be read during the measurement. */
+  sha256: string | null;
+}
+
+/**
+ * Right before H1Z1 starts: the first executable file that was changed,
+ * removed or added since the measurement, or null when the code on disk is
+ * still the code that was measured. Every file is read again; the cache is
+ * never used here.
+ */
+export async function findCodeChangedSinceMeasurement(
+  installationRoot: string,
+  measured: readonly MeasuredCodeFile[],
+): Promise<string | null> {
+  const known = new Set(measured.map((file) => manifestPathKey(file.path)));
+  for (const path of await listCodeFiles(installationRoot)) {
+    if (!known.has(manifestPathKey(path))) return path;
+  }
+  for (const file of measured) {
+    const absolute = join(installationRoot, ...file.path.split("/"));
+    const fileStat = await stat(absolute).catch(() => null);
+    if (!fileStat?.isFile() || fileStat.size !== file.size) return file.path;
+    // An antivirus scan can hold a file for a moment; a real change stays.
+    const digest = await retryFs(() => sha256File(absolute)).catch(() => null);
+    if (digest !== file.sha256) return file.path;
+  }
+  return null;
+}
+
 export interface Measurement {
   root: string;
   fileCount: number;
   totalBytes: number;
   deviations: ObservedDeviation[];
+  /**
+   * Every executable file in the measured tree, declared or not, with the
+   * digest it was measured with. Local only: not part of the evidence.
+   */
+  code: MeasuredCodeFile[];
 }
 
 /**
@@ -458,7 +597,8 @@ export async function measureInstallation(options: MeasureOptions): Promise<Meas
       continue;
     }
     const cacheKey = manifestPathKey(entry.path);
-    const cached = cache.get(cacheKey);
+    // Only an archive may take its digest from the cache; see isCachedArchive.
+    const cached = isCachedArchive(entry.path) ? cache.get(cacheKey) : undefined;
     const digest = cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs
       ? cached.sha256
       : await sha256File(absolute);
@@ -488,6 +628,20 @@ export async function measureInstallation(options: MeasureOptions): Promise<Meas
     }
   }
 
+  // What the launch checks again right before H1Z1 starts. Declared files
+  // keep the digest that went into the root; anything else is read now.
+  const measuredDigests = new Map(observed.map((entry) => [manifestPathKey(entry.path), entry.sha256]));
+  const code: MeasuredCodeFile[] = [];
+  for (const path of await listCodeFiles(installationRoot)) {
+    const absolute = join(installationRoot, ...path.split("/"));
+    const fileStat = await stat(absolute).catch(() => null);
+    code.push({
+      path,
+      size: fileStat?.size ?? -1,
+      sha256: measuredDigests.get(manifestPathKey(path)) ?? await sha256File(absolute).catch(() => null),
+    });
+  }
+
   await saveCache(userDataDirectory, nextCache);
   onProgress?.({ phase: "done", hashedFiles, totalFiles: expected.length, hashedBytes, totalBytes });
 
@@ -496,6 +650,7 @@ export async function measureInstallation(options: MeasureOptions): Promise<Meas
     fileCount: observed.length,
     totalBytes: observed.reduce((sum, entry) => sum + entry.size, 0),
     deviations: deviations.slice(0, MAX_REPORTED_DEVIATIONS),
+    code,
   };
 }
 
@@ -534,5 +689,6 @@ export const integrityAttestationInternals = {
   validateEndpoint,
   loadCache,
   saveCache,
+  isCachedArchive,
   CACHE_FILE_NAME,
 };
