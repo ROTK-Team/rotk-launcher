@@ -25,8 +25,8 @@ if (-not (Test-Path -LiteralPath $proxy -PathType Leaf)) {
     throw "Shotgun sprint proxy not found: $proxy"
 }
 
-$expectedHash = "F6611F3AB31AA28ECA251B54402CA9927EFEA090B94706D3E41E5C458C9B8CAA"
-$expectedBytes = 69632
+$expectedHash = "5C98AC7EA035B7309C13F509DF537E1B65624CCA9BC3A49CFD847165D44A5560"
+$expectedBytes = 72704
 function Get-Sha256([string]$Path) {
     $stream = [System.IO.File]::OpenRead($Path)
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
@@ -89,6 +89,9 @@ foreach ($required in @(
     "restore_patch_pair(g_image_base)",
     "result = g_direct_input8_create(",
     "start_patch_worker();",
+    "report_direct_input();",
+    "DirectInput8Create reached; system dinput8 %s; ",
+    "bridge_block_reserve();",
     "return result;"
 )) {
     if ($sourceText.IndexOf(
@@ -107,6 +110,13 @@ $returnIndex = $sourceText.LastIndexOf("return result;")
 if ($forwardIndex -lt 0 -or $workerIndex -le $forwardIndex -or
     $returnIndex -le $workerIndex) {
     throw "DirectInput forwarding must happen before worker startup."
+}
+# The smoke test does not run inside H1Z1, so only the source shows that
+# DllMain still reserves the bridge block.
+$dllMainIndex = $sourceText.IndexOf("BOOL WINAPI DllMain(")
+$reserveIndex = $sourceText.LastIndexOf("bridge_block_reserve();")
+if ($dllMainIndex -lt 0 -or $reserveIndex -le $dllMainIndex) {
+    throw "DllMain must reserve the bridge block."
 }
 
 $binary = [System.IO.File]::ReadAllBytes($proxy)
@@ -197,6 +207,17 @@ if ($LASTEXITCODE -ne 0) { throw "CZ respawn test compilation failed." }
 if ($LASTEXITCODE -ne -1073741819) { throw "CZ native access violation was not reproduced." }
 & $respawnExe
 if ($LASTEXITCODE -ne 0) { throw "CZ respawn repair test failed." }
+
+# Bridge pages: the early block, the original upward search and the search
+# below the image when that window is full, all on private allocations.
+$bridgeExe = Join-Path $testRoot "bridge_page_test.exe"
+& $zig.Source @(
+    "cc", "-ld3d11", "-ldxgi", "-target", "x86_64-windows-gnu", "-O2", "-Wall", "-Wextra", "-Werror",
+    "-o", $bridgeExe, (Join-Path $root "tests\bridge_page_test.c"), "-luser32"
+)
+if ($LASTEXITCODE -ne 0) { throw "Bridge page test compilation failed." }
+& $bridgeExe
+if ($LASTEXITCODE -ne 0) { throw "Bridge page test failed." }
 
 $rebootExe = Join-Path $testRoot "trio_reboot_camera_test.exe"
 & $zig.Source @(
