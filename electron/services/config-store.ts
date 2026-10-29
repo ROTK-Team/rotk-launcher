@@ -95,6 +95,8 @@ function withoutLegacyIdentity(value: LauncherConfig): LauncherConfig {
   if (value.diagnosticUploadConsent === 1) next.diagnosticUploadConsent = 1;
   if (value.serverId !== undefined) next.serverId = value.serverId;
   if (value.role !== undefined) next.role = value.role;
+  if (value.playerFont !== undefined) next.playerFont = value.playerFont;
+  if (value.launcherFont !== undefined) next.launcherFont = value.launcherFont;
   return next;
 }
 
