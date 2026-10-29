@@ -109,6 +109,12 @@ import { StartupLog } from "./services/startup-log.js";
 import { describeSystemError, isSystemError } from "./services/system-error.js";
 import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
 import { startWithRequiredElevation, windowsElevation } from "./services/startup-elevation.js";
+import {
+  cancelsRequestWithoutSandbox,
+  offersSandboxFallback,
+  readSandboxFallback,
+  recordSandboxFallback,
+} from "./services/sandbox-fallback.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
@@ -150,6 +156,19 @@ if (singleInstanceLock) {
   app.quit();
 }
 
+// Issue #151: a player whose window Windows refused to sandbox chose to run
+// this launcher version without it. The switch only works before ready.
+const sandboxFallback = singleInstanceLock && process.platform === "win32"
+  ? readSandboxFallback(app.getPath("userData"), app.getVersion())
+  : "absent";
+const sandboxFallbackActive = sandboxFallback === "active";
+if (sandboxFallbackActive) {
+  app.commandLine.appendSwitch("no-sandbox");
+  startupLog.mark("sandbox-fallback-active", app.getVersion());
+} else if (sandboxFallback !== "absent") {
+  startupLog.mark("sandbox-fallback-ignored", sandboxFallback);
+}
+
 const usesIsolatedDevelopmentData = !app.isPackaged && Boolean(process.env.ROTK_USER_DATA_DIR);
 const legacyUserDataDirectories = usesIsolatedDevelopmentData
   ? []
@@ -166,6 +185,10 @@ let assetSync: AssetSyncService;
 let launcherUpdate: LauncherUpdateService;
 let diagnostics: DiagnosticController;
 let debugSettingWrite = false;
+// For the sandbox fallback: set by the startup elevation check, and once a
+// window of this process has loaded.
+let runsAsAdministrator = false;
+let windowLoaded = false;
 // Resolved once initialize() has built the services the IPC handlers use. The
 // window is created before that, so handlers wait here instead of touching an
 // undefined store.
@@ -1494,6 +1517,7 @@ function createWindow(): BrowserWindow {
   };
   window.once("ready-to-show", () => showOnce("ready-to-show"));
   window.webContents.once("did-finish-load", () => showOnce("did-finish-load"));
+  window.webContents.once("did-finish-load", () => { windowLoaded = true; });
   const showDeadline = setTimeout(() => showOnce("deadline"), WINDOW_SHOW_DEADLINE_MS);
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _validatedUrl, isMainFrame) => {
     // -3 (ABORTED) is a navigation replaced by another, not a failed page.
@@ -1509,6 +1533,18 @@ function createWindow(): BrowserWindow {
   window.webContents.on("render-process-gone", (_event, details) => {
     startupLog.mark("render-process-gone", `${details.reason} exitCode=${details.exitCode}`);
     if (details.reason === "clean-exit" || rendererFailureReported) return;
+    // Issue #151: a window that never loaded cannot have started a game, so the
+    // player may restart without the sandbox or quit. Only if that choice could
+    // not be saved does the usual error box follow.
+    if (offersSandboxFallback(details, {
+      platform: process.platform,
+      administrator: runsAsAdministrator,
+      fallbackActive: sandboxFallbackActive,
+      windowLoaded,
+    }) && askRestartWithoutSandbox()) {
+      clearTimeout(showDeadline);
+      return;
+    }
     rendererFailureReported = true;
     void diagnostics?.recordLauncherError("launcher_renderer_gone", new Error(details.reason)).catch(() => undefined);
     const copy = MAIN_COPY[currentLocale];
@@ -1524,6 +1560,42 @@ function createWindow(): BrowserWindow {
   if (devServer && !app.isPackaged) void window.loadURL(devServer);
   else void window.loadFile(join(app.getAppPath(), "dist", "index.html"));
   return window;
+}
+
+/**
+ * Issue #151: asks whether to restart this launcher version without the
+ * window's sandbox. Returns false only when the choice could not be saved.
+ */
+function askRestartWithoutSandbox(): boolean {
+  startupLog.mark("sandbox-fallback-offered");
+  const copy = MAIN_COPY[currentLocale];
+  const choice = dialog.showMessageBoxSync({
+    type: "warning",
+    title: copy.startupTitle,
+    message: copy.sandboxFallback.message,
+    detail: copy.sandboxFallback.detail,
+    buttons: [copy.sandboxFallback.restart, copy.sandboxFallback.quit],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (choice !== 0) {
+    startupLog.mark("sandbox-fallback-declined");
+    app.quit();
+    return true;
+  }
+  try {
+    recordSandboxFallback(app.getPath("userData"), app.getVersion());
+  } catch (error) {
+    startupLog.mark("sandbox-fallback-unsaved", (error as NodeJS.ErrnoException | null)?.code ?? "unknown");
+    return false;
+  }
+  startupLog.mark("sandbox-fallback-accepted");
+  // Same arguments, same token: this process is already elevated, so the
+  // restart needs no UAC prompt and nothing crosses the UAC boundary.
+  app.relaunch();
+  app.exit(0);
+  return true;
 }
 
 function systemLocale(): AppLocale {
@@ -1681,17 +1753,26 @@ if (singleInstanceLock) {
   void app
     .whenReady()
     .then(async () => {
+      const elevation = windowsElevation(resolveBundledDiagnosticsPath());
       await startWithRequiredElevation({
         platform: process.platform,
         isPackaged: app.isPackaged,
         executablePath: process.execPath,
         argv: process.argv,
       }, {
-        ...windowsElevation(resolveBundledDiagnosticsPath()),
+        ...elevation,
+        isAdministrator: async () => (runsAsAdministrator = await elevation.isAdministrator()),
         releaseSingleInstanceLock: () => app.releaseSingleInstanceLock(),
         initialize: async () => {
           session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
           session.defaultSession.setPermissionCheckHandler(() => false);
+          if (sandboxFallbackActive) {
+            // Without the sandbox the window runs nothing but the launcher's own files.
+            const devServer = app.isPackaged ? null : process.env.VITE_DEV_SERVER_URL ?? null;
+            session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+              callback({ cancel: cancelsRequestWithoutSandbox(details.url, devServer) });
+            });
+          }
           await initialize();
         },
         quit: () => app.quit(),
