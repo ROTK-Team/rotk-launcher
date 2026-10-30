@@ -84,6 +84,10 @@ Dans `report.json`, consulter notamment :
   RAM, carte graphique et pilote lorsque l’interrogation Windows a réussi ;
 - `context.windowsEvents` : événements Windows Application Error, Hang et WER
   retrouvés dans la fenêtre de la session ;
+- `context.rotkcModule` : ce que le proxy vocal a écrit dans
+  `rotk-vivox-v5-compat.log` sur le chargement de `rotkc.dll` par ce processus
+  (`loaded`, `loaded-legacy-imports`, `load-failed` avec le code d’erreur Windows,
+  `path-failed`, `not-logged`, `log-unavailable` ou `unknown`), pour le support ;
 - `exit.code`, `unsignedCode`, `hex`, `name`, `signal`, `error` et `issues` pour
   distinguer une exception, un échec de lancement et une information absente.
 
