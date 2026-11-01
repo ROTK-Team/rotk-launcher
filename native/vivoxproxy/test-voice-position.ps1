@@ -14,6 +14,15 @@ if (-not [string]::IsNullOrWhiteSpace($ProxyPath)) {
     $sdk = Join-Path (Split-Path -Parent $ProxyPath) "vivoxsdk_x64_v5.dll"
     if (-not (Test-Path -LiteralPath $sdk -PathType Leaf)) { throw "Candidate must have the Vivox SDK alongside it" }
 }
+# The proxy loads rotkc.dll from its own directory. Run a private copy with only
+# the Vivox SDK beside it, as test-voice-volume.ps1 does, so the bundled
+# module in resources\patches is never loaded into the test process.
+$runtimeDirectory = Join-Path $outputDirectory "voice-position-runtime"
+New-Item -ItemType Directory -Path $runtimeDirectory -Force | Out-Null
+Copy-Item -LiteralPath $sdk -Destination (Join-Path $runtimeDirectory "vivoxsdk_x64_v5.dll") -Force
+Copy-Item -LiteralPath $ProxyPath -Destination (Join-Path $runtimeDirectory "vivoxsdk_x64.dll") -Force
+$sdk = Join-Path $runtimeDirectory "vivoxsdk_x64_v5.dll"
+$ProxyPath = Join-Path $runtimeDirectory "vivoxsdk_x64.dll"
 & $zig.Source cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Werror -o $output (Join-Path $PSScriptRoot "tests\voice_position_test.c") -lwinhttp -lshell32
 if ($LASTEXITCODE -ne 0) { throw "Voice position test build failed" }
 if ([string]::IsNullOrWhiteSpace($ProxyPath)) { & $output $sdk }

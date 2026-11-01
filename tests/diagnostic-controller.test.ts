@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -356,5 +356,18 @@ describe('diagnostic controller and persisted session lifecycle', () => {
     const next = await f.controller.beginLaunch(f.context);
     await next.hooks.onExit(0, null);
     expect((await f.controller.state()).recordingId).toBeNull();
+  });
+  it('records at exit what the voice proxy logged about loading rotkc.dll in this game process', async () => {
+    const f = await fixture();
+    const installationRoot = join(f.root, 'game');
+    await mkdir(installationRoot);
+    const launch = await f.controller.beginLaunch({ ...f.context, installationRoot });
+    launch.hooks.onSpawned(4242);
+    const at = new Date(Date.now() + 1_000).toISOString();
+    await writeFile(join(installationRoot, 'rotk-vivox-v5-compat.log'),
+      `2020-01-01T00:00:00.000Z pid=4242 tid=1 [rotk-vivoxproxy] rotkc: loaded\r\n${at} pid=4242 tid=9 [rotk-vivoxproxy] rotkc: load failed error=126\r\n`);
+    await launch.hooks.onExit(0, null);
+    const report = await f.controller.reports.getReport(launch.id);
+    expect(report.context.rotkcModule).toEqual({ status: 'load-failed', error: 126, at });
   });
 });
