@@ -261,6 +261,19 @@ static void reboot_actor(BYTE *actor) {
     reboot_original_actor(actor);
     reboot_after_actor(actor);
 }
+/* Why the last reboot_commit returned FALSE, for the refusal line: the first
+ * step that failed and the error of that call (0 for a check that is not a
+ * Windows call). A thread gate refusal is logged by the gate itself, with the
+ * attempts and the thread count, and shows up here as "thread gate".
+ */
+static const char *reboot_refused_step;
+static DWORD reboot_refused_error;
+/* Called right after the failing call, before thread_gate_thaw can replace
+ * its error. */
+static void reboot_refuse(const char *step, BOOL windows_call) {
+    DWORD error = windows_call ? GetLastError() : 0;
+    if (!reboot_refused_step) { reboot_refused_step = step; reboot_refused_error = error; }
+}
 /* Two native windows are committed while all other threads are suspended.
  * Neither window contains RIP-relative instructions in its displaced prologue.
  */
@@ -270,27 +283,47 @@ static BOOL reboot_commit(BYTE *base, const BYTE *actor_jump, const BYTE *respon
     thread_gate gate;
     DWORD p1 = 0, p2 = 0;
     BOOL ok = FALSE, writable1 = FALSE, writable2 = FALSE;
-    if (!thread_gate_freeze(&gate, "trio reboot", windows, ARRAYSIZE(windows))) return FALSE;
-    if (exact_bytes(actor, reboot_actor_guard, sizeof(reboot_actor_guard)) &&
-        exact_bytes(call, reboot_response_guard, sizeof(reboot_response_guard))) {
+    reboot_refused_step = NULL; reboot_refused_error = 0;
+    if (!thread_gate_freeze(&gate, "trio reboot", windows, ARRAYSIZE(windows))) {
+        reboot_refuse("thread gate", FALSE); return FALSE;
+    }
+    if (!exact_bytes(actor, reboot_actor_guard, sizeof(reboot_actor_guard))) {
+        reboot_refuse("actor bytes changed", FALSE);
+    } else if (!exact_bytes(call, reboot_response_guard, sizeof(reboot_response_guard))) {
+        reboot_refuse("response bytes changed", FALSE);
+    } else {
         writable1 = VirtualProtect(actor, REBOOT_ACTOR_STOLEN, PAGE_EXECUTE_READWRITE, &p1);
+        if (!writable1) reboot_refuse("actor page protection", TRUE);
         writable2 = VirtualProtect(call, REBOOT_RESPONSE_STOLEN, PAGE_EXECUTE_READWRITE, &p2);
+        if (!writable2) reboot_refuse("response page protection", TRUE);
         if (writable1 && writable2) {
             memcpy(actor, actor_jump, REBOOT_ACTOR_STOLEN); memcpy(call, response_call, REBOOT_RESPONSE_STOLEN);
             ok = FlushInstructionCache(GetCurrentProcess(), actor, REBOOT_ACTOR_STOLEN) && FlushInstructionCache(GetCurrentProcess(), call, REBOOT_RESPONSE_STOLEN);
             if (!ok) {
+                reboot_refuse("instruction cache flush", TRUE);
                 memcpy(actor, reboot_actor_guard, REBOOT_ACTOR_STOLEN);
                 memcpy(call, reboot_response_guard, REBOOT_RESPONSE_STOLEN); FlushInstructionCache(GetCurrentProcess(), NULL, 0);
             }
         }
-        if (writable1 && !restore_page_protection(actor, REBOOT_ACTOR_STOLEN, p1)) ok = FALSE;
-        if (writable2 && !restore_page_protection(call, REBOOT_RESPONSE_STOLEN, p2)) ok = FALSE;
+        if (writable1 && !restore_page_protection(actor, REBOOT_ACTOR_STOLEN, p1)) {
+            reboot_refuse("actor protection restore", TRUE); ok = FALSE;
+        }
+        if (writable2 && !restore_page_protection(call, REBOOT_RESPONSE_STOLEN, p2)) {
+            reboot_refuse("response protection restore", TRUE); ok = FALSE;
+        }
     }
     thread_gate_thaw(&gate);
     return ok;
 }
+/* The old prefix and suffix keep log searches working. */
+static void reboot_refused_line(char *line, size_t size) {
+    snprintf(line, size,
+        "ROTK trio reboot: guarded installation refused (%s, error %lu); disabled.\n",
+        reboot_refused_step ? reboot_refused_step : "unknown step",
+        (unsigned long)reboot_refused_error);
+}
 static void reboot_install(BYTE *base) {
-    BYTE *memory = NULL, actor_jump[REBOOT_ACTOR_STOLEN], call[REBOOT_RESPONSE_STOLEN]; DWORD old; SYSTEM_INFO info;
+    BYTE *memory = NULL, actor_jump[REBOOT_ACTOR_STOLEN], call[REBOOT_RESPONSE_STOLEN]; DWORD old;
     int64_t distance; int32_t relative; uintptr_t callback = (uintptr_t)reboot_response;
     const BYTE bridge[] = {
         0x48,0x83,0xec,0x20, /* JMP entry: native RSP aligned, shadow space */
@@ -309,10 +342,8 @@ static void reboot_install(BYTE *base) {
         !exact_bytes(base + 0x16d5131, reboot_match_guard, sizeof(reboot_match_guard))) {
         patch_log("ROTK trio reboot: native signature mismatch; skipped.\n"); return;
     }
-    GetSystemInfo(&info);
-    for (uintptr_t delta = 0x08000000; delta < 0x70000000 && !memory; delta += info.dwAllocationGranularity)
-        memory = VirtualAlloc(base + delta, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!memory) { patch_log("ROTK trio reboot: bridge allocation refused.\n"); return; }
+    memory = bridge_page(base);
+    if (!memory) { bridge_refused("ROTK trio reboot", base); return; }
     memcpy(memory, reboot_actor_guard, REBOOT_ACTOR_STOLEN);
     stance_jump(memory + REBOOT_ACTOR_STOLEN, base + REBOOT_ACTOR_RVA + REBOOT_ACTOR_STOLEN);
     memcpy(memory + 64, bridge, sizeof(bridge)); memcpy(memory + 83, &callback, sizeof(callback));
@@ -321,7 +352,8 @@ static void reboot_install(BYTE *base) {
     distance = (int64_t)(uintptr_t)(memory + 64) - (int64_t)(uintptr_t)(base + REBOOT_RESPONSE_RVA + 5);
     if (distance < INT32_MIN || distance > INT32_MAX ||
         !VirtualProtect(memory, 4096, PAGE_EXECUTE_READ, &old) || !FlushInstructionCache(GetCurrentProcess(), memory, 4096)) {
-        VirtualFree(memory, 0, MEM_RELEASE); return;
+        bridge_release(memory);
+        patch_log("ROTK trio reboot: bridge out of reach or protection refused; skipped.\n"); return;
     }
     reboot_base = base; reboot_original_actor = (reboot_actor_fn)(uintptr_t)memory;
     memset(actor_jump, 0x90, sizeof(actor_jump)); stance_jump(actor_jump, (void *)(uintptr_t)reboot_actor);
@@ -330,7 +362,9 @@ static void reboot_install(BYTE *base) {
     if (!reboot_commit(base, actor_jump, call)) {
         /* Keep the bridge alive if a protection-restoration error left a hook
          * installed. Disabled wrappers preserve the complete original path. */
-        patch_log("ROTK trio reboot: guarded installation refused; disabled.\n"); return;
+        char line[192];
+        reboot_refused_line(line, sizeof(line));
+        patch_log(line); return;
     }
     InterlockedExchange(&reboot_enabled, 1);
     patch_log("ROTK trio reboot: native response/alive camera restoration installed.\n");
