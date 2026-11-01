@@ -223,15 +223,12 @@ function sanitizedEnvironment(
   const environment: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(environment)) {
     const normalized = key.toLocaleUpperCase("en-US");
-    if (
-      normalized.startsWith("H1Z1_") ||
-      normalized === "STEAMID" ||
-      normalized === "STEAMAPPID" ||
-      normalized === "STEAMGAMEID"
-    ) {
+    if (normalized.startsWith("H1Z1_") || normalized === "STEAMID") {
       delete environment[key];
     }
   }
+  // Steam's app/game/overlay IDs describe the launch session, not the player.
+  // Preserve them so a Steam-launched client can use overlay and recording.
   environment.H1Z1_OVERRIDE_PERSONA = identity.displayName;
   environment.H1Z1_OVERRIDE_STEAMID = identity.steamId;
   environment.STEAMID = identity.steamId;
