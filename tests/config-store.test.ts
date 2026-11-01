@@ -151,6 +151,17 @@ describe("ConfigStore", () => {
     expect(reloaded).toEqual({ schemaVersion: 1, serverId: "test", role: "admin" });
   });
 
+  it("remembers the game and launcher fonts across restarts", async () => {
+    const directory = await temporaryDirectory();
+    const store = new ConfigStore(directory);
+    await store.setPlayerFont("inter");
+    await store.setLauncherFont("barlow");
+
+    const reloaded = await new ConfigStore(directory).load();
+
+    expect(reloaded).toEqual({ schemaVersion: 1, playerFont: "inter", launcherFont: "barlow" });
+  });
+
   it("keeps Debug opt-in and persists it independently of native crash capture", async () => {
     const directory = await temporaryDirectory();
     const store = new ConfigStore(directory);
