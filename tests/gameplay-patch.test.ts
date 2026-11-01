@@ -189,7 +189,7 @@ describe("shotgun sprint patch deployment", () => {
         value.bundledPath,
         value.policy,
       ),
-    ).rejects.toThrow(/embarquÃ© est absent ou modifiÃ©/i);
+    ).rejects.toThrow(/embarqué est absent ou modifié/i);
     await expect(readFile(value.activePath, "utf8")).resolves.toBe(value.retiredOld);
   });
 
@@ -339,7 +339,7 @@ describe("shotgun sprint patch state", () => {
         "patched",
         value.policy,
       ),
-    ).rejects.toThrow(/installÃ©/i);
+    ).rejects.toThrow(/installé/i);
 
     await gameplayPatchInternals.depatchGameplayPatchWithPolicy(value.root, value.policy);
     await expect(
