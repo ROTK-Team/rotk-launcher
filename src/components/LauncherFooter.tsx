@@ -59,6 +59,9 @@ function statusCopy(snapshot: LauncherSnapshot, copy: Copy): { label: string; de
   if (snapshot.phase === "ready" && !snapshot.playerIdentity.configured) {
     return { label: copy.footer.accountRequired, detail: copy.footer.missingAccountKey };
   }
+  if (snapshot.phase === "ready" && snapshot.assetSync.prefetch?.status === "ready") {
+    return { label: copy.footer.ready, detail: copy.footer.assetUpdateReady };
+  }
   if (snapshot.phase === "ready") return { label: copy.footer.ready, detail: snapshot.installationRoot ?? copy.footer.clientConfigured };
   return { label: copy.footer.setupRequired, detail: copy.footer.createIndependentInstall };
 }
