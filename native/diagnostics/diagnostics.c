@@ -1,5 +1,6 @@
 /* ROTK external crash collector. GPL-3.0-or-later.
  * Capture does not inject code, elevate, change registry or use the network.
+ * The passive watch also lists the images mapped in the game (module_inventory.h).
  * Separate startup commands check the inherited token or request normal UAC
  * consent to relaunch the installed launcher.
  * Only the explicit, validated target PID is opened. All DbgHelp calls are made
@@ -101,6 +102,7 @@ static void emit(const char *event, const char *format, ...) {
 static uint64_t filetime_value(FILETIME time) { return ((uint64_t)time.dwHighDateTime << 32) | time.dwLowDateTime; }
 
 #include "performance.h"
+#include "module_inventory.h"
 
 static void sample(void) {
     PROCESS_MEMORY_COUNTERS_EX memory = {0};
@@ -380,13 +382,16 @@ static BOOL validate_target(void) {
 static int watch_counters_only(void) {
     perf_emit(FALSE, "performance-status", ",\"status\":\"recording\",\"source\":\"windows-process-counters\",\"debuggerAttached\":false,\"threadCountAvailable\":false,\"reason\":\"debugger-attach-unavailable\",\"frameTimesCollected\":false,\"frameTimesStatus\":\"separate-presentmon-required\"");
     BOOL exited = FALSE;
+    inventory_begin();
     while (!stop_requested) {
         DWORD wait = WaitForSingleObject(target_process, 100);
         if (wait == WAIT_OBJECT_0) { exited = TRUE; break; }
         if (wait == WAIT_FAILED) break;
         read_commands();
         perf_tick(FALSE);
+        inventory_tick();
     }
+    inventory_end(exited ? "process-exited" : "stopped");
     if (exited) {
         DWORD code = 0; BOOL known = GetExitCodeProcess(target_process, &code);
         emit("exited", ",\"exitCode\":%lu,\"exitCodeHex\":\"0x%08lX\",\"exitCodeAvailable\":%s,\"elapsedMs\":%llu,\"fatalDumpCount\":0,\"debuggerAttached\":false",

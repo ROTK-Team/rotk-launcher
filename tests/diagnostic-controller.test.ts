@@ -248,6 +248,28 @@ describe('diagnostic controller and persisted session lifecycle', () => {
     expect((await f.controller.state()).recordingId).toBeNull();
   });
 
+  it('keeps the helper image inventory in the session report without paths', async () => {
+    const f = await fixture(), launch = await f.controller.beginLaunch(f.context);
+    launch.hooks.onSpawned(4242);
+    const emit = mocks.observers[0]!.options.onEvent;
+    emit({ event: 'module-image', scan: 1, name: 'H1Z1.exe', kind: 'game', location: 'game', late: false, depth: 0, main: true, signature: 'not-checked' });
+    emit({ event: 'module-image', scan: 2, name: 'overlay64.dll', kind: 'other', location: 'app-data', late: true, signature: 'valid', signer: 'Overlay Vendor Inc.' });
+    emit({ event: 'module-image', scan: 2, name: 'C:\\Users\\player\\AppData\\x.dll', kind: 'other', location: 'app-data', late: true, signature: 'none' });
+    emit({ event: 'module-inventory', at: '2026-10-28T09:01:10.301Z', scan: 2, complete: true, images: 3, system: 1, windows: 0, game: 1, other: 1,
+      unnamed: 0, withoutValidSignature: 0, added: 1, removed: 0, debuggerPresent: false, sameNameProcesses: 0 });
+    emit({ event: 'module-inventory-summary', reason: 'process-exited', scans: 2, failedScans: 0, addedTotal: 1, removedTotal: 0,
+      debuggerSeen: false, sameNameProcessesMax: 0, maxScanMs: 4.2, eventLimitReached: false });
+    await launch.hooks.onExit(0, null);
+    const report = await f.controller.reports.getReport(launch.id);
+    expect(report.context.moduleInventory).toMatchObject({ scans: 2, debuggerSeen: false,
+      images: [{ name: 'H1Z1.exe', kind: 'game' }, { name: 'overlay64.dll', kind: 'other', signer: 'Overlay Vendor Inc.' }],
+      final: { reason: 'process-exited' } });
+    const published = await readFile(join(f.controller.reports.getDirectory(launch.id), 'collected', 'report.json'), 'utf8');
+    expect(JSON.parse(published).context.moduleInventory.images).toHaveLength(2);
+    expect(published).not.toMatch(/Users|AppData\\/);
+    expect(report.summary.kind).toBe('exit');
+  });
+
   it('rejects overlapping manual capture/export and keeps busy until the snapshot completes', async () => {
     const f = await fixture(), launch = await f.controller.beginLaunch(f.context);
     launch.hooks.onSpawned(4242);

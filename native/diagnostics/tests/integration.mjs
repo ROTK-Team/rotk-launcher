@@ -1,6 +1,7 @@
 // Real Windows debugging API tests. Only the dedicated fixture is exercised.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,11 @@ const runRoot = path.join(root, 'native', 'diagnostics', 'dist', `integration-${
 const helperPath = path.join(runRoot, 'ROTK.Diagnostics.Test.exe');
 const fixturePath = path.join(runRoot, 'ROTK.Diagnostics.Fixture.exe');
 const boundedHelperPath = path.join(runRoot, 'ROTK.Diagnostics.Bounded.Test.exe');
+const inventoryHelperPath = path.join(runRoot, 'ROTK.Diagnostics.Inventory.Test.exe');
+// One copy beside the fixture executable (the "game" folder), one outside it.
+const gameModulePath = path.join(runRoot, 'ROTK.Diagnostics.FixtureModule.dll');
+const otherModuleDirectory = `${runRoot}-elsewhere`;
+const otherModulePath = path.join(otherModuleDirectory, 'ROTK.Diagnostics.OtherModule.dll');
 const productionHelper = path.join(root, 'resources', 'diagnostics', 'ROTK.Diagnostics.exe');
 const startupPaths = path.join(runRoot, 'startup-paths.exe');
 await mkdir(runRoot, { recursive: true });
@@ -21,7 +27,12 @@ function build(command, args) {
 }
 build('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/build-diagnostics.ps1', '-TestBuild', '-OutputPath', helperPath]);
 build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O0', '-g', '-Wall', '-Wextra', '-Werror', '-Wl,--stack,1048576', '-o', fixturePath, 'native/diagnostics/tests/fixture.c']);
-build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-s', '-Wall', '-Wextra', '-Werror', '-municode', '-DROTK_DIAGNOSTICS_TEST=1', '-DPERF_LOG_LIMIT=4096ULL', '-DPERF_MAX_DURATION=2500ULL', '-o', boundedHelperPath, 'native/diagnostics/diagnostics.c', '-ldbghelp', '-lpsapi', '-lversion', '-ladvapi32', '-lshell32']);
+const helperLibraries = ['-ldbghelp', '-lpsapi', '-lversion', '-ladvapi32', '-lshell32', '-lwintrust', '-lcrypt32', '-lbcrypt'];
+build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-s', '-Wall', '-Wextra', '-Werror', '-municode', '-DROTK_DIAGNOSTICS_TEST=1', '-DPERF_LOG_LIMIT=4096ULL', '-DPERF_MAX_DURATION=2500ULL', '-o', boundedHelperPath, 'native/diagnostics/diagnostics.c', ...helperLibraries]);
+build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-s', '-Wall', '-Wextra', '-Werror', '-municode', '-DROTK_DIAGNOSTICS_TEST=1', '-DINVENTORY_FIRST_SCAN_MS=300ULL', '-DINVENTORY_INTERVAL_MS=400ULL', '-o', inventoryHelperPath, 'native/diagnostics/diagnostics.c', ...helperLibraries]);
+build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-shared', '-O2', '-s', '-Wall', '-Wextra', '-Werror', '-o', gameModulePath, 'native/diagnostics/tests/fixture_module.c']);
+await mkdir(otherModuleDirectory, { recursive: true });
+await copyFile(gameModulePath, otherModulePath);
 
 build('zig', ['cc', '-target', 'x86_64-windows-gnu', '-O2', '-Wall', '-Wextra', '-Werror', '-o', startupPaths, 'native/diagnostics/tests/startup_paths.c', '-ladvapi32', '-lshell32']);
 test('startup derives only the fixed installed launcher path', () => { build(startupPaths, []); });
@@ -418,3 +429,97 @@ for (const debug of [false, true]) {
     assert.equal((await target.exit).code, 0);
   });
 }
+
+test('passive watch lists mapped images and reports late loads, unloads, a debugger and a second instance', async t => {
+  const target = await fixture(t);
+  const directory = path.join(runRoot, 'inventory');
+  const helper = processWithLines(inventoryHelperPath, ['--watch', '--counters-only', '--pid', String(target.child.pid), '--output', directory]);
+  t.after(() => helper.cleanup());
+  const first = await helper.wait(event => event.event === 'module-inventory' && event.scan === 1);
+  assert.equal(first.complete, true);
+  assert.ok(first.system >= 2, 'ntdll and kernel32 are system images');
+  assert.ok(first.game >= 1, 'the fixture executable sits in the watched folder');
+  assert.equal(first.added, 0);
+  assert.equal(first.debuggerPresent, false);
+  assert.ok(first.scanMs >= 0);
+  const initial = helper.lines.filter(event => event.event === 'module-image');
+  const ntdll = initial.find(event => event.name.toLowerCase() === 'ntdll.dll');
+  assert.equal(ntdll.kind, 'system');
+  assert.equal(ntdll.late, false);
+  assert.equal(Object.hasOwn(ntdll, 'signature'), false, 'Windows images are classified by location only');
+  const main = initial.find(event => event.main === true);
+  assert.deepEqual([main.name, main.kind, main.depth, main.signature], ['ROTK.Diagnostics.Fixture.exe', 'game', 0, 'not-checked']);
+  for (const event of initial) assert.doesNotMatch(event.name, /[\\/:]/, 'names only, never a folder');
+
+  target.command(`load ${gameModulePath}`);
+  await target.wait(line => line === 'loaded:1');
+  target.command(`load ${otherModulePath}`);
+  await target.wait(line => line === 'loaded:1');
+  const game = await helper.wait(event => event.event === 'module-image' && event.name === 'ROTK.Diagnostics.FixtureModule.dll');
+  assert.deepEqual([game.kind, game.location, game.depth, game.late, game.signature, game.signer], ['game', 'game', 0, true, 'none', null]);
+  assert.equal(Object.hasOwn(game, 'sha256'), false, 'game-folder files are measured before launch, not here');
+  const other = await helper.wait(event => event.event === 'module-image' && event.name === 'ROTK.Diagnostics.OtherModule.dll');
+  assert.equal(other.kind, 'other');
+  assert.equal(other.late, true);
+  assert.equal(other.signature, 'none');
+  const bytes = await readFile(otherModulePath);
+  assert.equal(other.sha256, createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(other.bytes, bytes.length);
+  // The location depends on where the checkout lives; it is a class, never a path.
+  assert.ok(['other-local', 'user-profile', 'app-data', 'program-files', 'program-data'].includes(other.location), other.location);
+  const grown = await helper.wait(event => event.event === 'module-inventory' && event.scan === other.scan);
+  assert.ok(grown.added >= 1);
+  assert.ok(grown.withoutValidSignature >= 1);
+  // File checks are queued: the scan reports first, the checked images follow from the watch loop.
+  assert.ok(grown.pendingChecks >= 1);
+  assert.ok(helper.lines.indexOf(grown) < helper.lines.indexOf(other), 'signature and hash work happens after the scan');
+
+  target.command('unload');
+  await target.wait(line => line === 'unloaded:1');
+  const unloaded = await helper.wait(event => event.event === 'module-image-unloaded' && event.name === 'ROTK.Diagnostics.OtherModule.dll');
+  assert.equal(unloaded.kind, 'other');
+
+  const second = await fixture(t);
+  const crowded = await helper.wait(event => event.event === 'module-inventory' && event.sameNameProcesses >= 1);
+  second.command('exit');
+  await second.exit;
+  await helper.wait(event => event.event === 'module-inventory' && event.scan > crowded.scan && event.sameNameProcesses < crowded.sameNameProcesses);
+
+  const { helper: debuggerHelper } = await watch(t, target, 'inventory-debugger');
+  const debugged = await helper.wait(event => event.event === 'module-inventory' && event.debuggerPresent === true);
+  debuggerHelper.command('stop');
+  await debuggerHelper.exit;
+  await helper.wait(event => event.event === 'module-inventory' && event.scan > debugged.scan && event.debuggerPresent === false);
+  target.command('ping');
+  await target.wait(line => line === 'alive:debugger=0');
+
+  target.command('exit');
+  const summary = await helper.wait(event => event.event === 'module-inventory-summary');
+  assert.equal(summary.reason, 'process-exited');
+  assert.ok(summary.scans >= 5);
+  assert.equal(summary.debuggerSeen, true);
+  assert.ok(summary.sameNameProcessesMax >= 1);
+  assert.ok(summary.addedTotal >= 2);
+  assert.ok(summary.removedTotal >= 1);
+  assert.equal(summary.eventLimitReached, false);
+  assert.equal(summary.uncheckedAtEnd, 0);
+  assert.equal((await helper.exit).code, 0);
+  assert.equal((await target.exit).code, 0);
+  const journal = (await readFile(path.join(directory, 'native-events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.ok(journal.some(event => event.event === 'module-image' && event.name === 'ROTK.Diagnostics.OtherModule.dll'));
+  assert.ok(journal.some(event => event.event === 'module-inventory-summary'));
+  console.log(`Image inventory fixture: ${summary.scans} scans, slowest ${summary.maxScanMs} ms, first scan ${first.images} images in ${first.scanMs} ms`);
+});
+
+test('passive watch stops cleanly before its first inventory scan', async t => {
+  const target = await fixture(t);
+  const helper = processWithLines(helperPath, ['--watch', '--counters-only', '--pid', String(target.child.pid), '--output', path.join(runRoot, 'inventory-early-stop')]);
+  t.after(() => helper.cleanup());
+  await helper.wait(event => event.event === 'observer-ready');
+  helper.command('stop');
+  const summary = await helper.wait(event => event.event === 'module-inventory-summary');
+  assert.deepEqual([summary.reason, summary.scans], ['stopped', 0]);
+  assert.equal(helper.lines.some(event => event.event === 'module-image'), false);
+  assert.equal((await helper.exit).code, 0);
+  target.command('exit');
+});

@@ -90,6 +90,10 @@ object has `event`, `at` (UTC ISO timestamp) and `pid`. Important events:
 | `exited` | unsigned decimal `exitCode`, `exitCodeHex`, `elapsedMs`, `fatalDumpCount` |
 | `detached` | `success`, `win32Error` |
 | `debug-error` / `command-rejected` | `reason`, optional `win32Error` |
+| `module-image` | passive watch only: `scan`, file `name` (never a folder), `kind` (`system`, `windows`, `game`, `other`), `location` class, hexadecimal `base`, `late`; `game` images add `depth` and `main` for the watched executable; `game`/`other` images add `signature` and `signer`; `other` images without a valid signature add `sha256` and `bytes` (or `hashStatus`) |
+| `module-image-unloaded` | `scan`, `name`, `kind`, hexadecimal `base` |
+| `module-inventory` | `scan`, `complete`, image counts per kind, `unnamed`, `withoutValidSignature` (queued images included), `pendingChecks`, `added`, `removed`, `debuggerPresent`, `sameNameProcesses`, `scanMs`, and `reason: "process-exited"` or `win32Error` for an incomplete scan; written for the first scan and then only when something changed |
+| `module-inventory-summary` / `module-inventory-failed` | totals when the watch ends (`reason`, `scans`, `failedScans`, `uncheckedAtEnd`, `addedTotal`, `removedTotal`, `debuggerSeen`, `sameNameProcessesMax`, `maxScanMs`, `eventLimitReached`) / `reason`, optional `win32Error` |
 
 Success returns exit code 0; malformed arguments/output returns 2; validation or
 attach failure returns 3; standalone dump failure returns 4. In Debug mode, a
@@ -99,6 +103,46 @@ for automatic fatal-dump availability. The game exit code
 is reported in the `exited` event, not used as the helper exit code. Manual
 snapshots have no fabricated fatal exception stream. All paths reported over
 stdout are basenames or `%WINDIR%` relative names, never user profile paths.
+
+## Image inventory (passive watch)
+
+The passive watch, the only mode production uses, lists the executable images
+mapped in the watched process at intervals while the game runs. It is
+report-only. It reads region information and mapped file names through the
+handle the helper already holds, reads no process memory, loads nothing into
+the game, never suspends or signals it and never decides anything. Each image
+is written once, when first seen, as a file name with a `kind` and a
+`location` class:
+
+| `kind` | Meaning |
+| --- | --- |
+| `system` | under `%WINDIR%\System32` (driver store included) or `%WINDIR%\WinSxS` |
+| `windows` | elsewhere under `%WINDIR%` |
+| `game` | in the folder of the watched executable or below it (`depth` counts subfolders) |
+| `other` | anywhere else; `location` is `temp`, `app-data`, `user-profile`, `program-files`, `program-data`, `other-local`, `removable`, `network`, `unmapped-volume` or `other` |
+
+For `game` and `other` images on a local fixed drive, the embedded Authenticode
+signature is checked with cached certificate data only and no revocation check, so
+the check never uses the network. These checks read files, so they never run
+inside a scan: new images wait in a queue (256 entries) and the watch loop works
+through it for at most about 50 ms per 100 ms pass, plus the file in progress, so
+the exit and stdin commands are still seen. Such an image's `module-image` event
+therefore follows the scan's `module-inventory` event. Images still queued when
+the watch ends are written as `not-checked` without reading their files
+(`uncheckedAtEnd`). A file signed only through a Windows catalog
+reads as `none`, and a chain that cannot be completed offline reads as
+`chain-unverified`. An `other` image without a valid signature is identified by
+its SHA-256 (files up to 64 MiB), never by its path. Unloads are only reported
+from a complete walk of a process that is still running.
+
+It is report-only on purpose: overlays, screen recorders, input tools,
+antivirus products and customization tools such as Windhawk put their own modules,
+some of them unsigned, into games or into every process, so `other` images are
+expected on most PCs and mean nothing by themselves. It gives context to crash
+and stutter reports. Per-image events stop after 768 per session and at most 1,024
+images are tracked; the counts keep going. In the local fixture a scan
+(region walk and names) of about 30 images takes a few milliseconds; the queued
+checks come on top, spread over the following passes.
 
 ## Optional Debug process counters
 
@@ -206,8 +250,9 @@ CPU and below 100 ms maximum sampler work on that synthetic run.
 ## Evidence and limits
 
 * `DebugActiveProcess` attaches only to the supplied, validated `H1Z1.exe` PID. No
-  `SeDebugPrivilege`, elevation, process enumeration, DLL injection, system crash
-  registry settings or networking is used.
+  `SeDebugPrivilege`, elevation, DLL injection, system crash registry settings or
+  networking is used. The passive watch lists process names only to count other
+  processes with the game's executable name; no other process is opened.
 * Immediately after attach, the same thread calls
   `DebugSetProcessKillOnExit(FALSE)`. An unsuccessful safety call aborts attach.
   Stopping or killing the helper leaves the game running. Debugging can still

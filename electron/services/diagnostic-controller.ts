@@ -6,6 +6,7 @@ import type { DiagnosticCaptureRequest, DiagnosticState } from "../../shared/dia
 import type { DebugReportFailureReason, DebugSessionSummary } from "../../shared/contracts.js";
 import type { GameLaunchDiagnostics } from "./game-launcher.js";
 import { DiagnosticObserver } from "./diagnostic-observer.js";
+import { ModuleInventoryCollector } from "./diagnostic-module-inventory.js";
 import { DiagnosticReportService, type DiagnosticSessionContext } from "./diagnostic-reports.js";
 import { collectDiagnosticSystemInfo, collectGameWindowsEvents } from "./diagnostic-system.js";
 import { DiagnosticFrameTimes } from "./diagnostic-frame-times.js";
@@ -203,8 +204,13 @@ export class DiagnosticController {
             }).catch(() => undefined);
           }
           if (!captureEnabled) return;
+          const inventory = new ModuleInventoryCollector();
           active.observer = new DiagnosticObserver({ executable: this.options.helperPath, pid, directory: created.directory, debug,
             onEvent: (event) => {
+              // Report-only: the image list is kept for support and never acts on the game.
+              if (inventory.accept(event)) {
+                void this.reports.updateSession(active.id, { moduleInventory: inventory.snapshot() }).catch(() => undefined);
+              }
               if (event.event === "attached" || event.event === "attach-failed") {
                 void this.reports.appendEvent(active.id, "native_observer_status", event).catch(() => undefined);
                 void this.reports.updateSession(active.id, { captureStatus: event.event === "attached" ? "attached" : "unavailable",
