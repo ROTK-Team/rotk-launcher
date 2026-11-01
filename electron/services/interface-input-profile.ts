@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { retryFs } from "./fs-safe.js";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { atomicWriteFile } from "./fs-safe.js";
 import { join } from "node:path";
 
 const ACTIONS = new Set(["OpenMap", "ToggleInventory"]);
@@ -155,12 +155,6 @@ async function optionalRead(path: string): Promise<string | null> {
   }
 }
 
-async function atomicWrite(path: string, contents: string): Promise<void> {
-  const temporary = `${path}.rotk-tmp-${process.pid}`;
-  try { await writeFile(temporary, contents, "utf8"); await retryFs(() => rename(temporary, path)); }
-  finally { await rm(temporary, { force: true }); }
-}
-
 function readManagedTriggers(saved: string | null): ManagedTriggers {
   if (saved === null) return {};
   try {
@@ -189,7 +183,7 @@ export async function prepareInterfaceInputProfile(root: string, stateRoot: stri
     await copyFile(profilePath, join(stateRoot, "InputProfile_User.before-shift.xml"), constants.COPYFILE_EXCL)
       .catch((error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
   }
-  if (result.text !== source) await atomicWrite(profilePath, result.text);
+  if (result.text !== source) await atomicWriteFile(profilePath, result.text);
   const state = JSON.stringify(result.managed, null, 2) + "\n";
-  if (state !== saved) await atomicWrite(statePath, state);
+  if (state !== saved) await atomicWriteFile(statePath, state);
 }
