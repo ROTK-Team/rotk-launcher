@@ -108,7 +108,7 @@ describe('diagnostic controller and persisted session lifecycle', () => {
     expect(report.context.clientContext).toMatchObject({ assets: { syncEnabled: false } });
     expect(report.context.debugSessionEnabled).toBe(true);
     expect(mocks.frameStops).toHaveBeenCalledOnce();
-    expect(f.controller.debugState()).toMatchObject({ enabled: true, status: 'ready', error: null });
+    expect(f.controller.debugState()).toMatchObject({ enabled: false, status: 'ready', error: null });
     expect(f.onDebugReport).toHaveBeenCalledOnce();
     const path = f.onDebugReport.mock.calls[0]![0];
     expect(path).toMatch(/ROTK-session-.*\.zip$/);

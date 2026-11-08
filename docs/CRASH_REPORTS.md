@@ -24,9 +24,10 @@ manuelle de crash n’est proposé.
 
 Le nom est `ROTK-session-DATE-ID8-unique.zip` : la date, un identifiant abrégé et
 un suffixe unique distinguent les exports. Le fichier reste dans le dossier
-Téléchargements configuré sur ce PC. La case est désactivée par défaut,
-mémorisée pour les prochaines parties et verrouillée pendant la session. Décoche-la
-après tes essais si tu ne souhaites plus enregistrer les parties suivantes.
+Téléchargements configuré sur ce PC. La case est désactivée par défaut et
+verrouillée pendant la session. Elle vaut pour une partie : elle se décoche toute
+seule une fois le rapport prêt (ou envoyé). Recoche-la pour enregistrer une autre
+partie. Si le rapport échoue, elle reste cochée pour que le redémarrage le retente.
 Il s'agit d'un enregistrement technique, sans vidéo, microphone ou saisie clavier.
 La fenêtre du launcher peut être fermée : son processus reste actif pendant le jeu
 et jusqu'à la fin de la préparation. Si Windows ou le launcher s'arrête brutalement,

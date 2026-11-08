@@ -65,12 +65,15 @@ it('old Debug recordings have no upload consent and are never sent automatically
 });
 it('new opted-in sessions upload on exit and preserve a remote receipt', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rotk-upload-controller-')); roots.push(root);
-  const remoteId = randomUUID(), upload = vi.fn(async () => remoteId);
-  const controller = new DiagnosticController({ directory: join(root, 'reports'), helperPath: 'unavailable.exe', knownSecrets: () => [], onChange: () => {}, uploadSession: upload });
+  const remoteId = randomUUID(), upload = vi.fn(async () => remoteId), onDebugSent = vi.fn();
+  const controller = new DiagnosticController({ directory: join(root, 'reports'), helperPath: 'unavailable.exe', knownSecrets: () => [], onChange: () => {}, uploadSession: upload, onDebugSent });
   await controller.initialize(false, true);
   const launch = await controller.beginLaunch({ launcherVersion: '2.0.8', serverLabel: 'Test' });
   await launch.hooks.onExit(0, null);
   expect(upload).toHaveBeenCalledOnce(); expect(controller.debugState().fileName).toBe(remoteId);
+  // One report per opt-in: the next game is not recorded unless Debug is ticked again.
+  expect(controller.debugState()).toMatchObject({ enabled: false, status: 'ready' });
+  expect(onDebugSent).toHaveBeenCalledOnce();
 });
 it('an interrupted opted-in session is collected and uploaded on restart', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rotk-upload-interrupted-')); roots.push(root);
@@ -93,13 +96,15 @@ it('an interrupted opted-in session is collected and uploaded on restart', async
 }, 20_000); // A real collection and upload preparation can exceed 5s on Windows CI.
 it('keeps why a report was not sent after exit and after the start-up retry', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rotk-upload-failure-')); roots.push(root);
-  const directory = join(root, 'reports'), onDebugFailure = vi.fn(), refused = new Error('Diagnostic upload refused (413)');
-  const controller = new DiagnosticController({ directory, helperPath: 'unavailable.exe', knownSecrets: () => [], onChange: () => {}, onDebugFailure,
+  const directory = join(root, 'reports'), onDebugFailure = vi.fn(), onDebugSent = vi.fn(), refused = new Error('Diagnostic upload refused (413)');
+  const controller = new DiagnosticController({ directory, helperPath: 'unavailable.exe', knownSecrets: () => [], onChange: () => {}, onDebugFailure, onDebugSent,
     uploadSession: async () => { throw refused; } });
   await controller.initialize(false, true);
   const launch = await controller.beginLaunch({ launcherVersion: '2.0.38', serverLabel: 'Test' });
   await launch.hooks.onExit(0, null);
-  expect(controller.debugState()).toMatchObject({ status: 'error', failure: { reason: 'rejected', httpStatus: 413 } });
+  expect(controller.debugState()).toMatchObject({ enabled: true, status: 'error', failure: { reason: 'rejected', httpStatus: 413 } });
+  // Debug stays on so the next launcher start retries the report.
+  expect(onDebugSent).not.toHaveBeenCalled();
   expect(onDebugFailure).toHaveBeenCalledWith('debug-export-failed', 'rejected', refused);
   const restarted = new DiagnosticController({ directory, helperPath: 'unavailable.exe', knownSecrets: () => [], onChange: () => {}, onDebugFailure,
     uploadSession: async () => { throw new Error('Diagnostic upload timeout'); } });
