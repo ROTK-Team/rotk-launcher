@@ -35,7 +35,6 @@
 
 typedef enum crouch_mode {
     CROUCH_MODE_DISABLED = 0,
-    CROUCH_MODE_TELEMETRY = 1,
     CROUCH_MODE_PATCH_V1 = 2,
     CROUCH_MODE_PATCH_V2 = 3
 } crouch_mode;
@@ -66,8 +65,6 @@ static SRWLOCK g_crouch_state_lock = SRWLOCK_INIT;
 static crouch_transition_state
     g_crouch_states[CROUCH_STATE_CAPACITY];
 static size_t g_crouch_state_hints[512U];
-
-static size_t crouch_scan_node_defs(void);
 
 static BOOL crouch_sibling_path(const WCHAR *name,
                                 WCHAR *path,
@@ -170,18 +167,6 @@ static BOOL crouch_page_is_readable(DWORD protect) {
            (protect & readable) != 0U;
 }
 
-static BOOL crouch_page_is_writable(DWORD protect) {
-    const DWORD writable =
-        PAGE_READWRITE |
-        PAGE_WRITECOPY |
-        PAGE_EXECUTE_READWRITE |
-        PAGE_EXECUTE_WRITECOPY;
-
-    return (protect & PAGE_GUARD) == 0U &&
-           (protect & PAGE_NOACCESS) == 0U &&
-           (protect & writable) != 0U;
-}
-
 static crouch_mode crouch_read_mode(void) {
     WCHAR marker[32768];
     char contents[1024];
@@ -225,9 +210,6 @@ static crouch_mode crouch_read_mode(void) {
         g_crouch_enable_camera =
             strstr(contents, "cameraScalePitch=direct") != NULL;
         return CROUCH_MODE_PATCH_V1;
-    }
-    if (strstr(contents, "mode=telemetry") != NULL) {
-        return CROUCH_MODE_TELEMETRY;
     }
     return CROUCH_MODE_DISABLED;
 }
@@ -361,19 +343,15 @@ static BOOL crouch_prepare_trampoline(const void *target,
     return TRUE;
 }
 
+/* The hook runs on the game's animation thread: read the live graph directly. */
 static BOOL crouch_read_exact(const void *address,
                               void *destination,
                               size_t length) {
-    SIZE_T copied = 0U;
-
-    return address != NULL && destination != NULL && length != 0U &&
-           ReadProcessMemory(
-               GetCurrentProcess(),
-               address,
-               destination,
-               length,
-               &copied) &&
-           copied == length;
+    if (address == NULL || destination == NULL || length == 0U) {
+        return FALSE;
+    }
+    memcpy(destination, address, length);
+    return TRUE;
 }
 
 /*
@@ -388,52 +366,33 @@ static BOOL crouch_read_exact(const void *address,
  * Reading this binary CP avoids treating out-of-order worker results from the
  * mobile Blend2 as fresh crouch commands. Node 20 is State_Crouching and
  * node 45 is Vehicle in the pinned BR1315 graph. Vehicle is zero on foot.
- *
- * The network is the live graph the engine is evaluating and passes on to the
- * original function, so its node-bin pointer is read directly. Every pointer
- * found from there is still read through ReadProcessMemory, which fails
- * instead of faulting. Both pin entries come from one read of the node-bin
- * span between the two control nodes.
  */
-#define CROUCH_PIN_SPAN_OFFSET \
-    (0x10U + (uintptr_t)CROUCH_CONTROL_NODE_ID * 0x28U)
-#define CROUCH_PIN_SPAN_VEHICLE \
-    ((uintptr_t)(CROUCH_VEHICLE_NODE_ID - CROUCH_CONTROL_NODE_ID) * 0x28U)
-
-typedef struct crouch_control_identity {
-    uintptr_t node_bins;
-    uintptr_t control_pins;
-    uintptr_t vehicle_pins;
-} crouch_control_identity;
-
-static BOOL crouch_read_identity(void *network,
-                                 crouch_control_identity *identity) {
-    uint8_t span[CROUCH_PIN_SPAN_VEHICLE + sizeof(uintptr_t)];
-
-    memcpy(&identity->node_bins,
-           (const uint8_t *)network + 0x08U,
-           sizeof(identity->node_bins));
-    if (identity->node_bins == 0U ||
-        !crouch_read_exact(
-            (const void *)(identity->node_bins + CROUCH_PIN_SPAN_OFFSET),
-            span,
-            sizeof(span))) {
-        return FALSE;
-    }
-    memcpy(&identity->control_pins, span, sizeof(uintptr_t));
-    memcpy(&identity->vehicle_pins,
-           span + CROUCH_PIN_SPAN_VEHICLE,
-           sizeof(uintptr_t));
-    return identity->control_pins != 0U && identity->vehicle_pins != 0U;
-}
-
-static BOOL crouch_read_float_control(uintptr_t pin_entries,
+static BOOL crouch_read_float_control(void *network,
+                                      uint16_t node_id,
                                       float maximum,
-                                      float *value) {
+                                      float *value,
+                                      uintptr_t *generation,
+                                      uintptr_t *control_generation) {
+    uintptr_t node_bins = 0U;
+    uintptr_t confirmed_node_bins = 0U;
+    uintptr_t pin_entries = 0U;
+    uintptr_t confirmed_pin_entries = 0U;
     uintptr_t attrib = 0U;
     float control = 0.0f;
+    const uintptr_t pin_offset =
+        0x10U + (uintptr_t)node_id * 0x28U;
 
     if (!crouch_read_exact(
+            (const uint8_t *)network + 0x08U,
+            &node_bins,
+            sizeof(node_bins)) ||
+        node_bins == 0U ||
+        !crouch_read_exact(
+            (const void *)(node_bins + pin_offset),
+            &pin_entries,
+            sizeof(pin_entries)) ||
+        pin_entries == 0U ||
+        !crouch_read_exact(
             (const void *)pin_entries,
             &attrib,
             sizeof(attrib)) ||
@@ -442,23 +401,45 @@ static BOOL crouch_read_float_control(uintptr_t pin_entries,
             (const void *)(attrib + 0x10U),
             &control,
             sizeof(control)) ||
-        !(control >= 0.0f && control <= maximum)) {
+        !(control >= 0.0f && control <= maximum) ||
+        !crouch_read_exact(
+            (const uint8_t *)network + 0x08U,
+            &confirmed_node_bins,
+            sizeof(confirmed_node_bins)) ||
+        confirmed_node_bins != node_bins ||
+        !crouch_read_exact(
+            (const void *)(confirmed_node_bins + pin_offset),
+            &confirmed_pin_entries,
+            sizeof(confirmed_pin_entries)) ||
+        confirmed_pin_entries != pin_entries) {
         return FALSE;
     }
     *value = control;
+    *generation = node_bins;
+    *control_generation = pin_entries;
     return TRUE;
 }
 
-/* Under the state lock: the graph must not have been rebuilt since the reads. */
 static BOOL crouch_validate_state_identity(
     void *network,
-    const crouch_control_identity *identity) {
-    crouch_control_identity confirmed;
+    uint16_t node_id,
+    uintptr_t generation,
+    uintptr_t control_generation) {
+    uintptr_t confirmed_generation = 0U;
+    uintptr_t confirmed_control_generation = 0U;
+    const uintptr_t pin_offset =
+        0x10U + (uintptr_t)node_id * 0x28U;
 
-    return crouch_read_identity(network, &confirmed) &&
-        confirmed.node_bins == identity->node_bins &&
-        confirmed.control_pins == identity->control_pins &&
-        confirmed.vehicle_pins == identity->vehicle_pins;
+    return crouch_read_exact(
+               (const uint8_t *)network + 0x08U,
+               &confirmed_generation,
+               sizeof(confirmed_generation)) &&
+        confirmed_generation == generation &&
+        crouch_read_exact(
+            (const void *)(confirmed_generation + pin_offset),
+            &confirmed_control_generation,
+            sizeof(confirmed_control_generation)) &&
+        confirmed_control_generation == control_generation;
 }
 
 static float crouch_current_transition_value(
@@ -524,9 +505,10 @@ static uint16_t crouch_blend_weight_hook(
     BOOL log_started = FALSE;
     BOOL log_completed = FALSE;
     LARGE_INTEGER now;
-    crouch_control_identity identity;
-    uintptr_t network_generation;
-    uintptr_t control_generation;
+    uintptr_t network_generation = 0U;
+    uintptr_t control_generation = 0U;
+    uintptr_t vehicle_network_generation = 0U;
+    uintptr_t vehicle_control_generation = 0U;
     int64_t stale_after_ticks;
     crouch_transition_state *state;
     crouch_state_cache_lookup cache_lookup;
@@ -581,9 +563,21 @@ static uint16_t crouch_blend_weight_hook(
             is_additive);
     }
     call_sequence = InterlockedIncrement64(&g_crouch_blend_call_count);
-    if (!crouch_read_identity(network, &identity) ||
-        !crouch_read_float_control(identity.control_pins, 1.0f, &control) ||
-        !crouch_read_float_control(identity.vehicle_pins, 256.0f, &vehicle)) {
+    if (!crouch_read_float_control(
+            network,
+            CROUCH_CONTROL_NODE_ID,
+            1.0f,
+            &control,
+            &network_generation,
+            &control_generation) ||
+        !crouch_read_float_control(
+            network,
+            CROUCH_VEHICLE_NODE_ID,
+            256.0f,
+            &vehicle,
+            &vehicle_network_generation,
+            &vehicle_control_generation) ||
+        vehicle_network_generation != network_generation) {
         return original(
             attrib_blend_weights,
             node_child_weights,
@@ -596,10 +590,17 @@ static uint16_t crouch_blend_weight_hook(
             sync_events_weight,
             is_additive);
     }
-    network_generation = identity.node_bins;
-    control_generation = identity.control_pins;
     AcquireSRWLockExclusive(&g_crouch_state_lock);
-    if (!crouch_validate_state_identity(network, &identity)) {
+    if (!crouch_validate_state_identity(
+            network,
+            CROUCH_CONTROL_NODE_ID,
+            network_generation,
+            control_generation) ||
+        !crouch_validate_state_identity(
+            network,
+            CROUCH_VEHICLE_NODE_ID,
+            network_generation,
+            vehicle_control_generation)) {
         ReleaseSRWLockExclusive(&g_crouch_state_lock);
         return original(
             attrib_blend_weights,
@@ -935,7 +936,6 @@ static int crouch_install_runtime_patch(void) {
 
 static DWORD WINAPI crouch_patch_worker(LPVOID parameter) {
     unsigned int attempt;
-    BOOL node_ready = FALSE;
 
     (void)parameter;
     crouch_log("[crouch-parity] patch-v2 ADS-safe v12 worker started");
@@ -943,24 +943,8 @@ static DWORD WINAPI crouch_patch_worker(LPVOID parameter) {
         return 0U;
     }
     for (attempt = 0U; attempt < 240U; ++attempt) {
-        if (!node_ready) {
-            size_t candidates = crouch_scan_node_defs();
-            if (candidates == 0U) {
-                Sleep(250U);
-                continue;
-            }
-            node_ready = TRUE;
-            crouch_log(
-                "[crouch-parity] NodeDef10151 ready candidates=%llu "
-                "attempt=%u",
-                (unsigned long long)candidates,
-                attempt + 1U);
-        }
         int installed = crouch_install_runtime_patch();
-        if (installed > 0) {
-            return 0U;
-        }
-        if (installed < 0) {
+        if (installed != 0) {
             return 0U;
         }
         Sleep(100U);
@@ -970,190 +954,8 @@ static DWORD WINAPI crouch_patch_worker(LPVOID parameter) {
     return 0U;
 }
 
-static size_t crouch_scan_node_defs(void) {
-    /*
-     * Exact first 32 bytes of BR1315 v26 NodeDef 10151, the idle
-     * StandOrCrouch Blend2 that consumes SmoothFloat node 10154. Relocation
-     * starts at +0x20, so this header remains stable after asset loading.
-     *
-     * This scanner is telemetry-only while the marker selects telemetry. It
-     * lets the next patch target the Blend2 connection/weight path actually
-     * consumed by the pose graph instead of mutating SmoothFloat's cached
-     * AttribData after evaluation.
-     */
-    static const uint8_t node_header[32] = {
-        0x6b, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00,
-        0xa7, 0x27, 0xbc, 0x27, 0x02, 0x00, 0x02, 0x00,
-        0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xcd, 0xcd
-    };
-    SYSTEM_INFO info;
-    uintptr_t cursor;
-    uintptr_t maximum;
-    size_t candidate_count = 0U;
-    const size_t chunk_bytes = 256U * 1024U;
-    const size_t probe_bytes = sizeof(node_header) + 0xb0U;
-    uint8_t *buffer = (uint8_t *)VirtualAlloc(
-        NULL,
-        chunk_bytes + probe_bytes,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE);
-
-    if (buffer == NULL) {
-        crouch_log(
-            "[crouch-parity] scanner buffer allocation failed error=%lu",
-            (unsigned long)GetLastError());
-        return 0U;
-    }
-
-    GetSystemInfo(&info);
-    cursor = (uintptr_t)info.lpMinimumApplicationAddress;
-    maximum = (uintptr_t)info.lpMaximumApplicationAddress;
-    while (cursor < maximum) {
-        MEMORY_BASIC_INFORMATION region;
-        SIZE_T queried = VirtualQuery(
-            (const void *)cursor, &region, sizeof(region));
-        uintptr_t base;
-        size_t size;
-        size_t region_offset;
-
-        if (queried != sizeof(region)) {
-            break;
-        }
-        base = (uintptr_t)region.BaseAddress;
-        size = (size_t)region.RegionSize;
-        if (size == 0U || base > UINTPTR_MAX - size) {
-            break;
-        }
-        if (region.State != MEM_COMMIT ||
-            region.Type != MEM_PRIVATE ||
-            !crouch_page_is_writable(region.Protect) ||
-            size < sizeof(node_header) + 0xb0U) {
-            cursor = base + size;
-            continue;
-        }
-        for (region_offset = 0U; region_offset < size;) {
-            size_t primary_bytes = size - region_offset;
-            size_t trailing_bytes;
-            size_t requested_bytes;
-            SIZE_T copied_bytes = 0U;
-
-            if (primary_bytes > chunk_bytes) {
-                primary_bytes = chunk_bytes;
-            }
-            trailing_bytes = size - region_offset - primary_bytes;
-            if (trailing_bytes > probe_bytes - 1U) {
-                trailing_bytes = probe_bytes - 1U;
-            }
-            requested_bytes = primary_bytes + trailing_bytes;
-            if (ReadProcessMemory(
-                    GetCurrentProcess(),
-                    (const void *)(base + region_offset),
-                    buffer,
-                    requested_bytes,
-                    &copied_bytes)) {
-                const uint8_t *scan = buffer;
-                size_t searchable = primary_bytes;
-
-                if (searchable > (size_t)copied_bytes) {
-                    searchable = (size_t)copied_bytes;
-                }
-                while (searchable != 0U) {
-                    const uint8_t *found = (const uint8_t *)memchr(
-                        scan, node_header[0], searchable);
-                    size_t consumed;
-                    size_t found_offset;
-
-                    if (found == NULL) {
-                        break;
-                    }
-                    consumed = (size_t)(found - scan);
-                    found_offset = (size_t)(found - buffer);
-                    if ((size_t)copied_bytes - found_offset >= probe_bytes &&
-                        memcmp(
-                            found,
-                            node_header,
-                            sizeof(node_header)) == 0) {
-                        uint64_t qwords[18];
-                        size_t index;
-                        char values[1024];
-                        size_t used = 0U;
-
-                        for (index = 0U; index < 18U; ++index) {
-                            memcpy(
-                                &qwords[index],
-                                found + 0x20U +
-                                    index * sizeof(uint64_t),
-                                sizeof(uint64_t));
-                        }
-                        values[0] = '\0';
-                        for (index = 0U;
-                             index < 18U && used < sizeof(values);
-                             ++index) {
-                            int appended = snprintf(
-                                values + used,
-                                sizeof(values) - used,
-                                "%s%02x=%016llx",
-                                index == 0U ? "" : " ",
-                                (unsigned int)(0x20U + index * 8U),
-                                (unsigned long long)qwords[index]);
-                            if (appended <= 0 ||
-                                (size_t)appended >=
-                                    sizeof(values) - used) {
-                                break;
-                            }
-                            used += (size_t)appended;
-                        }
-                        ++candidate_count;
-                        crouch_log(
-                            "[crouch-parity] NodeDef10151 candidate=%p "
-                            "regionType=0x%lx protect=0x%lx %s",
-                            (const void *)(
-                                base + region_offset + found_offset),
-                            (unsigned long)region.Type,
-                            (unsigned long)region.Protect,
-                            values);
-                    }
-                    scan = found + 1;
-                    searchable -= consumed + 1U;
-                }
-            }
-            region_offset += primary_bytes;
-        }
-        cursor = base + size;
-    }
-    VirtualFree(buffer, 0U, MEM_RELEASE);
-    return candidate_count;
-}
-
-static DWORD WINAPI crouch_probe_worker(LPVOID parameter) {
-    unsigned int attempt;
-
-    (void)parameter;
-    crouch_log(
-        "[crouch-parity] telemetry worker started nodeType=%u "
-        "moveNodeId=%u idleNodeId=%u",
-        (unsigned int)CROUCH_NODE_TYPE,
-        (unsigned int)CROUCH_MOVE_NODE_ID,
-        (unsigned int)CROUCH_IDLE_NODE_ID);
-    for (attempt = 0U; attempt < 240U; ++attempt) {
-        size_t candidates = crouch_scan_node_defs();
-        if (candidates != 0U) {
-            crouch_log(
-                "[crouch-parity] telemetry complete candidates=%llu attempt=%u",
-                (unsigned long long)candidates,
-                attempt + 1U);
-            return 0U;
-        }
-        Sleep(250U);
-    }
-    crouch_log("[crouch-parity] telemetry timeout: NodeDef10151 not found");
-    return 0U;
-}
-
 static void crouch_parity_start(void) {
     crouch_mode mode;
-    LPTHREAD_START_ROUTINE worker_entry;
     HANDLE worker;
 
     if (InterlockedCompareExchange(
@@ -1164,11 +966,7 @@ static void crouch_parity_start(void) {
     if (mode == CROUCH_MODE_DISABLED) {
         return;
     }
-    worker_entry = (mode == CROUCH_MODE_PATCH_V1 ||
-                    mode == CROUCH_MODE_PATCH_V2)
-        ? crouch_patch_worker
-        : crouch_probe_worker;
-    worker = CreateThread(NULL, 0U, worker_entry, NULL, 0U, NULL);
+    worker = CreateThread(NULL, 0U, crouch_patch_worker, NULL, 0U, NULL);
     if (worker == NULL) {
         crouch_log(
             "[crouch-parity] CreateThread failed error=%lu",

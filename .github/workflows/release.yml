@@ -140,7 +140,7 @@ jobs:
           npm run build:vivox
           if ($LASTEXITCODE -ne 0) { throw "Vivox release input validation failed." }
           $proxyHash = (Get-FileHash -LiteralPath "resources\patches\vivoxsdk_x64.dll" -Algorithm SHA256).Hash
-          if ($proxyHash -ne "63FAA2048BB70473018391621A1CFA2EE0C1976AF12B4DF8E1F59F7A398B1E2D") {
+          if ($proxyHash -ne "8FC7715F677A0B53F185F0746317D4EFAF76DEEA584EBC6B124627983D8EE2BB") {
             throw "Unexpected Vivox proxy SHA-256: $proxyHash"
           }
           npm run prepare:gameplay-patch
@@ -199,7 +199,7 @@ jobs:
             Where-Object { $_.Name -eq "vivoxsdk_x64.dll" } |
             Select-Object -First 1
           $proxyHash = (Get-FileHash -LiteralPath $vivoxProxy.FullName -Algorithm SHA256).Hash
-          if ($proxyHash -ne "63FAA2048BB70473018391621A1CFA2EE0C1976AF12B4DF8E1F59F7A398B1E2D") {
+          if ($proxyHash -ne "8FC7715F677A0B53F185F0746317D4EFAF76DEEA584EBC6B124627983D8EE2BB") {
             throw "Unexpected packaged Vivox proxy SHA-256: $proxyHash"
           }
 

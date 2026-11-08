@@ -4,13 +4,13 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 // Bundled voice reliability and pickup crouch proxy, pinned byte for byte.
-const expected = "63faa2048bb70473018391621a1cfa2ee0c1976af12b4df8e1f59f7a398b1e2d";
+const expected = "8fc7715f677a0b53f185f0746317d4efaf76deea584ebc6b124627983d8ee2bb";
 const proxyPath = resolve(process.argv[2] ?? "resources/patches/vivoxsdk_x64.dll");
 const [binary, sidecar] = await Promise.all([
   readFile(proxyPath),
   readFile(`${proxyPath}.sha256`, "utf8"),
 ]);
-assert.equal(binary.length, 91648, "Unexpected Vivox proxy size");
+assert.equal(binary.length, 89088, "Unexpected Vivox proxy size");
 assert.equal(createHash("sha256").update(binary).digest("hex"), expected,
   "The supplied Vivox release proxy has changed");
 assert.equal(sidecar.trim().split(/\s+/u)[0], expected,
