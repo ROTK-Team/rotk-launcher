@@ -19,14 +19,28 @@ describe("stance binding migration and rollback", () => {
       expect(restored).toContain('<Trigger>M</Trigger>');
     } finally { await rm(root, { recursive: true, force: true }); }
   });
-  it("refuses corrupt ownership without overwriting the player's profile", async () => {
+  it("ignores invalid ownership without touching the player's bindings", async () => {
     const root = await mkdtemp(join(tmpdir(), "rotk-stance-state-"));
     const state = join(root, "state");
     try {
       await mkdir(state); await writeFile(join(root, "InputProfile_User.xml"), source);
-      await writeFile(join(state, "weapon-stance.v1.json"), JSON.stringify({ added: ["OpenMap"], removedNetworkN: true }));
-      await expect(prepareWeaponStanceProfile(root, state, false)).rejects.toThrow("invalide");
+      const invalid = JSON.stringify({ added: ["OpenMap"], removedNetworkN: true });
+      await writeFile(join(state, "weapon-stance.v1.json"), invalid);
+      await prepareWeaponStanceProfile(root, state, false);
       expect(await readFile(join(root, "InputProfile_User.xml"), "utf8")).toBe(source);
+      expect(await readFile(join(state, "weapon-stance.v1.json.corrupt"), "utf8")).toBe(invalid);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it.each(["", "{\"added\":[\"Toggle", "null"])("recovers from an unreadable ownership file (%j)", async broken => {
+    const root = await mkdtemp(join(tmpdir(), "rotk-stance-state-"));
+    const state = join(root, "state");
+    try {
+      await mkdir(state); await writeFile(join(root, "InputProfile_User.xml"), source);
+      await writeFile(join(state, "weapon-stance.v1.json"), broken);
+      await prepareWeaponStanceProfile(root, state, true);
+      expect(await readFile(join(root, "InputProfile_User.xml"), "utf8")).toContain('<Action name="ToggleWeaponStance" version="1"><Trigger>V</Trigger></Action>');
+      expect(JSON.parse(await readFile(join(state, "weapon-stance.v1.json"), "utf8"))).toEqual({ added: ["ToggleWeaponStance"], removedNetworkN: false });
+      expect(await readFile(join(state, "weapon-stance.v1.json.corrupt"), "utf8")).toBe(broken);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("keeps the stock console and unrelated bindings intact", () => {
