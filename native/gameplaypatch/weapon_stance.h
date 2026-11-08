@@ -15,9 +15,11 @@ static BOOL stance_initialized, stance_pressed;
 static BYTE *stance_rule_cache, *stance_rule_node, *stance_rule_value;
 static unsigned long stance_toggles;
 
+/* Hooks run on the game thread: read game memory directly. */
 static BOOL stance_read(const void *p, void *out, SIZE_T size) {
-    SIZE_T done = 0;
-    return p != NULL && ReadProcessMemory(GetCurrentProcess(), p, out, size, &done) && done == size;
+    if (p == NULL) return FALSE;
+    memcpy(out, p, size);
+    return TRUE;
 }
 static uintptr_t stance_ptr(const void *p) {
     uintptr_t n = 0; (void)stance_read(p, &n, sizeof(n)); return n;
