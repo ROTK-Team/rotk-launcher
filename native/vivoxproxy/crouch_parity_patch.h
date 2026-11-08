@@ -388,33 +388,52 @@ static BOOL crouch_read_exact(const void *address,
  * Reading this binary CP avoids treating out-of-order worker results from the
  * mobile Blend2 as fresh crouch commands. Node 20 is State_Crouching and
  * node 45 is Vehicle in the pinned BR1315 graph. Vehicle is zero on foot.
+ *
+ * The network is the live graph the engine is evaluating and passes on to the
+ * original function, so its node-bin pointer is read directly. Every pointer
+ * found from there is still read through ReadProcessMemory, which fails
+ * instead of faulting. Both pin entries come from one read of the node-bin
+ * span between the two control nodes.
  */
-static BOOL crouch_read_float_control(void *network,
-                                      uint16_t node_id,
+#define CROUCH_PIN_SPAN_OFFSET \
+    (0x10U + (uintptr_t)CROUCH_CONTROL_NODE_ID * 0x28U)
+#define CROUCH_PIN_SPAN_VEHICLE \
+    ((uintptr_t)(CROUCH_VEHICLE_NODE_ID - CROUCH_CONTROL_NODE_ID) * 0x28U)
+
+typedef struct crouch_control_identity {
+    uintptr_t node_bins;
+    uintptr_t control_pins;
+    uintptr_t vehicle_pins;
+} crouch_control_identity;
+
+static BOOL crouch_read_identity(void *network,
+                                 crouch_control_identity *identity) {
+    uint8_t span[CROUCH_PIN_SPAN_VEHICLE + sizeof(uintptr_t)];
+
+    memcpy(&identity->node_bins,
+           (const uint8_t *)network + 0x08U,
+           sizeof(identity->node_bins));
+    if (identity->node_bins == 0U ||
+        !crouch_read_exact(
+            (const void *)(identity->node_bins + CROUCH_PIN_SPAN_OFFSET),
+            span,
+            sizeof(span))) {
+        return FALSE;
+    }
+    memcpy(&identity->control_pins, span, sizeof(uintptr_t));
+    memcpy(&identity->vehicle_pins,
+           span + CROUCH_PIN_SPAN_VEHICLE,
+           sizeof(uintptr_t));
+    return identity->control_pins != 0U && identity->vehicle_pins != 0U;
+}
+
+static BOOL crouch_read_float_control(uintptr_t pin_entries,
                                       float maximum,
-                                      float *value,
-                                      uintptr_t *generation,
-                                      uintptr_t *control_generation) {
-    uintptr_t node_bins = 0U;
-    uintptr_t confirmed_node_bins = 0U;
-    uintptr_t pin_entries = 0U;
-    uintptr_t confirmed_pin_entries = 0U;
+                                      float *value) {
     uintptr_t attrib = 0U;
     float control = 0.0f;
-    const uintptr_t pin_offset =
-        0x10U + (uintptr_t)node_id * 0x28U;
 
     if (!crouch_read_exact(
-            (const uint8_t *)network + 0x08U,
-            &node_bins,
-            sizeof(node_bins)) ||
-        node_bins == 0U ||
-        !crouch_read_exact(
-            (const void *)(node_bins + pin_offset),
-            &pin_entries,
-            sizeof(pin_entries)) ||
-        pin_entries == 0U ||
-        !crouch_read_exact(
             (const void *)pin_entries,
             &attrib,
             sizeof(attrib)) ||
@@ -423,45 +442,23 @@ static BOOL crouch_read_float_control(void *network,
             (const void *)(attrib + 0x10U),
             &control,
             sizeof(control)) ||
-        !(control >= 0.0f && control <= maximum) ||
-        !crouch_read_exact(
-            (const uint8_t *)network + 0x08U,
-            &confirmed_node_bins,
-            sizeof(confirmed_node_bins)) ||
-        confirmed_node_bins != node_bins ||
-        !crouch_read_exact(
-            (const void *)(confirmed_node_bins + pin_offset),
-            &confirmed_pin_entries,
-            sizeof(confirmed_pin_entries)) ||
-        confirmed_pin_entries != pin_entries) {
+        !(control >= 0.0f && control <= maximum)) {
         return FALSE;
     }
     *value = control;
-    *generation = node_bins;
-    *control_generation = pin_entries;
     return TRUE;
 }
 
+/* Under the state lock: the graph must not have been rebuilt since the reads. */
 static BOOL crouch_validate_state_identity(
     void *network,
-    uint16_t node_id,
-    uintptr_t generation,
-    uintptr_t control_generation) {
-    uintptr_t confirmed_generation = 0U;
-    uintptr_t confirmed_control_generation = 0U;
-    const uintptr_t pin_offset =
-        0x10U + (uintptr_t)node_id * 0x28U;
+    const crouch_control_identity *identity) {
+    crouch_control_identity confirmed;
 
-    return crouch_read_exact(
-               (const uint8_t *)network + 0x08U,
-               &confirmed_generation,
-               sizeof(confirmed_generation)) &&
-        confirmed_generation == generation &&
-        crouch_read_exact(
-            (const void *)(confirmed_generation + pin_offset),
-            &confirmed_control_generation,
-            sizeof(confirmed_control_generation)) &&
-        confirmed_control_generation == control_generation;
+    return crouch_read_identity(network, &confirmed) &&
+        confirmed.node_bins == identity->node_bins &&
+        confirmed.control_pins == identity->control_pins &&
+        confirmed.vehicle_pins == identity->vehicle_pins;
 }
 
 static float crouch_current_transition_value(
@@ -527,10 +524,9 @@ static uint16_t crouch_blend_weight_hook(
     BOOL log_started = FALSE;
     BOOL log_completed = FALSE;
     LARGE_INTEGER now;
-    uintptr_t network_generation = 0U;
-    uintptr_t control_generation = 0U;
-    uintptr_t vehicle_network_generation = 0U;
-    uintptr_t vehicle_control_generation = 0U;
+    crouch_control_identity identity;
+    uintptr_t network_generation;
+    uintptr_t control_generation;
     int64_t stale_after_ticks;
     crouch_transition_state *state;
     crouch_state_cache_lookup cache_lookup;
@@ -585,21 +581,9 @@ static uint16_t crouch_blend_weight_hook(
             is_additive);
     }
     call_sequence = InterlockedIncrement64(&g_crouch_blend_call_count);
-    if (!crouch_read_float_control(
-            network,
-            CROUCH_CONTROL_NODE_ID,
-            1.0f,
-            &control,
-            &network_generation,
-            &control_generation) ||
-        !crouch_read_float_control(
-            network,
-            CROUCH_VEHICLE_NODE_ID,
-            256.0f,
-            &vehicle,
-            &vehicle_network_generation,
-            &vehicle_control_generation) ||
-        vehicle_network_generation != network_generation) {
+    if (!crouch_read_identity(network, &identity) ||
+        !crouch_read_float_control(identity.control_pins, 1.0f, &control) ||
+        !crouch_read_float_control(identity.vehicle_pins, 256.0f, &vehicle)) {
         return original(
             attrib_blend_weights,
             node_child_weights,
@@ -612,17 +596,10 @@ static uint16_t crouch_blend_weight_hook(
             sync_events_weight,
             is_additive);
     }
+    network_generation = identity.node_bins;
+    control_generation = identity.control_pins;
     AcquireSRWLockExclusive(&g_crouch_state_lock);
-    if (!crouch_validate_state_identity(
-            network,
-            CROUCH_CONTROL_NODE_ID,
-            network_generation,
-            control_generation) ||
-        !crouch_validate_state_identity(
-            network,
-            CROUCH_VEHICLE_NODE_ID,
-            network_generation,
-            vehicle_control_generation)) {
+    if (!crouch_validate_state_identity(network, &identity)) {
         ReleaseSRWLockExclusive(&g_crouch_state_lock);
         return original(
             attrib_blend_weights,
