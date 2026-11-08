@@ -131,8 +131,11 @@ async function deployVivoxCompatibilityWithPolicy(
   const v5Path = join(root, "vivoxsdk_x64_v5.dll");
   const crouchMarkerPath = join(root, CROUCH_PARITY_MARKER_NAME);
 
+  // An antivirus can quarantine the active proxy. With a valid stock backup
+  // the proxy is simply copied back below, so only a missing file with no
+  // backup to fall back on is fatal.
   const active = await stat(activePath).catch(() => null);
-  if (!active?.isFile()) {
+  if (active && !active.isFile()) {
     throw new Error("Le SDK Vivox historique est introuvable.");
   }
 
@@ -145,6 +148,8 @@ async function deployVivoxCompatibilityWithPolicy(
       await atomicCopy(legacyBackupPath, backupPath);
     } else if (activeHash === policy.stockV4Sha256) {
       await atomicCopy(activePath, backupPath);
+    } else if (!active) {
+      throw new Error("Le SDK Vivox historique est introuvable.");
     } else {
       throw new Error("La sauvegarde du SDK Vivox historique est invalide.");
     }
