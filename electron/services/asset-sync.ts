@@ -13,6 +13,7 @@ import {
   statfs,
   writeFile,
 } from "node:fs/promises";
+import { DownloadRateMeter } from "./download-rate.js";
 import { retryFs } from "./fs-safe.js";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -389,6 +390,22 @@ function isRetryableDownloadError(error: unknown): boolean {
     || code.startsWith("UND_ERR") || NETWORK_ERROR_CODES.has(code);
 }
 
+const PROGRESS_TICK_MS = 1_000;
+
+/**
+ * Run `task` and call `tick` every second until it settles: when no bytes
+ * arrive (a stalled connection, the SHA-256 check) the speed shown must
+ * still follow.
+ */
+async function withProgressTicks<T>(tick: () => void, task: () => Promise<T>): Promise<T> {
+  const timer = setInterval(tick, PROGRESS_TICK_MS);
+  try {
+    return await task();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 export class AssetSyncService {
   private readonly statePath: string;
   // Up to 2.0.23 cache and backups lived in userData, on C:, whatever drive the
@@ -488,6 +505,7 @@ export class AssetSyncService {
     await ensureFreeSpace(dirname(root), totalBytes);
     let completedBytes = 0;
     let assetsCompleted = 0;
+    const rate = new DownloadRateMeter();
     const emit = (phase: AssetSyncProgress["phase"], assetName: string, force = false): void => {
       const now = Date.now();
       if (!force && now - this.lastProgressAt < 80) return;
@@ -499,16 +517,20 @@ export class AssetSyncService {
         totalAssets: pending.length,
         completedBytes,
         totalBytes,
+        ...(phase === "downloading" ? rate.estimate(totalBytes - completedBytes) : {}),
       });
     };
 
     const newRecords: InstalledAssetRecord[] = [...keptRecords];
     for (const asset of pending) {
       emit("downloading", asset.name, true);
-      const cachePath = await this.ensureCachedAsset(asset, options.signal, (amount) => {
-        completedBytes += amount;
-        emit("downloading", asset.name);
-      });
+      const cachePath = await withProgressTicks(
+        () => emit("downloading", asset.name),
+        () => this.ensureCachedAsset(asset, options.signal, (amount) => {
+          completedBytes += amount;
+          emit("downloading", asset.name);
+        }, rate),
+      );
       emit("installing", asset.name, true);
       newRecords.push(await this.installAsset(root, asset, cachePath, ownedFiles));
       assetsCompleted += 1;
@@ -655,6 +677,7 @@ export class AssetSyncService {
     asset: AssetManifestEntry,
     signal: AbortSignal | undefined,
     onBytes: (amount: number) => void,
+    rate?: DownloadRateMeter,
   ): Promise<string> {
     await mkdir(this.cacheDirectory, { recursive: true });
     const cachePath = join(this.cacheDirectory, `${asset.sha256}.pack`);
@@ -678,7 +701,7 @@ export class AssetSyncService {
     for (let pass = 1; ; pass += 1) {
       for (let attempt = 1; ; attempt += 1) {
         try {
-          await this.downloadToPartial(asset, partialPath, signal, report);
+          await this.downloadToPartial(asset, partialPath, signal, report, rate);
           break;
         } catch (error) {
           if (signal?.aborted || attempt >= DOWNLOAD_ATTEMPTS || !isRetryableDownloadError(error)) throw error;
@@ -698,6 +721,7 @@ export class AssetSyncService {
     partialPath: string,
     signal: AbortSignal | undefined,
     report: (total: number) => void,
+    rate?: DownloadRateMeter,
   ): Promise<void> {
     let offset = (await stat(partialPath).catch(() => null))?.size ?? 0;
     if (offset > asset.size) {
@@ -723,6 +747,7 @@ export class AssetSyncService {
     };
     try {
       armIdleTimer();
+      rate?.resume();
       const response = await this.fetchFollowingRedirects(
         asset.url,
         controller.signal,
@@ -751,6 +776,7 @@ export class AssetSyncService {
             return;
           }
           armIdleTimer();
+          rate?.add(chunk.byteLength);
           report(received);
           callback(null, chunk);
         },
@@ -777,6 +803,7 @@ export class AssetSyncService {
       throw error;
     } finally {
       clearTimeout(idleTimer);
+      rate?.pause();
       signal?.removeEventListener("abort", abortUpstream);
     }
   }

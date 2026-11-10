@@ -129,6 +129,28 @@ describe("homepage activity selector", () => {
     });
   });
 
+  it("passes the download speed and time left on only while a pack downloads", () => {
+    const progress = {
+      phase: "downloading" as const,
+      assetName: "assets_x64_1.zip",
+      assetsCompleted: 0,
+      totalAssets: 2,
+      completedBytes: 40,
+      totalBytes: 100,
+      bytesPerSecond: 307_200,
+      secondsLeft: 1_500,
+    };
+    const select = (status: "downloading" | "installing", phase: "downloading" | "installing") =>
+      selectGlobalActivities(snapshot({
+        assetSync: { ...snapshot().assetSync, status, progress: { ...progress, phase } },
+      }))[0];
+
+    expect(select("downloading", "downloading")).toMatchObject({ bytesPerSecond: 307_200, secondsLeft: 1_500 });
+    const installing = select("installing", "installing");
+    expect(installing.bytesPerSecond).toBeUndefined();
+    expect(installing.secondsLeft).toBeUndefined();
+  });
+
   it("uses completed packs rather than downloaded bytes during extraction", () => {
     const [activity] = selectGlobalActivities(snapshot({
       assetSync: {

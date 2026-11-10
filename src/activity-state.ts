@@ -21,6 +21,9 @@ export interface GlobalActivity {
   totalBytes: number | null;
   completedItems: number | null;
   totalItems: number | null;
+  /** Asset downloads only, while the speed is known. */
+  bytesPerSecond?: number;
+  secondsLeft?: number;
 }
 
 function ratioPercent(completed: number, total: number): number | null {
@@ -46,6 +49,12 @@ function installActivity(snapshot: LauncherSnapshot): GlobalActivity | null {
   };
 }
 
+/** Speed and time left only mean something while a pack is downloading. */
+function downloadRate(progress: AssetSyncProgress | null): Pick<GlobalActivity, "bytesPerSecond" | "secondsLeft"> {
+  if (progress?.phase !== "downloading") return {};
+  return { bytesPerSecond: progress.bytesPerSecond, secondsLeft: progress.secondsLeft };
+}
+
 function assetActivity(snapshot: LauncherSnapshot): GlobalActivity | null {
   const { status, progress } = snapshot.assetSync;
   if (status !== "checking" && status !== "downloading" && status !== "installing") return null;
@@ -69,6 +78,7 @@ function assetActivity(snapshot: LauncherSnapshot): GlobalActivity | null {
     totalBytes: progress?.totalBytes || null,
     completedItems: progress?.totalAssets ? progress.assetsCompleted : null,
     totalItems: progress?.totalAssets || null,
+    ...downloadRate(progress),
   };
 }
 

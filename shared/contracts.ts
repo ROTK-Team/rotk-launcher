@@ -68,6 +68,10 @@ export interface AssetSyncProgress {
   totalAssets: number;
   completedBytes: number;
   totalBytes: number;
+  /** Network speed while downloading, once measured. */
+  bytesPerSecond?: number;
+  /** Time the remaining bytes take at that speed, once it is steady. */
+  secondsLeft?: number;
 }
 
 export interface AssetSyncSummary {

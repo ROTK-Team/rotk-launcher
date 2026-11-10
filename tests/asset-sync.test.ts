@@ -11,6 +11,8 @@ import {
   type AssetManifest,
   type AssetManifestEntry,
 } from "../electron/services/asset-sync.js";
+import { DownloadRateMeter } from "../electron/services/download-rate.js";
+import type { AssetSyncProgress } from "../shared/contracts.js";
 import { buildZip } from "./helpers/build-zip.js";
 
 const faults = vi.hoisted(() => ({
@@ -356,6 +358,113 @@ describe("ROTK asset sync", () => {
     expect(await readFile(join(root, "data", "big.pack"))).toEqual(payload);
     expect(Math.max(...progress.map((event) => event.completedBytes))).toBe(payload.length);
     expect(progress.every((event) => event.completedBytes <= event.totalBytes)).toBe(true);
+  });
+
+  it("measures the download speed on network bytes, not on cached packs or resumed parts", async () => {
+    const { userData, root } = await setup();
+    const cachedPayload = Buffer.alloc(600_000, 0x61);
+    const cachedEntry = assetEntry("cached.pack", cachedPayload);
+    const chunkSize = 10_240;
+    const payload = Buffer.alloc(400_000 + 12 * chunkSize, 0x62);
+    const entry = assetEntry("big.pack", payload);
+    const cacheDirectory = join(assetStorage(root), "asset-cache");
+    await mkdir(cacheDirectory, { recursive: true });
+    await writeFile(join(cacheDirectory, `${cachedEntry.sha256}.pack`), cachedPayload);
+    await writeFile(join(cacheDirectory, `${entry.sha256}.pack.part`), payload.subarray(0, 400_000));
+    // A fake clock where each network chunk arrives one second after the one before.
+    let clock = 0;
+    const measure = DownloadRateMeter.prototype.add;
+    const spies = [
+      vi.spyOn(performance, "now").mockImplementation(() => clock),
+      vi.spyOn(Date, "now").mockImplementation(() => clock),
+      vi.spyOn(DownloadRateMeter.prototype, "add").mockImplementation(function (this: DownloadRateMeter, bytes) {
+        clock += 1_000;
+        measure.call(this, bytes);
+      }),
+    ];
+    let sent = 400_000;
+    const progress: AssetSyncProgress[] = [];
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      onProgress: (event) => progress.push(event),
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([cachedEntry, entry])));
+        return new Response(new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (sent === payload.length) {
+              controller.close();
+              return;
+            }
+            controller.enqueue(new Uint8Array(payload.subarray(sent, sent + chunkSize)));
+            sent += chunkSize;
+          },
+        }), { status: 206, headers: { "content-range": `bytes 400000-${payload.length - 1}/${payload.length}` } });
+      }) as typeof fetch,
+    });
+    try {
+      await sync.sync(root);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+
+    const measured = progress.filter((event) => event.bytesPerSecond !== undefined);
+    expect(measured.length).toBeGreaterThan(0);
+    expect(measured.every((event) => event.phase === "downloading" && event.assetName === "big.pack")).toBe(true);
+    // 1,000,000 bytes came from the cache and the .part file: none of them counts.
+    expect(measured.every((event) => event.bytesPerSecond === chunkSize)).toBe(true);
+    const timed = measured.filter((event) => event.secondsLeft !== undefined);
+    expect(timed.length).toBeGreaterThan(0);
+    for (const event of timed) {
+      expect(event.secondsLeft).toBe(Math.ceil((event.totalBytes - event.completedBytes) / chunkSize));
+    }
+    expect(progress.filter((event) => event.phase !== "downloading")
+      .every((event) => event.bytesPerSecond === undefined && event.secondsLeft === undefined)).toBe(true);
+    expect(await readFile(join(root, "big.pack"))).toEqual(payload);
+  });
+
+  it("keeps the progress moving through a stall and stops once the sync is over", async () => {
+    const { userData, root } = await setup();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    const payload = Buffer.alloc(20_480, 0x63);
+    const entry = assetEntry("slow.pack", payload);
+    const partialPath = join(assetStorage(root), "asset-cache", `${entry.sha256}.pack.part`);
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let step = 0;
+    const progress: AssetSyncProgress[] = [];
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      onProgress: (event) => progress.push(event),
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        return new Response(new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            step += 1;
+            if (step === 1) controller.enqueue(new Uint8Array(payload.subarray(0, 10_240)));
+            else if (step === 2) {
+              await released;
+              controller.enqueue(new Uint8Array(payload.subarray(10_240)));
+            } else controller.close();
+          },
+        }));
+      }) as typeof fetch,
+    });
+
+    const done = sync.sync(root);
+    // The first half is on disk and the server sends nothing more.
+    await vi.waitFor(async () => expect((await stat(partialPath)).size).toBe(10_240));
+    const before = progress.length;
+    vi.advanceTimersByTime(1_000);
+    expect(progress.length).toBe(before + 1);
+    expect(progress.at(-1)).toMatchObject({ phase: "downloading", completedBytes: 10_240 });
+    release();
+    await done;
+    expect(vi.getTimerCount()).toBe(0);
+    const afterSync = progress.length;
+    vi.advanceTimersByTime(5_000);
+    expect(progress.length).toBe(afterSync);
   });
 
   it("drops a partial answer for another offset and retries without Range", async () => {
