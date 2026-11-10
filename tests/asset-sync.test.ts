@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,11 +10,14 @@ import {
   stripByteOrderMark,
   type AssetManifest,
   type AssetManifestEntry,
+  type CacheRetentionPolicy,
 } from "../electron/services/asset-sync.js";
 import { buildZip } from "./helpers/build-zip.js";
 
 const faults = vi.hoisted(() => ({
   locked: null as { operation: "copyFile" | "rename"; path: string } | null,
+  // When set, statfs reports this many free bytes on every drive.
+  freeBytes: null as (() => Promise<number>) | null,
 }));
 // Until released, every copy from or rename onto the locked path fails with
 // EPERM, like a file an antivirus holds for the whole attempt.
@@ -33,6 +36,10 @@ vi.mock("node:fs/promises", async (original) => {
     rename: (...args: Parameters<typeof fs.rename>) => {
       const failure = fault("rename", String(args[1]));
       return failure ? Promise.reject(failure) : fs.rename(...args);
+    },
+    statfs: async (...args: Parameters<typeof fs.statfs>) => {
+      const disk = await fs.statfs(...args);
+      return faults.freeBytes ? { ...disk, bavail: await faults.freeBytes(), bsize: 1 } : disk;
     },
   };
 });
@@ -88,6 +95,7 @@ describe("ROTK asset sync", () => {
   afterEach(async () => {
     vi.useRealTimers();
     faults.locked = null;
+    faults.freeBytes = null;
     await Promise.all(temporaryDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true })));
   });
@@ -482,6 +490,213 @@ describe("ROTK asset sync", () => {
     expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "1.0.0" });
     expect(await readFile(join(root, "repair.dat"), "utf8")).toBe("repairable");
     expect(calls).toEqual([FEED_URL]);
+  });
+
+  describe("packs a release replaced", () => {
+    const GiB = 1024 ** 3;
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const payloads = new Map<string, Buffer>();
+
+    /** A feed where each pack's payload is its text, served from its own release. */
+    function release(version: string, packs: Record<string, string>): AssetManifest {
+      return manifest(Object.entries(packs).map(([name, text]) => {
+        const payload = Buffer.from(text);
+        const entry = assetEntry(name, payload, {
+          version,
+          url: `https://github.com/rotk/rotk-assets/releases/download/assets-v${version}/${name}.payload`,
+          installPath: `Resources/Assets/${name}.pack2`,
+        });
+        payloads.set(entry.url, payload);
+        return entry;
+      }), version);
+    }
+
+    function releaseService(
+      userData: string,
+      feed: { current: AssetManifest },
+      calls: string[] = [],
+      cacheRetention?: Partial<CacheRetentionPolicy>,
+    ): AssetSyncService {
+      return new AssetSyncService({
+        userDataDirectory: userData,
+        feedUrl: FEED_URL,
+        cacheRetention,
+        fetchImpl: (async (input: RequestInfo | URL) => {
+          const url = String(input);
+          calls.push(url);
+          if (url === FEED_URL) return new Response(JSON.stringify(feed.current));
+          const payload = payloads.get(url);
+          if (!payload) throw new Error(`Unrouted fetch: ${url}`);
+          return new Response(new Uint8Array(payload));
+        }) as typeof fetch,
+      });
+    }
+
+    function cached(root: string, text: string): string {
+      return join(assetStorage(root), "asset-cache", `${sha256(text)}.pack`);
+    }
+
+    function indexPath(root: string): string {
+      return join(assetStorage(root), "asset-cache", "replaced-packs.v1.json");
+    }
+
+    async function cacheEntries(root: string): Promise<string[]> {
+      return (await readdir(join(assetStorage(root), "asset-cache"))).sort();
+    }
+
+    it("installs the packs a release goes back to from the cache", async () => {
+      const { userData, root } = await setup();
+      faults.freeBytes = async () => 100 * GiB;
+      // Shaped like 1.13.56 to 1.13.59: an event replaces two packs, changes one
+      // of them twice, then the next release goes back to both and adds one.
+      const before = release("1.13.56", { assets_x64_0: "assets base", data_x64_0: "data base" });
+      const event1 = release("1.13.57", { assets_x64_0: "assets event", data_x64_0: "data event 1" });
+      const event2 = release("1.13.58", { assets_x64_0: "assets event", data_x64_0: "data event 2" });
+      const after = release("1.13.59", { assets_x64_0: "assets base", data_x64_0: "data base", z2_x64_0: "z2 new" });
+      const feed = { current: before };
+      const calls: string[] = [];
+      const sync = releaseService(userData, feed, calls);
+      for (const next of [before, event1, event2]) {
+        feed.current = next;
+        await sync.sync(root);
+      }
+      // A download of a replaced pack that never finished is not kept.
+      const abandoned = `${cached(root, "never finished")}.part`;
+      await writeFile(abandoned, "never");
+
+      calls.length = 0;
+      feed.current = after;
+      expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "1.13.59" });
+      expect(calls).toEqual([FEED_URL, after.assets[2].url]);
+      const installed = join(root, "Resources", "Assets");
+      expect(await readFile(join(installed, "assets_x64_0.pack2"), "utf8")).toBe("assets base");
+      expect(await readFile(join(installed, "data_x64_0.pack2"), "utf8")).toBe("data base");
+      expect(await readFile(join(installed, "z2_x64_0.pack2"), "utf8")).toBe("z2 new");
+      // Both event versions of the data pack are kept, not only the last one.
+      expect(existsSync(cached(root, "assets event"))).toBe(true);
+      expect(existsSync(cached(root, "data event 1"))).toBe(true);
+      expect(existsSync(cached(root, "data event 2"))).toBe(true);
+      expect(existsSync(abandoned)).toBe(false);
+    });
+
+    it("drops a replaced pack 30 days after it left the feed", async () => {
+      const { userData, root } = await setup();
+      faults.freeBytes = async () => 100 * GiB;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const start = Date.parse("2026-11-01T00:00:00Z");
+      vi.setSystemTime(start);
+      const feed = { current: release("1.20.0", { pack: "before event" }) };
+      const sync = releaseService(userData, feed);
+      await sync.sync(root);
+
+      // Downloaded 60 days before it is replaced: the 30 days count from the replacement.
+      vi.setSystemTime(start + 60 * DAY_MS);
+      feed.current = release("1.21.0", { pack: "during event" });
+      await sync.sync(root);
+      vi.setSystemTime(start + 89 * DAY_MS);
+      await sync.sync(root);
+      expect(existsSync(cached(root, "before event"))).toBe(true);
+
+      vi.setSystemTime(start + 91 * DAY_MS);
+      expect(await sync.sync(root)).toEqual({ status: "up-to-date", packVersion: "1.21.0" });
+      expect(existsSync(cached(root, "before event"))).toBe(false);
+      expect(existsSync(cached(root, "during event"))).toBe(true);
+    });
+
+    it("keeps at most maxBytes of replaced packs, the oldest replaced going first", async () => {
+      const { userData, root } = await setup();
+      faults.freeBytes = async () => 100 * GiB;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const start = Date.parse("2026-11-01T00:00:00Z");
+      const texts = ["release 1.30", "release 1.31", "release 1.32", "release 1.33"];
+      const feed = { current: manifest([]) };
+      // Room for two of these 12-byte packs.
+      const sync = releaseService(userData, feed, [], { maxBytes: 30 });
+      for (const [step, text] of texts.entries()) {
+        vi.setSystemTime(start + step * 60 * 60 * 1000);
+        feed.current = release(`1.3${step}.0`, { pack: text });
+        await sync.sync(root);
+      }
+      expect(existsSync(cached(root, "release 1.30"))).toBe(false);
+      expect(existsSync(cached(root, "release 1.31"))).toBe(true);
+      expect(existsSync(cached(root, "release 1.32"))).toBe(true);
+      expect(existsSync(cached(root, "release 1.33"))).toBe(true);
+      const index = JSON.parse(await readFile(indexPath(root), "utf8")) as { packs: Array<{ sha256: string }> };
+      expect(index.packs.map((pack) => pack.sha256)).toEqual([sha256("release 1.32"), sha256("release 1.31")]);
+    });
+
+    it("drops the replaced packs when an update would not fit otherwise, then checks again", async () => {
+      const { userData, root } = await setup();
+      faults.freeBytes = async () => 100 * GiB;
+      const feed = { current: release("1.40.0", { pack: "pack 1.40" }) };
+      const sync = releaseService(userData, feed);
+      await sync.sync(root);
+      feed.current = release("1.41.0", { pack: "pack 1.41" });
+      await sync.sync(root);
+      expect(existsSync(cached(root, "pack 1.40"))).toBe(true);
+
+      // Three times the new pack is needed: one byte short while the old pack is there.
+      feed.current = release("1.42.0", { pack: "a bigger pack 1.42" });
+      const needed = 3 * feed.current.assets[0].size;
+      faults.freeBytes = async () => needed - 1 + (existsSync(cached(root, "pack 1.40")) ? 0 : 1);
+      expect(await sync.sync(root)).toEqual({ status: "updated", packVersion: "1.42.0" });
+      expect(await readFile(join(root, "Resources", "Assets", "pack.pack2"), "utf8")).toBe("a bigger pack 1.42");
+      // The drive stays low on space: the pack replaced now is not kept either.
+      expect(await cacheEntries(root)).toEqual(
+        [`${sha256("a bigger pack 1.42")}.pack`, "replaced-packs.v1.json"].sort());
+    });
+
+    it("keeps nothing replaced while the drive has less than 10 GiB free", async () => {
+      const { userData, root } = await setup();
+      faults.freeBytes = async () => 100 * GiB;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      const start = Date.parse("2026-11-01T00:00:00Z");
+      const feed = { current: manifest([]) };
+      const sync = releaseService(userData, feed);
+      for (const [step, version] of ["1.50", "1.51", "1.52"].entries()) {
+        vi.setSystemTime(start + step * 60 * 60 * 1000);
+        feed.current = release(`${version}.0`, { pack: `pack ${version}` });
+        await sync.sync(root);
+      }
+      expect(existsSync(cached(root, "pack 1.50"))).toBe(true);
+      expect(existsSync(cached(root, "pack 1.51"))).toBe(true);
+
+      // Dropping the oldest (9 bytes) is enough to get back to 10 GiB.
+      faults.freeBytes = async () => 10 * GiB - 1;
+      await sync.sync(root);
+      expect(existsSync(cached(root, "pack 1.50"))).toBe(false);
+      expect(existsSync(cached(root, "pack 1.51"))).toBe(true);
+
+      faults.freeBytes = async () => 2 * GiB;
+      await sync.sync(root);
+      expect(await cacheEntries(root)).toEqual([`${sha256("pack 1.52")}.pack`, "replaced-packs.v1.json"].sort());
+    });
+
+    it.each([
+      ["corrupt", "{ not json"],
+      ["invalid", JSON.stringify({ schemaVersion: 1, packs: [{ sha256: "beef", replacedAt: "soon" }] })],
+      ["missing", null],
+    ])("uses the file dates when the index is %s", async (_kind, content) => {
+      const { userData, root } = await setup();
+      faults.freeBytes = async () => 100 * GiB;
+      const feed = { current: manifest([]) };
+      const sync = releaseService(userData, feed);
+      for (const version of ["1.60", "1.61", "1.62"]) {
+        feed.current = release(`${version}.0`, { pack: `pack ${version}` });
+        await sync.sync(root);
+      }
+      if (content === null) await rm(indexPath(root));
+      else await writeFile(indexPath(root), content);
+      const longAgo = new Date(Date.now() - 40 * DAY_MS);
+      await utimes(cached(root, "pack 1.60"), longAgo, longAgo);
+
+      expect(await sync.sync(root)).toEqual({ status: "up-to-date", packVersion: "1.62.0" });
+      // Written 40 days ago, so replaced at least that long ago.
+      expect(existsSync(cached(root, "pack 1.60"))).toBe(false);
+      expect(existsSync(cached(root, "pack 1.61"))).toBe(true);
+      const index = JSON.parse(await readFile(indexPath(root), "utf8")) as { packs: Array<{ sha256: string }> };
+      expect(index.packs.map((pack) => pack.sha256)).toEqual([sha256("pack 1.61")]);
+    });
   });
 
   it("normal sync detects same-size drift in a standalone file asset", async () => {
