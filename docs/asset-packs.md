@@ -30,6 +30,13 @@ requiring a launcher release. The pipeline is implemented by
    everything the catalog added.
 5. Assets removed from the catalog are uninstalled on the next sync (backup restored
    or file deleted).
+6. After a sync the cache keeps the packs of the current catalog. A pack the catalog
+   replaced stays for 30 days after it left it, 3 GiB in all, so a release that goes
+   back to it (typically the end of an event) installs it from the cache. The oldest
+   replaced go first, past 3 GiB or while the drive has less than 10 GiB free, and
+   all of them go when an update would not fit otherwise.
+   `asset-cache/replaced-packs.v1.json` records when each one left the catalog;
+   without it the file date is used. `.part` files of replaced packs are deleted.
 7. Launchers up to 2.0.23 kept the cache and backups in `userData` (always C:).
    Old backups and current packs are moved next to the install (copied and checked
    when the drive differs) and the rest of the old cache is removed. A backup that
