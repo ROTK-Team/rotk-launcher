@@ -67,12 +67,23 @@ export async function prepareWeaponStanceProfile(root: string, stateRoot: string
     return;
   }
   let previous: StanceProfileState | undefined;
-  try {
-    const value = JSON.parse(await readFile(stateFile, "utf8")) as StanceProfileState;
-    if (!Array.isArray(value.added) || !value.added.every(v => Object.hasOwn(defaults, v) || v === LEGACY_CONSOLE) || typeof value.removedNetworkN !== "boolean")
-      throw new Error("Sauvegarde des touches Weapon Stance invalide.");
-    previous = value;
-  } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+  const saved = await readFile(stateFile, "utf8").catch((e: NodeJS.ErrnoException) => {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  });
+  if (saved !== null) {
+    const value = (() => { try { return JSON.parse(saved) as StanceProfileState | null; } catch { return null; } })();
+    if (Array.isArray(value?.added) && value.added.every(v => Object.hasOwn(defaults, v) || v === LEGACY_CONSOLE) && typeof value.removedNetworkN === "boolean") {
+      previous = value;
+    } else {
+      // An empty or damaged ownership file (e.g. a crash mid-write) used to
+      // fail every launch. Treat it as absent: we only lose the right to undo
+      // our own changes on rollback (remove our V binding, give back an N an
+      // older build removed), never touch a player binding. The file is kept
+      // aside for bug reports; the state write below replaces it anyway.
+      await rename(stateFile, `${stateFile}.corrupt`).catch(() => undefined);
+    }
+  }
   const result = migrateStanceProfile(source, enabled, previous);
   await mkdir(stateRoot, { recursive: true });
   await copyFile(profile, join(stateRoot, "InputProfile_User.before-stance.xml"), constants.COPYFILE_EXCL)
