@@ -14,8 +14,8 @@ which git ignores, and fails unless it has that SHA-256. `dev`, `dev:isolated`,
 `dist`, `dist:dir`, CI and the release workflow run it.
 
 To store a newly supplied build:
-`node scripts/prepare-rotkc.mjs --pack <path to rotkc.dll>`, then commit
-`rotkc.dll.br` and `rotkc.dll.sha256`.
+`node scripts/prepare-rotkc.mjs --pack <path to rotkc.dll>` (about two and a
+half minutes), then commit `rotkc.dll.br` and `rotkc.dll.sha256`.
 
 The final installer must contain this exact DLL: the release workflow compares
 the packaged file with `rotkc.dll.sha256`. Preserve the existing integrity

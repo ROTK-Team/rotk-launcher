@@ -5,7 +5,7 @@
 //   node scripts/prepare-rotkc.mjs                      restore and verify
 //   node scripts/prepare-rotkc.mjs --pack <rotkc.dll>   store a newly supplied build
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { brotliCompressSync, brotliDecompressSync, constants } from "node:zlib";
 
 const patches = new URL("../resources/patches/", import.meta.url);
@@ -15,8 +15,12 @@ const sidecarPath = new URL("rotkc.dll.sha256", patches);
 const GITHUB_FILE_LIMIT = 100 * 1024 * 1024;
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-if (process.argv[2] === "--pack") {
-  if (!process.argv[3]) throw new Error("Usage: node scripts/prepare-rotkc.mjs --pack <rotkc.dll>");
+const packing = process.argv[2] === "--pack";
+if (process.argv.length !== (packing ? 4 : 2)) {
+  throw new Error("Usage: node scripts/prepare-rotkc.mjs [--pack <rotkc.dll>]");
+}
+
+if (packing) {
   const source = readFileSync(process.argv[3]);
   // Fixed parameters: the same input always gives the same compressed file.
   const packed = brotliCompressSync(source, {
@@ -27,7 +31,7 @@ if (process.argv[2] === "--pack") {
     },
   });
   if (packed.length >= GITHUB_FILE_LIMIT) {
-    throw new Error(`rotkc.dll.br would be ${packed.length} bytes: GitHub refuses files of 100 MB or more.`);
+    throw new Error(`rotkc.dll.br would be ${packed.length} bytes: GitHub refuses files of 100 MiB or more.`);
   }
   writeFileSync(packedPath, packed);
   writeFileSync(sidecarPath, `${sha256(source)} *rotkc.dll\n`, "ascii");
@@ -38,14 +42,19 @@ if (process.argv[2] === "--pack") {
 const expected = readFileSync(sidecarPath, "ascii").trim().split(/\s+/)[0].toLowerCase();
 if (!/^[a-f0-9]{64}$/.test(expected)) throw new Error("rotkc.dll.sha256 does not hold a SHA-256.");
 
-if (!existsSync(dllPath) || sha256(readFileSync(dllPath)) !== expected) {
+const present = existsSync(dllPath) ? sha256(readFileSync(dllPath)) : null;
+// After --pack, restore even when the file is already there: it proves the round trip.
+if (packing || present !== expected) {
   const dll = brotliDecompressSync(readFileSync(packedPath));
   const actual = sha256(dll);
   if (actual !== expected) {
     throw new Error(`rotkc.dll.br does not restore the supplied rotkc.dll: SHA-256 ${actual}, expected ${expected}.`);
   }
-  writeFileSync(dllPath, dll);
+  if (present !== expected) {
+    if (present && !packing) {
+      console.warn(`Replacing a different rotkc.dll (SHA-256 ${present}). Use --pack to store a newly supplied build.`);
+    }
+    writeFileSync(dllPath, dll);
+  }
 }
-const restored = readFileSync(dllPath);
-if (sha256(restored) !== expected) throw new Error("The restored rotkc.dll does not match rotkc.dll.sha256.");
-console.log(`rotkc.dll ready: ${restored.length} bytes, SHA-256 ${expected}`);
+console.log(`rotkc.dll ready: ${statSync(dllPath).size} bytes, SHA-256 ${expected}`);
