@@ -12,6 +12,7 @@ import {
   selectGlobalActivities,
   type GlobalActivity,
 } from "../activity-state";
+import { formatDownloadSpeed, formatTimeLeft } from "../download-format";
 import { useI18n, type Copy } from "../i18n";
 
 interface GlobalActivityCenterProps {
@@ -87,6 +88,9 @@ function metrics(activity: GlobalActivity, copy: Copy, locale: AppLocale): strin
   if (activity.completedBytes !== null && activity.totalBytes !== null) {
     values.push(`${formatBytes(activity.completedBytes, locale)} / ${formatBytes(activity.totalBytes, locale)}`);
   }
+  if (activity.bytesPerSecond !== undefined) values.push(formatDownloadSpeed(activity.bytesPerSecond, locale));
+  const timeLeft = activity.secondsLeft === undefined ? null : formatTimeLeft(activity.secondsLeft, locale);
+  if (timeLeft) values.push(timeLeft);
   return values;
 }
 
