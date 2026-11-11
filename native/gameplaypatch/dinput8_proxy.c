@@ -389,14 +389,14 @@ static BOOL validate_h1z1_image(HMODULE module, BYTE **image_base) {
     DWORD path_length;
     BOOL valid_size;
 
-    if (base == NULL) {
+    if (base == NULL || !readable_range(base, sizeof(dos))) {
         return FALSE;
     }
-    /* The loaded module's headers are always mapped. */
     memcpy(&dos, base, sizeof(dos));
     if (dos.e_magic != IMAGE_DOS_SIGNATURE ||
         dos.e_lfanew <= 0 ||
-        dos.e_lfanew > 0x1000) {
+        dos.e_lfanew > 0x1000 ||
+        !readable_range(base + dos.e_lfanew, sizeof(nt))) {
         return FALSE;
     }
     memcpy(&nt, base + dos.e_lfanew, sizeof(nt));

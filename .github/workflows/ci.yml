@@ -97,7 +97,7 @@ jobs:
           }
 
           $gameplayHash = (Get-FileHash -LiteralPath $allowedGameplayDll -Algorithm SHA256).Hash
-          if ($gameplayHash -ne "75A26325AC7DDD48450A8790C5467D28B5B921ABC4B9133AF86F8131BE538300") {
+          if ($gameplayHash -ne "701A216CF896254FA3D26CFBECBF158C6FA7E7FE2C753ECE1132B6C4C88BAC31") {
             throw "Unexpected shotgun sprint proxy SHA-256: $gameplayHash"
           }
           $gameplaySidecar = ((Get-Content -LiteralPath "$allowedGameplayDll.sha256" -Raw) -split "\s+")[0]

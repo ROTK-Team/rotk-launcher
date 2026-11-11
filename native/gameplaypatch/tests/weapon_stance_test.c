@@ -32,6 +32,12 @@ int main(void) {
     stance_set(actor,0); assert(stance_u32(actor+0x9a0)==0);
     *(uintptr_t *)(vt+0x4d8)=(uintptr_t)(image+0x7a2dd);
     stance_set(actor,1); assert(stance_u32(actor+0x9a0)==0);
+    /* A pointer the game no longer maps must read as zero, not fault. */
+    assert(VirtualProtect(image+0x4000000,4096,PAGE_NOACCESS,&old));
+    assert(!stance_ptr(image+0x4000000) && !stance_ptr(image+0x4000000-4) && !stance_ptr((void *)0x4d8));
+    *(uintptr_t *)actor=(uintptr_t)(image+0x4000000); stance_set(actor,1); assert(stance_u32(actor+0x9a0)==0);
+    *(uintptr_t *)actor=0; stance_set(actor,1); assert(stance_u32(actor+0x9a0)==0);
+    assert(VirtualProtect(image+0x4000000,4096,PAGE_READWRITE,&old));
     BYTE manager[0x22d8]={0}, context[0xc0]={0}, action[0x190]={0}; uintptr_t table[16]={0};
     *(uintptr_t *)(manager+0x2d8+(stance_hash("Generic")&1023)*8)=(uintptr_t)context;
     *(uintptr_t *)(context+8)=(uintptr_t)"Generic"; *(uint32_t *)(context+0x10)=7;
