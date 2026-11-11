@@ -53,6 +53,11 @@ jobs:
         shell: pwsh
         run: '"ZIG_LOCAL_CACHE_DIR=$env:RUNNER_TEMP\zig-local-cache" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8'
 
+      - name: Restaurer le module rotkc fourni
+        # Le dépôt le conserve compressé (limite GitHub de 100 Mo par fichier) ;
+        # le script échoue si le fichier restauré n'a pas l'empreinte attendue.
+        run: npm run prepare:rotkc
+
       - name: Refuser les fichiers propriétaires du client
         shell: pwsh
         run: |

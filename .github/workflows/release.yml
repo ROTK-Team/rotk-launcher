@@ -86,6 +86,12 @@ jobs:
         if: steps.reuse.outputs.reused != 'true'
         run: npm ci
 
+      - name: Restore the supplied rotkc module
+        if: steps.reuse.outputs.reused != 'true'
+        # Stored compressed (GitHub's 100 MB limit per file); the script fails
+        # unless the restored file has the expected SHA-256.
+        run: npm run prepare:rotkc
+
       - name: Verify the bundled official Vivox 5 runtime
         if: steps.reuse.outputs.reused != 'true'
         run: npm run verify:vivox-runtime
@@ -190,6 +196,10 @@ jobs:
           $helperPackagedHash = (Get-FileHash -LiteralPath "release\win-unpacked\resources\diagnostics\ROTK.Diagnostics.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
           $helperPackagedSidecar = ((Get-Content -LiteralPath "release\win-unpacked\resources\diagnostics\ROTK.Diagnostics.exe.sha256" -Raw) -split "\s+")[0]
           if ($helperPackagedSidecar -ne $helperPackagedHash) { throw "Packaged diagnostic helper sidecar mismatch (including Authenticode bytes)." }
+          # The installer must carry the supplied rotkc module unchanged.
+          $rotkcPackagedHash = (Get-FileHash -LiteralPath "release\win-unpacked\resources\patches\rotkc.dll" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $rotkcSidecar = ((Get-Content -LiteralPath "resources\patches\rotkc.dll.sha256" -Raw) -split "\s+")[0]
+          if ($rotkcSidecar -ne $rotkcPackagedHash) { throw "Packaged rotkc.dll differs from the supplied module: $rotkcPackagedHash" }
 
           $vivoxRuntime = $targets |
             Where-Object { $_.Name -eq "vivoxsdk_x64_v5.dll" } |
