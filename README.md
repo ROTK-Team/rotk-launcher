@@ -198,6 +198,11 @@ automatiquement les proxies Vivox et DirectInput, puis vérifient le runtime
 Vivox officiel avant de démarrer. Un worktree frais ne peut ainsi pas lancer un
 client avec un binaire natif absent ou incohérent.
 
+Elles restaurent aussi `resources/patches/rotkc.dll`, que le dépôt conserve
+compressé (`rotkc.dll.br`) parce qu’il dépasse la limite GitHub de 100 Mo par
+fichier, et s’arrêtent si son SHA-256 diffère de `rotkc.dll.sha256`.
+`npm run prepare:rotkc` fait cette seule étape.
+
 Le mode développeur normal réutilise la configuration du launcher installé. Pour un test volontairement isolé, sans toucher à cette configuration :
 
 ```powershell
