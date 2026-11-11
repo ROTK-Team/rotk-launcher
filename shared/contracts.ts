@@ -244,6 +244,8 @@ export interface RotkLauncherApi {
   install(): Promise<OperationResult<{ installationRoot: string }>>;
   cancelInstall(): Promise<void>;
   play(): Promise<OperationResult<{ pid: number }>>;
+  /** Ends a running H1Z1 after the player confirms it. */
+  stopGame(): Promise<OperationResult>;
   /** Opens a ROTK site path; `serverId` picks which site, defaulting to the selected one. */
   openWebsite(path: string, serverId?: ServerId): Promise<OperationResult>;
   checkLauncherUpdate(): Promise<void>;
@@ -285,6 +287,7 @@ export const IPC_CHANNELS = {
   install: "launcher:install",
   cancelInstall: "launcher:cancel-install",
   play: "launcher:play",
+  stopGame: "launcher:stop-game",
   openWebsite: "launcher:open-website",
   checkLauncherUpdate: "launcher:update-check",
   downloadLauncherUpdate: "launcher:update-download",

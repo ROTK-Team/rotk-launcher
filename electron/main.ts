@@ -59,6 +59,8 @@ import { DiscordPresence } from "./services/discord-presence.js";
 import { adoptExistingClient, cleanupInstallLeftovers, inspectDestination, installClient, lostWithLauncherFolder } from "./services/installer.js";
 import {
   GameLauncher,
+  assertExecutableNotRunning,
+  stopGameFromInstallation,
   validateInstalledClient,
   type AttestationOutcome,
 } from "./services/game-launcher.js";
@@ -304,6 +306,15 @@ async function findQuarantinedPatches(): Promise<string[]> {
     if (!(await stat(path).catch(() => null))?.isFile()) missing.push(path);
   }
   return missing;
+}
+
+/** Cancel is the default: closing H1Z1 loses a match in progress. */
+async function confirmCloseGame(message: string): Promise<boolean> {
+  const copy = MAIN_COPY[currentLocale].stopGame;
+  const options = { type: "warning" as const, title: copy.title, message,
+    buttons: [copy.confirm, copy.cancel], defaultId: 1, cancelId: 1, noLink: true };
+  const { response } = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+  return response === 0;
 }
 
 async function installationRoot(): Promise<string | null> {
@@ -1307,9 +1318,37 @@ function registerIpc(): void {
         }
         phase = "ready";
         await broadcastSnapshot();
+        // An H1Z1 left by an earlier launcher session: offer what players
+        // otherwise do in Task Manager, limited to this installation's copy.
+        const stray = error as { code?: string; executablePath?: string } | null;
+        let outcome: OperationResult<{ pid: number }> = result;
+        if (stray?.code === "game_already_running" && stray.executablePath
+          && await confirmCloseGame(MAIN_COPY[currentLocale].stopGame.strayMessage)) {
+          const stopped = await stopGameFromInstallation(stray.executablePath)
+            .catch((failure: { code?: unknown; signal?: unknown } | null) => `powershell failed (${failure?.code ?? failure?.signal ?? "error"}), 0`);
+          // Ask the executable itself: the game may also have ended on its own
+          // while the question was open, or Windows may have refused to end it.
+          const free = await assertExecutableNotRunning(stray.executablePath).then(() => true, () => false);
+          startupLog.mark("game-force-closed", `left by an earlier launcher session, ${stopped} process(es) ended, executable ${free ? "free" : "still in use"}`);
+          const copy = MAIN_COPY[currentLocale].stopGame;
+          if (free) lastErrorRaw = null;
+          outcome = { ok: false, error: free ? copy.strayClosed : copy.strayNotClosed };
+          await broadcastSnapshot();
+        }
         if (quitWhenGameExits && !mainWindow && !diagnosticWorkInProgress()) app.quit();
-        return result;
+        return outcome;
       }
+    }),
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.stopGame,
+    trustedHandler(async (): Promise<OperationResult> => {
+      if (!gameLauncher.isRunning()) return { ok: true };
+      if (await confirmCloseGame(MAIN_COPY[currentLocale].stopGame.message) && gameLauncher.stop()) {
+        startupLog.mark("game-force-closed", "in-game button");
+      }
+      return { ok: true };
     }),
   );
 

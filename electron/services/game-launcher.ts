@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { retryFs } from "./fs-safe.js";
 import { promisify } from "node:util";
 import type { InstalledClientConfig, LauncherConfig } from "./config-store.js";
@@ -29,6 +29,7 @@ import { assertVivoxCompatibility, deployVivoxCompatibility } from "./vivox-clie
 import { assertSteamShim, deploySteamShim } from "./steam-shim.js";
 import { deployPlayerFonts } from "./player-fonts.js";
 import { prepareInterfaceInputProfile } from "./interface-input-profile.js";
+import { windowsSystemToolPath } from "./windows-tools.js";
 import { recoverInputProfile, type InputProfileRecovery } from "./input-profile-recovery.js";
 import { prepareWeaponStanceProfile, WEAPON_STANCE_ENABLED } from "./weapon-stance-profile.js";
 
@@ -202,6 +203,30 @@ async function isImageRunning(imageName: string): Promise<boolean> {
   }
 }
 
+// A launcher that restarted has no handle on the H1Z1 it started before.
+// `executablePath` is set only when that very file is held open: main offers to
+// close the game then. A process list match by name could be another copy.
+function gameAlreadyRunning(executablePath?: string): Error {
+  return Object.assign(new Error("H1Z1 est déjà lancé depuis cette installation."), { code: "game_already_running", executablePath });
+}
+
+/** Ends every H1Z1 started from this exact executable (none from another copy). Returns how many it ended. */
+export async function stopGameFromInstallation(executablePath: string): Promise<number> {
+  // An empty path would match every process whose path Windows hides.
+  if (!isAbsolute(executablePath)) return 0;
+  // The path travels in the environment, never inside the script text. A
+  // process Windows refuses to end (started elevated) is not counted. The
+  // wait lets Windows release the executable before the caller checks it.
+  const script = "$n = 0; Get-CimInstance Win32_Process -Filter \"Name='H1Z1.exe'\""
+    + " | Where-Object { $env:ROTK_GAME_EXE -and $_.ExecutablePath -eq $env:ROTK_GAME_EXE }"
+    + " | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $n++;"
+    + " Wait-Process -Id $_.ProcessId -Timeout 5 -ErrorAction SilentlyContinue } catch {} }; $n";
+  const { stdout } = await promisify(execFile)(windowsSystemToolPath("powershell"),
+    ["-NoProfile", "-NonInteractive", "-Command", script],
+    { windowsHide: true, timeout: 20_000, env: { ...process.env, ROTK_GAME_EXE: executablePath } });
+  return Number.parseInt(stdout.trim(), 10) || 0;
+}
+
 // A running exe can't be opened for writing (EBUSY). Catches a game left open
 // by a previous launcher session, which GameLauncher.isRunning() can't see.
 export async function assertExecutableNotRunning(executablePath: string, attempts = 5): Promise<void> {
@@ -214,11 +239,11 @@ export async function assertExecutableNotRunning(executablePath: string, attempt
       const code = (error as NodeJS.ErrnoException).code;
       // A denied open says nothing about the game: ask the process list instead.
       if ((code === "EPERM" || code === "EACCES") && await isImageRunning(basename(executablePath))) {
-        throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+        throw gameAlreadyRunning();
       }
       // Missing or read-only executables are reported by the regular checks.
       if (code !== "EBUSY") return;
-      if (attempt >= attempts) throw new Error("H1Z1 est déjà lancé depuis cette installation.");
+      if (attempt >= attempts) throw gameAlreadyRunning(executablePath);
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 100 * 2 ** (attempt - 1)));
     }
   }
@@ -443,6 +468,13 @@ export class GameLauncher {
 
   isRunning(): boolean {
     return this.child !== null && this.child.exitCode === null && !this.child.killed;
+  }
+
+  // H1Z1 can keep running after its window has gone (FAQ: Play stuck on IN
+  // GAME until H1Z1.exe is ended in Task Manager). This is that same
+  // termination; the usual exit event then hands Play back.
+  stop(): boolean {
+    return this.isRunning() && this.child!.kill();
   }
 
   async launch(request: LaunchRequest): Promise<number> {

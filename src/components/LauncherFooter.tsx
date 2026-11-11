@@ -11,6 +11,7 @@ interface LauncherFooterProps {
   onPrimary(): void;
   onSetup(): void;
   onIdentity(): void;
+  onStopGame(): void;
   onSelectLaunchProfile(serverId: ServerId, role: PlayerRole): void;
 }
 
@@ -69,6 +70,7 @@ export function LauncherFooter({
   onPrimary,
   onSetup,
   onIdentity,
+  onStopGame,
   onSelectLaunchProfile,
 }: LauncherFooterProps) {
   const { copy } = useI18n();
@@ -117,9 +119,11 @@ export function LauncherFooter({
 
       <button
         type="button"
-        className={`play-button ${ready ? "is-ready" : ""}`}
-        disabled={busy || running || installing}
-        onClick={onPrimary}
+        className={`play-button ${ready ? "is-ready" : ""} ${snapshot.phase === "running" ? "is-running" : ""}`}
+        // IN GAME stays clickable: it offers to close an H1Z1 whose window is gone.
+        disabled={busy || snapshot.phase === "launching" || installing}
+        onClick={snapshot.phase === "running" ? onStopGame : onPrimary}
+        title={snapshot.phase === "running" ? copy.footer.stopGame : undefined}
       >
         <span className="play-button__copy"><small>RETURN OF THE KING</small><strong>{primaryLabel}</strong></span>
         {updatePending && !running && !installing ? <Download size={24} /> : <Play size={24} fill="currentColor" />}
