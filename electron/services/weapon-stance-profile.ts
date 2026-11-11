@@ -77,9 +77,10 @@ export async function prepareWeaponStanceProfile(root: string, stateRoot: string
       previous = value;
     } else {
       // An empty or damaged ownership file (e.g. a crash mid-write) used to
-      // fail every launch. Treat it as absent: we only lose the right to remove
-      // our V binding on rollback, never touch a player binding. The file is
-      // kept aside for bug reports; the state write below replaces it anyway.
+      // fail every launch. Treat it as absent: we only lose the right to undo
+      // our own changes on rollback (remove our V binding, give back an N an
+      // older build removed), never touch a player binding. The file is kept
+      // aside for bug reports; the state write below replaces it anyway.
       await rename(stateFile, `${stateFile}.corrupt`).catch(() => undefined);
     }
   }
