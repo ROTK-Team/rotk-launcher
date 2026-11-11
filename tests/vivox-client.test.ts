@@ -196,6 +196,39 @@ describe("Vivox client deployment", () => {
       .resolves.toBe(contents.v4);
   });
 
+  it("restores a quarantined proxy when the stock backup is valid", async () => {
+    const fixture = await createFixture();
+    await writeFile(join(fixture.root, "vivoxsdk_x64.dll"), contents.v4);
+    await deploy(fixture);
+    await rm(join(fixture.root, "vivoxsdk_x64.dll"));
+
+    await deploy(fixture);
+
+    await expect(readFile(join(fixture.root, "vivoxsdk_x64.dll"), "utf8"))
+      .resolves.toBe(contents.proxy);
+    await expect(readFile(join(fixture.root, "vivoxsdk_x64.original.dll"), "utf8"))
+      .resolves.toBe(contents.v4);
+    await vivoxClientInternals.assertVivoxCompatibilityWithPolicy(fixture.root, policy);
+  });
+
+  it("still refuses a path that exists but is not a file, even with a valid backup", async () => {
+    const fixture = await createFixture();
+    await mkdir(join(fixture.root, "vivoxsdk_x64.dll"));
+    await writeFile(join(fixture.root, "vivoxsdk_x64.original.dll"), contents.v4);
+
+    await expect(deploy(fixture)).rejects.toThrow("Le SDK Vivox historique est introuvable.");
+    await expect(readFile(join(fixture.root, "vivoxsdk_x64_v5.dll"))).rejects.toThrow();
+  });
+
+  it("reports a missing SDK when there is no valid backup either", async () => {
+    const fixture = await createFixture();
+    await writeFile(join(fixture.root, "vivoxsdk_x64.original.dll"), contents.stale);
+
+    await expect(deploy(fixture)).rejects.toThrow("Le SDK Vivox historique est introuvable.");
+    await expect(readFile(join(fixture.root, "vivoxsdk_x64.dll"))).rejects.toThrow();
+    await expect(readFile(join(fixture.root, "vivoxsdk_x64_v5.dll"))).rejects.toThrow();
+  });
+
   it("fails closed before mutation when no valid stock backup exists", async () => {
     const fixture = await createFixture();
     const activePath = join(fixture.root, "vivoxsdk_x64.dll");
