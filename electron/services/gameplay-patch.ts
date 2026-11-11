@@ -23,6 +23,11 @@ export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
 /** Exact retired ROTK artifacts an automatic migration may replace. */
 export const RETIRED_GAMEPLAY_PATCHES = Object.freeze([
   Object.freeze({
+    // Launcher 2.0.48: last build that read game memory through ReadProcessMemory.
+    sha256: "f6611f3ab31aa28eca251b54402ca9927efea090b94706d3e41e5c458c9b8caa",
+    bytes: 69_632,
+  }),
+  Object.freeze({
     // Launcher 2.0.47: stock exit, before the player image settings pass.
     sha256: "48268b1080ef1caa7314c45513620d7af3e1db058ba6a43305eb1829095f1eec",
     bytes: 55_808,

@@ -80,6 +80,7 @@ describe("shotgun sprint patch deployment", () => {
     );
     expect(GAMEPLAY_PATCH_BYTES).toBe(71_168);
     expect(RETIRED_GAMEPLAY_PATCHES).toEqual([
+      { sha256: "f6611f3ab31aa28eca251b54402ca9927efea090b94706d3e41e5c458c9b8caa", bytes: 69_632 },
       { sha256: "48268b1080ef1caa7314c45513620d7af3e1db058ba6a43305eb1829095f1eec", bytes: 55_808 },
       { sha256: "f3a66a96f5ddcd7018098948e46b34ba64eecc68d7a12c6fc8d8654055126a74", bytes: 59_904 },
       { sha256: "3d2319e6ac4f598ffe90c9389129e56d4e892896276b639d2d1eeb9b16d6dc6a", bytes: 59_904 },
