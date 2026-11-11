@@ -37,6 +37,8 @@ describe("stance binding migration and rollback", () => {
     try {
       await mkdir(state); await writeFile(join(root, "InputProfile_User.xml"), source);
       await writeFile(join(state, "weapon-stance.v1.json"), broken);
+      // A copy set aside by an earlier recovery must not block this one.
+      await writeFile(join(state, "weapon-stance.v1.json.corrupt"), "older");
       await prepareWeaponStanceProfile(root, state, true);
       expect(await readFile(join(root, "InputProfile_User.xml"), "utf8")).toContain('<Action name="ToggleWeaponStance" version="1"><Trigger>V</Trigger></Action>');
       expect(JSON.parse(await readFile(join(state, "weapon-stance.v1.json"), "utf8"))).toEqual({ added: ["ToggleWeaponStance"], removedNetworkN: false });
