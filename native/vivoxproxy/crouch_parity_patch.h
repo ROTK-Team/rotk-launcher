@@ -35,7 +35,6 @@
 
 typedef enum crouch_mode {
     CROUCH_MODE_DISABLED = 0,
-    CROUCH_MODE_TELEMETRY = 1,
     CROUCH_MODE_PATCH_V1 = 2,
     CROUCH_MODE_PATCH_V2 = 3
 } crouch_mode;
@@ -66,8 +65,6 @@ static SRWLOCK g_crouch_state_lock = SRWLOCK_INIT;
 static crouch_transition_state
     g_crouch_states[CROUCH_STATE_CAPACITY];
 static size_t g_crouch_state_hints[512U];
-
-static size_t crouch_scan_node_defs(void);
 
 static BOOL crouch_sibling_path(const WCHAR *name,
                                 WCHAR *path,
@@ -170,18 +167,6 @@ static BOOL crouch_page_is_readable(DWORD protect) {
            (protect & readable) != 0U;
 }
 
-static BOOL crouch_page_is_writable(DWORD protect) {
-    const DWORD writable =
-        PAGE_READWRITE |
-        PAGE_WRITECOPY |
-        PAGE_EXECUTE_READWRITE |
-        PAGE_EXECUTE_WRITECOPY;
-
-    return (protect & PAGE_GUARD) == 0U &&
-           (protect & PAGE_NOACCESS) == 0U &&
-           (protect & writable) != 0U;
-}
-
 static crouch_mode crouch_read_mode(void) {
     WCHAR marker[32768];
     char contents[1024];
@@ -225,9 +210,6 @@ static crouch_mode crouch_read_mode(void) {
         g_crouch_enable_camera =
             strstr(contents, "cameraScalePitch=direct") != NULL;
         return CROUCH_MODE_PATCH_V1;
-    }
-    if (strstr(contents, "mode=telemetry") != NULL) {
-        return CROUCH_MODE_TELEMETRY;
     }
     return CROUCH_MODE_DISABLED;
 }
@@ -361,19 +343,21 @@ static BOOL crouch_prepare_trampoline(const void *target,
     return TRUE;
 }
 
+/*
+ * The hook runs on the game's animation thread: read the live graph directly.
+ * IsBadReadPtr probes the pages in user mode, so a stale or garbage pointer
+ * still fails the read instead of faulting. The probe and the copy are two
+ * steps: a page another thread unmaps in between would still fault.
+ */
 static BOOL crouch_read_exact(const void *address,
                               void *destination,
                               size_t length) {
-    SIZE_T copied = 0U;
-
-    return address != NULL && destination != NULL && length != 0U &&
-           ReadProcessMemory(
-               GetCurrentProcess(),
-               address,
-               destination,
-               length,
-               &copied) &&
-           copied == length;
+    if (address == NULL || destination == NULL || length == 0U ||
+        IsBadReadPtr(address, length)) {
+        return FALSE;
+    }
+    memcpy(destination, address, length);
+    return TRUE;
 }
 
 /*
@@ -958,7 +942,6 @@ static int crouch_install_runtime_patch(void) {
 
 static DWORD WINAPI crouch_patch_worker(LPVOID parameter) {
     unsigned int attempt;
-    BOOL node_ready = FALSE;
 
     (void)parameter;
     crouch_log("[crouch-parity] patch-v2 ADS-safe v12 worker started");
@@ -966,24 +949,8 @@ static DWORD WINAPI crouch_patch_worker(LPVOID parameter) {
         return 0U;
     }
     for (attempt = 0U; attempt < 240U; ++attempt) {
-        if (!node_ready) {
-            size_t candidates = crouch_scan_node_defs();
-            if (candidates == 0U) {
-                Sleep(250U);
-                continue;
-            }
-            node_ready = TRUE;
-            crouch_log(
-                "[crouch-parity] NodeDef10151 ready candidates=%llu "
-                "attempt=%u",
-                (unsigned long long)candidates,
-                attempt + 1U);
-        }
         int installed = crouch_install_runtime_patch();
-        if (installed > 0) {
-            return 0U;
-        }
-        if (installed < 0) {
+        if (installed != 0) {
             return 0U;
         }
         Sleep(100U);
@@ -993,190 +960,8 @@ static DWORD WINAPI crouch_patch_worker(LPVOID parameter) {
     return 0U;
 }
 
-static size_t crouch_scan_node_defs(void) {
-    /*
-     * Exact first 32 bytes of BR1315 v26 NodeDef 10151, the idle
-     * StandOrCrouch Blend2 that consumes SmoothFloat node 10154. Relocation
-     * starts at +0x20, so this header remains stable after asset loading.
-     *
-     * This scanner is telemetry-only while the marker selects telemetry. It
-     * lets the next patch target the Blend2 connection/weight path actually
-     * consumed by the pose graph instead of mutating SmoothFloat's cached
-     * AttribData after evaluation.
-     */
-    static const uint8_t node_header[32] = {
-        0x6b, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00,
-        0xa7, 0x27, 0xbc, 0x27, 0x02, 0x00, 0x02, 0x00,
-        0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0xcd, 0xcd
-    };
-    SYSTEM_INFO info;
-    uintptr_t cursor;
-    uintptr_t maximum;
-    size_t candidate_count = 0U;
-    const size_t chunk_bytes = 256U * 1024U;
-    const size_t probe_bytes = sizeof(node_header) + 0xb0U;
-    uint8_t *buffer = (uint8_t *)VirtualAlloc(
-        NULL,
-        chunk_bytes + probe_bytes,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE);
-
-    if (buffer == NULL) {
-        crouch_log(
-            "[crouch-parity] scanner buffer allocation failed error=%lu",
-            (unsigned long)GetLastError());
-        return 0U;
-    }
-
-    GetSystemInfo(&info);
-    cursor = (uintptr_t)info.lpMinimumApplicationAddress;
-    maximum = (uintptr_t)info.lpMaximumApplicationAddress;
-    while (cursor < maximum) {
-        MEMORY_BASIC_INFORMATION region;
-        SIZE_T queried = VirtualQuery(
-            (const void *)cursor, &region, sizeof(region));
-        uintptr_t base;
-        size_t size;
-        size_t region_offset;
-
-        if (queried != sizeof(region)) {
-            break;
-        }
-        base = (uintptr_t)region.BaseAddress;
-        size = (size_t)region.RegionSize;
-        if (size == 0U || base > UINTPTR_MAX - size) {
-            break;
-        }
-        if (region.State != MEM_COMMIT ||
-            region.Type != MEM_PRIVATE ||
-            !crouch_page_is_writable(region.Protect) ||
-            size < sizeof(node_header) + 0xb0U) {
-            cursor = base + size;
-            continue;
-        }
-        for (region_offset = 0U; region_offset < size;) {
-            size_t primary_bytes = size - region_offset;
-            size_t trailing_bytes;
-            size_t requested_bytes;
-            SIZE_T copied_bytes = 0U;
-
-            if (primary_bytes > chunk_bytes) {
-                primary_bytes = chunk_bytes;
-            }
-            trailing_bytes = size - region_offset - primary_bytes;
-            if (trailing_bytes > probe_bytes - 1U) {
-                trailing_bytes = probe_bytes - 1U;
-            }
-            requested_bytes = primary_bytes + trailing_bytes;
-            if (ReadProcessMemory(
-                    GetCurrentProcess(),
-                    (const void *)(base + region_offset),
-                    buffer,
-                    requested_bytes,
-                    &copied_bytes)) {
-                const uint8_t *scan = buffer;
-                size_t searchable = primary_bytes;
-
-                if (searchable > (size_t)copied_bytes) {
-                    searchable = (size_t)copied_bytes;
-                }
-                while (searchable != 0U) {
-                    const uint8_t *found = (const uint8_t *)memchr(
-                        scan, node_header[0], searchable);
-                    size_t consumed;
-                    size_t found_offset;
-
-                    if (found == NULL) {
-                        break;
-                    }
-                    consumed = (size_t)(found - scan);
-                    found_offset = (size_t)(found - buffer);
-                    if ((size_t)copied_bytes - found_offset >= probe_bytes &&
-                        memcmp(
-                            found,
-                            node_header,
-                            sizeof(node_header)) == 0) {
-                        uint64_t qwords[18];
-                        size_t index;
-                        char values[1024];
-                        size_t used = 0U;
-
-                        for (index = 0U; index < 18U; ++index) {
-                            memcpy(
-                                &qwords[index],
-                                found + 0x20U +
-                                    index * sizeof(uint64_t),
-                                sizeof(uint64_t));
-                        }
-                        values[0] = '\0';
-                        for (index = 0U;
-                             index < 18U && used < sizeof(values);
-                             ++index) {
-                            int appended = snprintf(
-                                values + used,
-                                sizeof(values) - used,
-                                "%s%02x=%016llx",
-                                index == 0U ? "" : " ",
-                                (unsigned int)(0x20U + index * 8U),
-                                (unsigned long long)qwords[index]);
-                            if (appended <= 0 ||
-                                (size_t)appended >=
-                                    sizeof(values) - used) {
-                                break;
-                            }
-                            used += (size_t)appended;
-                        }
-                        ++candidate_count;
-                        crouch_log(
-                            "[crouch-parity] NodeDef10151 candidate=%p "
-                            "regionType=0x%lx protect=0x%lx %s",
-                            (const void *)(
-                                base + region_offset + found_offset),
-                            (unsigned long)region.Type,
-                            (unsigned long)region.Protect,
-                            values);
-                    }
-                    scan = found + 1;
-                    searchable -= consumed + 1U;
-                }
-            }
-            region_offset += primary_bytes;
-        }
-        cursor = base + size;
-    }
-    VirtualFree(buffer, 0U, MEM_RELEASE);
-    return candidate_count;
-}
-
-static DWORD WINAPI crouch_probe_worker(LPVOID parameter) {
-    unsigned int attempt;
-
-    (void)parameter;
-    crouch_log(
-        "[crouch-parity] telemetry worker started nodeType=%u "
-        "moveNodeId=%u idleNodeId=%u",
-        (unsigned int)CROUCH_NODE_TYPE,
-        (unsigned int)CROUCH_MOVE_NODE_ID,
-        (unsigned int)CROUCH_IDLE_NODE_ID);
-    for (attempt = 0U; attempt < 240U; ++attempt) {
-        size_t candidates = crouch_scan_node_defs();
-        if (candidates != 0U) {
-            crouch_log(
-                "[crouch-parity] telemetry complete candidates=%llu attempt=%u",
-                (unsigned long long)candidates,
-                attempt + 1U);
-            return 0U;
-        }
-        Sleep(250U);
-    }
-    crouch_log("[crouch-parity] telemetry timeout: NodeDef10151 not found");
-    return 0U;
-}
-
 static void crouch_parity_start(void) {
     crouch_mode mode;
-    LPTHREAD_START_ROUTINE worker_entry;
     HANDLE worker;
 
     if (InterlockedCompareExchange(
@@ -1187,11 +972,7 @@ static void crouch_parity_start(void) {
     if (mode == CROUCH_MODE_DISABLED) {
         return;
     }
-    worker_entry = (mode == CROUCH_MODE_PATCH_V1 ||
-                    mode == CROUCH_MODE_PATCH_V2)
-        ? crouch_patch_worker
-        : crouch_probe_worker;
-    worker = CreateThread(NULL, 0U, worker_entry, NULL, 0U, NULL);
+    worker = CreateThread(NULL, 0U, crouch_patch_worker, NULL, 0U, NULL);
     if (worker == NULL) {
         crouch_log(
             "[crouch-parity] CreateThread failed error=%lu",
