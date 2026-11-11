@@ -211,6 +211,15 @@ describe("Vivox client deployment", () => {
     await vivoxClientInternals.assertVivoxCompatibilityWithPolicy(fixture.root, policy);
   });
 
+  it("still refuses a path that exists but is not a file, even with a valid backup", async () => {
+    const fixture = await createFixture();
+    await mkdir(join(fixture.root, "vivoxsdk_x64.dll"));
+    await writeFile(join(fixture.root, "vivoxsdk_x64.original.dll"), contents.v4);
+
+    await expect(deploy(fixture)).rejects.toThrow("Le SDK Vivox historique est introuvable.");
+    await expect(readFile(join(fixture.root, "vivoxsdk_x64_v5.dll"))).rejects.toThrow();
+  });
+
   it("reports a missing SDK when there is no valid backup either", async () => {
     const fixture = await createFixture();
     await writeFile(join(fixture.root, "vivoxsdk_x64.original.dll"), contents.stale);

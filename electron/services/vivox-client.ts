@@ -133,9 +133,14 @@ async function deployVivoxCompatibilityWithPolicy(
 
   // An antivirus can quarantine the active proxy. With a valid stock backup
   // the proxy is simply copied back below, so only a missing file with no
-  // backup to fall back on is fatal.
-  const active = await stat(activePath).catch(() => null);
-  if (active && !active.isFile()) {
+  // backup to fall back on is fatal. Only a file that is really gone counts:
+  // any other stat failure still stops here, as before.
+  let missing = false;
+  const active = await stat(activePath).catch((e: NodeJS.ErrnoException) => {
+    missing = e.code === "ENOENT";
+    return null;
+  });
+  if (!missing && !active?.isFile()) {
     throw new Error("Le SDK Vivox historique est introuvable.");
   }
 
@@ -148,7 +153,7 @@ async function deployVivoxCompatibilityWithPolicy(
       await atomicCopy(legacyBackupPath, backupPath);
     } else if (activeHash === policy.stockV4Sha256) {
       await atomicCopy(activePath, backupPath);
-    } else if (!active) {
+    } else if (missing) {
       throw new Error("Le SDK Vivox historique est introuvable.");
     } else {
       throw new Error("La sauvegarde du SDK Vivox historique est invalide.");
