@@ -81,13 +81,14 @@ it('an interrupted opted-in session is collected and uploaded on restart', async
   // The launcher or Windows stopped during the game: the session was never finalized.
   const interrupted = await new DiagnosticReportService({ directory })
     .beginSession({ launcherVersion: '2.0.38', serverLabel: 'Test', debugSessionEnabled: true, diagnosticUploadConsent: 1 });
-  const remoteId = randomUUID();
-  const controller: DiagnosticController = new DiagnosticController({ directory, helperPath: 'unavailable.exe', knownSecrets: () => [], onChange: () => {},
+  const remoteId = randomUUID(), onDebugSent = vi.fn();
+  const controller: DiagnosticController = new DiagnosticController({ directory, helperPath: 'unavailable.exe', knownSecrets: () => [], onChange: () => {}, onDebugSent,
     uploadSession: async (id) => { await controller.reports.prepareUpload(id); return remoteId; } });
   await controller.initialize(false, true);
   // Network recovery is not awaited by initialize.
   await vi.waitFor(() => expect(controller.debugState().status).not.toBe('preparing'), { timeout: 10_000 });
-  expect(controller.debugState()).toMatchObject({ status: 'ready', fileName: remoteId });
+  expect(controller.debugState()).toMatchObject({ enabled: false, status: 'ready', fileName: remoteId });
+  expect(onDebugSent).toHaveBeenCalledOnce();
   const record = await controller.reports.getReport(interrupted.id);
   expect(record.summary.kind).toBe('interrupted');
   expect(record.context.debugRemoteReportId).toBe(remoteId);
