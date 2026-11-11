@@ -15,9 +15,13 @@ static BOOL stance_initialized, stance_pressed;
 static BYTE *stance_rule_cache, *stance_rule_node, *stance_rule_value;
 static unsigned long stance_toggles;
 
+/* Hooks run on the game thread: read game memory directly. IsBadReadPtr probes
+ * the pages in user mode, so a stale pointer still fails the read instead of faulting.
+ * The probe and the copy are two steps: a page another thread unmaps in between would still fault. */
 static BOOL stance_read(const void *p, void *out, SIZE_T size) {
-    SIZE_T done = 0;
-    return p != NULL && ReadProcessMemory(GetCurrentProcess(), p, out, size, &done) && done == size;
+    if (p == NULL || IsBadReadPtr(p, size)) return FALSE;
+    memcpy(out, p, size);
+    return TRUE;
 }
 static uintptr_t stance_ptr(const void *p) {
     uintptr_t n = 0; (void)stance_read(p, &n, sizeof(n)); return n;

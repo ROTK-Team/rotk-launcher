@@ -327,35 +327,17 @@ static BOOL exact_bytes(
     const BYTE *address,
     const BYTE *expected,
     SIZE_T size) {
-    BYTE observed[64];
-    SIZE_T transferred = 0U;
-
-    if (size == 0U || size > sizeof(observed) ||
-        !readable_range(address, size) ||
-        !ReadProcessMemory(
-            GetCurrentProcess(),
-            address,
-            observed,
-            size,
-            &transferred) ||
-        transferred != size) {
+    if (size == 0U || size > 64U || !readable_range(address, size)) {
         return FALSE;
     }
-    return memcmp(observed, expected, size) == 0;
+    return memcmp(address, expected, size) == 0;
 }
 
 static BOOL read_byte(const BYTE *address, BYTE *value) {
-    SIZE_T transferred = 0U;
-    if (value == NULL || !readable_range(address, 1U) ||
-        !ReadProcessMemory(
-            GetCurrentProcess(),
-            address,
-            value,
-            1U,
-            &transferred) ||
-        transferred != 1U) {
+    if (value == NULL || !readable_range(address, 1U)) {
         return FALSE;
     }
+    *value = *(const volatile BYTE *)address;
     return TRUE;
 }
 
@@ -405,28 +387,20 @@ static BOOL validate_h1z1_image(HMODULE module, BYTE **image_base) {
     HANDLE file;
     LARGE_INTEGER file_size;
     DWORD path_length;
-    SIZE_T transferred = 0U;
     BOOL valid_size;
 
-    if (base == NULL ||
-        !ReadProcessMemory(
-            GetCurrentProcess(),
-            base,
-            &dos,
-            sizeof(dos),
-            &transferred) ||
-        transferred != sizeof(dos) ||
-        dos.e_magic != IMAGE_DOS_SIGNATURE ||
+    if (base == NULL || !readable_range(base, sizeof(dos))) {
+        return FALSE;
+    }
+    memcpy(&dos, base, sizeof(dos));
+    if (dos.e_magic != IMAGE_DOS_SIGNATURE ||
         dos.e_lfanew <= 0 ||
         dos.e_lfanew > 0x1000 ||
-        !ReadProcessMemory(
-            GetCurrentProcess(),
-            base + dos.e_lfanew,
-            &nt,
-            sizeof(nt),
-            &transferred) ||
-        transferred != sizeof(nt) ||
-        nt.Signature != IMAGE_NT_SIGNATURE ||
+        !readable_range(base + dos.e_lfanew, sizeof(nt))) {
+        return FALSE;
+    }
+    memcpy(&nt, base + dos.e_lfanew, sizeof(nt));
+    if (nt.Signature != IMAGE_NT_SIGNATURE ||
         nt.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
         nt.FileHeader.TimeDateStamp != ROTK_H1Z1_TIMESTAMP ||
         nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||

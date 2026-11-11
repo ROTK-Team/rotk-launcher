@@ -24,17 +24,16 @@ static const BYTE respawn_continuation_guard[] = {0xe9,0x04,0x6d,0xf9,0xff};
 /* 1: repaired/already repaired, 0: unsupported, -1: OS operation failed. */
 static int respawn_address_install(BYTE *base) {
     uint64_t image_base = 0, operand = 0;
-    SIZE_T done = 0;
     DWORD old;
     volatile LONG64 *slot = (volatile LONG64 *)(base + RESPAWN_OPERAND_RVA);
     if (((uintptr_t)slot & 7U) ||
         !exact_bytes(base + RESPAWN_READER_RVA, respawn_reader_guard, sizeof(respawn_reader_guard)) ||
         !exact_bytes(base + RESPAWN_CONTINUATION_RVA, respawn_continuation_guard, sizeof(respawn_continuation_guard)) ||
-        !ReadProcessMemory(GetCurrentProcess(), base + RESPAWN_BASE_RVA,
-                           &image_base, sizeof(image_base), &done) || done != sizeof(image_base) ||
-        image_base != (uintptr_t)base ||
-        !ReadProcessMemory(GetCurrentProcess(), (const void *)slot,
-                           &operand, sizeof(operand), &done) || done != sizeof(operand)) return 0;
+        !readable_range(base + RESPAWN_BASE_RVA, sizeof(image_base)) ||
+        !readable_range((const BYTE *)slot, sizeof(operand))) return 0;
+    memcpy(&image_base, base + RESPAWN_BASE_RVA, sizeof(image_base));
+    operand = (uint64_t)*slot;
+    if (image_base != (uintptr_t)base) return 0;
     if (operand == RESPAWN_CONTINUATION_RVA) return 1;
     if (operand != image_base + RESPAWN_CONTINUATION_RVA) return 0;
     if (!VirtualProtect((void *)slot, sizeof(*slot), PAGE_EXECUTE_READWRITE, &old)) return -1;
