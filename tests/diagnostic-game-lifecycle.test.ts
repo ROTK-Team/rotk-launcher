@@ -92,6 +92,19 @@ describe('game lifecycle remains independent of diagnostics', () => {
     await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce());
   });
 
+  it('stops only its own running game, and the exit event hands Play back', async () => {
+    const f = await fixture();
+    expect(f.launcher.stop()).toBe(false);
+    expect(await f.launcher.launch(f.request)).toBe(4242);
+    f.child().kill.mockReturnValue(true);
+    expect(f.launcher.stop()).toBe(true);
+    expect(f.child().kill).toHaveBeenCalledOnce();
+    f.child().exit(1);
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledWith(1));
+    expect(f.launcher.stop()).toBe(false);
+    expect(f.child().kill).toHaveBeenCalledOnce();
+  });
+
   it('never publishes presence for a startup crash and tolerates a broken presence hook', async () => {
     const f = await fixture();
     f.request.presence = { start: vi.fn(), stop: vi.fn(() => { throw new Error('Discord unavailable'); }) };

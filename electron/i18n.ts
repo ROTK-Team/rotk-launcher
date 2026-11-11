@@ -48,6 +48,15 @@ export const MAIN_COPY = {
       "not-downloaded": "The launcher update has not been downloaded yet.",
       gameRunning: "Close H1Z1 before updating the launcher.",
     },
+    stopGame: {
+      title: "Close H1Z1",
+      message: "Use this only if the game window is already gone or no longer responds. A match in progress is lost.",
+      strayMessage: "H1Z1 from this installation is still running, probably without a window, since an earlier launcher session. Close it? A match in progress is lost.",
+      strayClosed: "H1Z1 was closed. Click Play again.",
+      strayNotClosed: "Windows refused to close H1Z1: it may be running as administrator. End H1Z1.exe in Task Manager, then click Play again.",
+      confirm: "Close H1Z1",
+      cancel: "Cancel",
+    },
     assets: {
       busy: "An asset synchronization is already in progress.",
       disabled: "Asset synchronization is disabled in the launcher settings.",
@@ -106,6 +115,15 @@ export const MAIN_COPY = {
       gameRunning: "Ferme H1Z1 avant de mettre à jour le launcher.",
       required: "Mets à jour le launcher ROTK avant de jouer.",
     },
+    stopGame: {
+      title: "Fermer H1Z1",
+      message: "À utiliser seulement si la fenêtre du jeu a déjà disparu ou ne répond plus. Une partie en cours sera perdue.",
+      strayMessage: "Le H1Z1 de cette installation tourne encore, sans doute sans fenêtre, depuis une session précédente du launcher. Le fermer ? Une partie en cours sera perdue.",
+      strayClosed: "H1Z1 a été fermé. Clique de nouveau sur Jouer.",
+      strayNotClosed: "Windows a refusé de fermer H1Z1 : il tourne peut-être en administrateur. Termine H1Z1.exe dans le Gestionnaire des tâches, puis clique de nouveau sur Jouer.",
+      confirm: "Fermer H1Z1",
+      cancel: "Annuler",
+    },
     assets: {
       busy: "Une synchronisation des assets est déjà en cours.",
       disabled: "La synchronisation des assets est désactivée dans les réglages du launcher.",
@@ -163,6 +181,15 @@ export const MAIN_COPY = {
       "no-update": "暂时没有启动器更新。",
       "not-downloaded": "启动器更新还没有下载完成。",
       gameRunning: "请先关闭 H1Z1，再更新启动器。",
+    },
+    stopGame: {
+      title: "关闭 H1Z1",
+      message: "仅在游戏窗口已消失或无响应时使用。正在进行的对局将会丢失。",
+      strayMessage: "此安装的 H1Z1 自上次启动器会话起仍在运行（可能没有窗口）。要关闭它吗？正在进行的对局将会丢失。",
+      strayClosed: "H1Z1 已关闭。请再次点击开始游戏。",
+      strayNotClosed: "Windows 拒绝关闭 H1Z1：它可能正以管理员身份运行。请在任务管理器中结束 H1Z1.exe，然后再次点击开始游戏。",
+      confirm: "关闭 H1Z1",
+      cancel: "取消",
     },
     assets: {
       busy: "资源正在同步中。",

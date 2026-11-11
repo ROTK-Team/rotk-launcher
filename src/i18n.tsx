@@ -54,6 +54,7 @@ export interface Copy {
   footer: {
     play: string;
     inGame: string;
+    stopGame: string;
     process: string;
     activeProcess: string;
     launching: string;
@@ -255,6 +256,7 @@ const COPY: Record<AppLocale, Copy> = {
     footer: {
       play: "PLAY",
       inGame: "IN GAME",
+      stopGame: "Close H1Z1 (game window gone or not responding)",
       process: "PROCESS",
       activeProcess: "ACTIVE PROCESS",
       launching: "LAUNCHING",
@@ -486,6 +488,7 @@ const COPY: Record<AppLocale, Copy> = {
     footer: {
       play: "JOUER",
       inGame: "EN JEU",
+      stopGame: "Fermer H1Z1 (fenêtre du jeu disparue ou bloquée)",
       process: "PROCESSUS",
       activeProcess: "PROCESSUS ACTIF",
       launching: "LANCEMENT",
@@ -717,6 +720,7 @@ const COPY: Record<AppLocale, Copy> = {
     footer: {
       play: "开始游戏",
       inGame: "游戏中",
+      stopGame: "关闭 H1Z1（游戏窗口已消失或无响应）",
       process: "进程",
       activeProcess: "运行中的进程",
       launching: "正在启动",

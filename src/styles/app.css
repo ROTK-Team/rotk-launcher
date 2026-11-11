@@ -2129,6 +2129,10 @@ button:focus-visible {
 .play-button:not(:disabled)::before { display: none; }
 .play-button:not(:disabled) > svg { transition: transform .2s ease; }
 .play-button:not(:disabled):hover > svg { transform: translateX(4px); }
+/* IN GAME keeps its idle look although it stays clickable (it offers to close a stuck H1Z1). */
+.play-button.is-running, .play-button.is-running:hover { background: #252522; color: #77756f; }
+.play-button.is-running:hover { color: var(--paper); }
+.play-button.is-running:hover > svg { transform: none; }
 .install-panel, .identity-panel { background: #0d0d0d; }
 .install-panel h2, .identity-panel h2 { font-size: 31px; line-height: 1.1; letter-spacing: -.02em; }
 .install-panel__intro, .identity-panel__intro { color: #b8b8b8; }
