@@ -77,6 +77,8 @@ export class DiagnosticController {
     collectClientContext?: (context: DiagnosticSessionContext) => Promise<Record<string, unknown>>;
     onDebugChange?: () => void;
     onDebugReport?: (path: string) => void;
+    /** Debug covers one report: it turns itself off once that report exists. */
+    onDebugSent?: () => void;
     onDebugFailure?: (code: string, reason: DebugReportFailureReason, error: unknown) => void;
     uploadSession?: (id: string, context: DiagnosticSessionContext) => Promise<string>;
   }) {
@@ -284,7 +286,7 @@ export class DiagnosticController {
       if (!report.collectionCompletedAt) await this.reports.collectSession(id);
       const remoteId = await this.options.uploadSession(id, report.context);
       await this.reports.updateSession(id, { debugRemoteReportId: remoteId, debugUploadedAt: new Date().toISOString() });
-      this.debug = { ...this.debug, status: 'ready', fileName: remoteId, error: null, failure: null }; this.changed(); return;
+      this.debugDone({ status: 'ready', fileName: remoteId, error: null, failure: null }); return;
     }
     if (!this.options.exportDirectory) throw new Error("Debug export directory is unavailable");
     await mkdir(this.options.exportDirectory, { recursive: true });
@@ -294,8 +296,14 @@ export class DiagnosticController {
     await this.reports.exportReport(id, path, { includeDumps: true,
       description: "Session enregistrée avec Debug activé avant le lancement. Comparer la chronologie des performances et les journaux du client ; une coïncidence ne prouve pas la cause du stutter." });
     await this.reports.updateSession(id, { debugExportedFile: fileName, debugExportedAt: new Date().toISOString() });
-    this.debug = { ...this.debug, status: "ready", fileName, error: null, failure: null };
+    this.debugDone({ status: "ready", fileName, error: null, failure: null });
     try { this.options.onDebugReport?.(path); } catch { /* The completed ZIP remains available. */ }
+  }
+
+  // A failed report keeps Debug on so the next launcher start retries it.
+  private debugDone(result: Omit<DebugSessionSummary, "enabled">): void {
+    this.debug = { ...result, enabled: false };
+    try { this.options.onDebugSent?.(); } catch { /* The report is sent; only the saved setting lags. */ }
     this.changed();
   }
 

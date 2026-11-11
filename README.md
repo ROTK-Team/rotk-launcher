@@ -7,7 +7,8 @@ private uploads after the game exits. A previous local-only Debug preference doe
 not authorize transmission. The launcher sends bounded, redacted technical text
 and available memory dumps, then displays the server's report reference. It does
 not ask players to send ZIPs. Dumps can contain private data and remain quarantined
-at reception; reports expire after seven days. Disable Debug after testing.
+at reception; reports are deleted within seven days. Debug covers one game: it turns
+itself off once that game's report is sent, and stays on after a failed report.
 
 An interrupted transfer keeps its local evidence; restarting the launcher retries
 the latest eligible report when Debug is still enabled. A changed key/account

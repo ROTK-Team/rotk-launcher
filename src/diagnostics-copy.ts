@@ -23,7 +23,7 @@ export const DIAGNOSTICS_COPY: Record<AppLocale, DiagnosticsCopy> = {
     debug: {
       title: "Debug",
       enable: "Debug and send session reports",
-      description: "Enable before playing to send technical logs, performance data and available memory dumps privately to ROTK after each game. Dumps may contain private data. No screen or microphone recording. Reports are deleted after 7 days. Turn off after testing.",
+      description: "Enable before playing to send technical logs, performance data and available memory dumps privately to ROTK after your next game. Dumps may contain private data. No screen or microphone recording. Reports are deleted within 7 days. Debug covers one game: it turns itself off once the report has been sent.",
       enabled: "Debug is ready for your next game.",
       saving: "Saving…",
       recording: "Debug is active. Your game session is being recorded.",
@@ -45,7 +45,7 @@ export const DIAGNOSTICS_COPY: Record<AppLocale, DiagnosticsCopy> = {
     debug: {
       title: "Debug",
       enable: "Debug et envoi des rapports",
-      description: "À activer avant de jouer pour envoyer à ROTK, en privé après chaque partie, les logs techniques, les performances et les dumps mémoire disponibles. Les dumps peuvent contenir des données privées. Aucun enregistrement de l’écran ou du micro. Rapports supprimés après 7 jours. Désactive après les essais.",
+      description: "À activer avant de jouer pour envoyer à ROTK, en privé après ta prochaine partie, les logs techniques, les performances et les dumps mémoire disponibles. Les dumps peuvent contenir des données privées. Aucun enregistrement de l’écran ou du micro. Rapports supprimés sous 7 jours. Debug vaut pour une partie : il se désactive tout seul une fois le rapport envoyé.",
       enabled: "Debug prêt pour ta prochaine partie.",
       saving: "Enregistrement…",
       recording: "Debug actif. Ta session de jeu est enregistrée.",
@@ -67,7 +67,7 @@ export const DIAGNOSTICS_COPY: Record<AppLocale, DiagnosticsCopy> = {
     debug: {
       title: "调试",
       enable: "调试并发送会话报告",
-      description: "在游戏前开启，每局结束后会把技术日志、性能数据和可用的内存转储私下发送给 ROTK。转储可能包含隐私数据。不会录制屏幕或麦克风。报告会在 7 天后删除。测试结束后请关闭。",
+      description: "在游戏前开启，下一局结束后会把技术日志、性能数据和可用的内存转储私下发送给 ROTK。转储可能包含隐私数据。不会录制屏幕或麦克风。报告会在 7 天内删除。调试只对一局游戏有效：报告发送后会自动关闭。",
       enabled: "调试已为下一局游戏准备就绪。",
       saving: "正在保存…",
       recording: "调试已开启，正在记录你的游戏会话。",

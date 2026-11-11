@@ -1637,6 +1637,13 @@ async function initialize(): Promise<void> {
       assetSyncEnabled: context.assetSyncEnabled === true, assetPackVersion: context.assetPackVersion,
       assetState: await assetSync.readState().catch(() => null) }),
     onDebugChange: () => { void broadcastSnapshot(); },
+    onDebugSent: () => {
+      // Same guard as the Debug toggle: a click during this save is refused, not lost.
+      debugSettingWrite = true;
+      void configStore.load().then((config) => configStore.save({ ...config, debugSessionEnabled: false }))
+        .catch((error: unknown) => startupLog.mark("debug-setting-save-failed", errorMessage(error)))
+        .finally(() => { debugSettingWrite = false; });
+    },
     // The player sees the reason; startup.log keeps the error behind it.
     onDebugFailure: (code, reason, error) => startupLog.mark(code, redactDiagnosticText([reason,
       (error as NodeJS.ErrnoException | null)?.code, error instanceof Error ? error.message : String(error)].filter(Boolean).join(" | "))),
