@@ -9,17 +9,27 @@ export const ELEVATION_RELAUNCH_ARGUMENT = "--rotk-elevation-relaunch";
 type NativeCommand = "--admin-status" | "--elevate-launcher";
 type NativeRunner = (helperPath: string, command: NativeCommand, timeoutMs: number) => Promise<string>;
 
+/** The bundled helper is missing or damaged: a reinstall fixes it, administrator rights do not. */
+export class StartupHelperDamagedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StartupHelperDamagedError";
+  }
+}
+
 async function runNativeHelper(helperPath: string, command: NativeCommand, timeoutMs: number): Promise<string> {
   // Match the bundled helper's signing-aware sidecar; refuse missing, linked,
   // oversized or damaged resources before running any native code.
-  const [binaryInfo, sidecarInfo] = await Promise.all([lstat(helperPath), lstat(`${helperPath}.sha256`)]);
+  const [binaryInfo, sidecarInfo] = await Promise.all([lstat(helperPath), lstat(`${helperPath}.sha256`)]).catch(() => {
+    throw new StartupHelperDamagedError("Startup helper resources are missing.");
+  });
   if (!binaryInfo.isFile() || !sidecarInfo.isFile() || binaryInfo.size > 16 * 1024 * 1024 || sidecarInfo.size > 1024) {
-    throw new Error("Invalid startup helper resources.");
+    throw new StartupHelperDamagedError("Invalid startup helper resources.");
   }
   const [binary, sidecar] = await Promise.all([readFile(helperPath), readFile(`${helperPath}.sha256`, "utf8")]);
   const expected = sidecar.trim().split(/\s+/)[0]?.toLowerCase();
   if (!expected || !/^[a-f0-9]{64}$/.test(expected) || createHash("sha256").update(binary).digest("hex") !== expected) {
-    throw new Error("Startup helper integrity check failed.");
+    throw new StartupHelperDamagedError("Startup helper integrity check failed.");
   }
   const { stdout } = await execFileAsync(helperPath, [command], {
     windowsHide: true, shell: false, timeout: timeoutMs, maxBuffer: 64 * 1024,
@@ -52,7 +62,7 @@ export function windowsElevation(helperPath: string, run: NativeRunner = runNati
   };
 }
 
-export type ElevationFailure = "check-failed" | "required" | "development" | "relaunch-failed";
+export type ElevationFailure = "check-failed" | "helper-damaged" | "required" | "development" | "relaunch-failed";
 export interface ElevatedStartupOptions {
   platform: NodeJS.Platform;
   isPackaged: boolean;
@@ -66,7 +76,7 @@ export interface ElevatedStartupActions {
   initialize(): Promise<void>;
   quit(): void;
   reportFailure(reason: ElevationFailure): void;
-  mark(event: string): void;
+  mark(event: string, detail?: string): void;
 }
 
 /** No window, IPC handlers, account data or launch services before this gate. */
@@ -81,9 +91,12 @@ export async function startWithRequiredElevation(
   let elevated: boolean;
   try {
     elevated = await actions.isAdministrator();
-  } catch {
-    actions.mark("elevation-check-failed");
-    actions.reportFailure("check-failed");
+  } catch (error) {
+    // A damaged helper looks like a permission problem to the player; say what
+    // actually fixes it (reinstalling) and keep the cause in startup.log.
+    const damaged = error instanceof StartupHelperDamagedError;
+    actions.mark(damaged ? "elevation-helper-damaged" : "elevation-check-failed", errorDetail(error));
+    actions.reportFailure(damaged ? "helper-damaged" : "check-failed");
     actions.quit();
     return;
   }
@@ -110,4 +123,8 @@ export async function startWithRequiredElevation(
     actions.reportFailure("relaunch-failed");
   }
   actions.quit();
+}
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

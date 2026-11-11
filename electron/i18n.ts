@@ -34,6 +34,7 @@ export const MAIN_COPY = {
     startupSafety: "No H1Z1 files were modified.",
     elevation: {
       "check-failed": "Windows administrator rights could not be verified. The launcher will close. Try Run as administrator.",
+      "helper-damaged": "A launcher file is missing or damaged, often after an interrupted update. The launcher will close. Reinstall ROTK Launcher over your current installation.",
       required: "ROTK Launcher requires Windows administrator rights and will close. Use Run as administrator to start it.",
       development: "ROTK Launcher requires administrator rights. Start the development terminal as administrator, then run the launcher again.",
       "relaunch-failed": "Windows could not restart ROTK Launcher as administrator. The launcher will close. Try Run as administrator.",
@@ -101,6 +102,7 @@ export const MAIN_COPY = {
     startupSafety: "Aucun fichier H1Z1 n’a été modifié.",
     elevation: {
       "check-failed": "Les droits administrateur Windows n’ont pas pu être vérifiés. Le launcher va se fermer. Essaie Exécuter en tant qu’administrateur.",
+      "helper-damaged": "Un fichier du launcher est manquant ou endommagé, souvent après une mise à jour interrompue. Le launcher va se fermer. Réinstalle ROTK Launcher par-dessus ton installation actuelle.",
       required: "ROTK Launcher exige les droits administrateur Windows et va se fermer. Utilise Exécuter en tant qu’administrateur pour le démarrer.",
       development: "ROTK Launcher exige les droits administrateur. Démarre le terminal de développement en tant qu’administrateur, puis relance le launcher.",
       "relaunch-failed": "Windows n’a pas pu relancer ROTK Launcher en tant qu’administrateur. Le launcher va se fermer. Essaie Exécuter en tant qu’administrateur.",
@@ -168,6 +170,7 @@ export const MAIN_COPY = {
     startupSafety: "H1Z1 的游戏文件没有被改动。",
     elevation: {
       "check-failed": "无法确认 Windows 管理员权限。启动器即将关闭。请尝试“以管理员身份运行”。",
+      "helper-damaged": "启动器的某个文件缺失或已损坏，通常是更新被中断所致。启动器即将关闭。请在当前安装上重新安装 ROTK 启动器。",
       required: "ROTK 启动器需要 Windows 管理员权限，即将关闭。请使用“以管理员身份运行”来启动。",
       development: "ROTK 启动器需要管理员权限。请以管理员身份打开开发终端，然后重新运行启动器。",
       "relaunch-failed": "Windows 无法以管理员身份重新启动 ROTK 启动器。启动器即将关闭。请尝试“以管理员身份运行”。",
