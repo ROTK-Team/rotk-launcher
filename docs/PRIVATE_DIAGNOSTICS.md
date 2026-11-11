@@ -8,7 +8,9 @@ and these historical/local export tools; its ZIP player instructions are superse
 `diagnosticUploadConsent: 1` is required in addition to `debugSessionEnabled`.
 No previous preference silently enables uploads. The visible checkbox describes
 automatic transfer, private dump contents, no screen/microphone capture, and
-seven-day server retention. Disabling the option prevents startup retry.
+seven-day server retention. Disabling the option prevents startup retry. The
+option covers one game: it turns itself off, saved setting included, once that
+game's report is acknowledged; a failed report keeps it on for the startup retry.
 
 Each recording captures its server/role and a digest of its account credential.
 The digest stays in the private session record and is excluded from exported

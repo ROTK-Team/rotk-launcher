@@ -239,7 +239,7 @@ peuvent aider à distinguer une attente stable d’un traitement lent.
 La capture automatique utilise un **minidump**, jamais un dump complet. La
 collecte des exceptions, registres, modules et mesures mémoire/CPU reste active
 dans le mécanisme de diagnostic. Le parcours joueur propose uniquement la case
-**Debug** pour les prochaines sessions, puis l’export automatique à la fermeture
+**Debug** pour la prochaine session, puis l’export automatique à la fermeture
 du jeu ; il ne demande aucune sélection de dump complet.
 
 Les API backend de déclaration, capture et export manuels restent disponibles
