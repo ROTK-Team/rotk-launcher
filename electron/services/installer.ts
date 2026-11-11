@@ -430,8 +430,6 @@ export async function installClient(request: InstallRequest): Promise<Installati
   const sourceRoot = await validateClientSource(request.sourceRoot);
   const destinationRoot = await validateInstallDestination(request.destinationRoot, sourceRoot);
   assertOutsideLauncherFolder(destinationRoot, request.launcherFolder);
-  const destinationParent = dirname(destinationRoot);
-  await mkdir(destinationParent, { recursive: true });
 
   const state = await inspectDestination(destinationRoot);
   if (state === "foreign") {
@@ -444,6 +442,8 @@ export async function installClient(request: InstallRequest): Promise<Installati
   const existingMarker = state === "installed" ? await readInstallationMarker(destinationRoot) : null;
   const repairing = existingMarker !== null;
 
+  // Creates missing parents too. Never mkdir the parent on its own: for G:\ROTK
+  // it is G:\, and Windows refuses mkdir on a drive root (EPERM, even recursive).
   await mkdir(destinationRoot, { recursive: true });
   await removeLegacyStagingDirectories(destinationRoot);
   const pending = (await readPendingMarker(destinationRoot)) ?? {
