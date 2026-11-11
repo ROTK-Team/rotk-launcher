@@ -343,11 +343,17 @@ static BOOL crouch_prepare_trampoline(const void *target,
     return TRUE;
 }
 
-/* The hook runs on the game's animation thread: read the live graph directly. */
+/*
+ * The hook runs on the game's animation thread: read the live graph directly.
+ * IsBadReadPtr probes the pages in user mode, so a stale or garbage pointer
+ * still fails the read instead of faulting. The probe and the copy are two
+ * steps: a page another thread unmaps in between would still fault.
+ */
 static BOOL crouch_read_exact(const void *address,
                               void *destination,
                               size_t length) {
-    if (address == NULL || destination == NULL || length == 0U) {
+    if (address == NULL || destination == NULL || length == 0U ||
+        IsBadReadPtr(address, length)) {
         return FALSE;
     }
     memcpy(destination, address, length);

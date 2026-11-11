@@ -124,9 +124,27 @@ static void pickup_seat_pose(void) {
         assert(tick_raw(901, 0, .61f, moving) == .61f);
     }
 }
+/* A pointer the game no longer maps must keep the stock pose, not fault. */
+static void unmapped_graph(void) {
+    unsigned char *page = VirtualAlloc(NULL, 8192, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    DWORD old;
+    assert(page != NULL && VirtualProtect(page + 4096, 4096, PAGE_NOACCESS, &old));
+    reset(0, 0);
+    *(void **)(generation + 0x330) = page + 4096;            /* pin entries gone */
+    assert(tick_raw(1, 1, .42f, 0) == .42f);
+    *(void **)(generation + 0x330) = &control_generation;
+    control_generation = page + 4096 - 0x12;                 /* float straddles the gap */
+    assert(tick_raw(2, 1, .43f, 0) == .43f);
+    control_generation = (void *)(uintptr_t)0x4d8;           /* garbage attrib */
+    assert(tick_raw(3, 1, .44f, 0) == .44f);
+    *(void **)(network + 8) = page + 4096;                   /* node bins gone */
+    assert(tick_raw(4, 1, .45f, 0) == .45f);
+    VirtualFree(page, 0, MEM_RELEASE);
+}
 int main(void) {
     pickup_seat_pose();
     nominal();
+    unmapped_graph();
     reset(0,0);
     g_crouch_blend_call_count = 0;
     tick(1,1,0); tick(501,1,0); tick(3001,0,0);
