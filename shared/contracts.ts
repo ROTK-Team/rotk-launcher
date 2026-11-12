@@ -70,6 +70,15 @@ export interface AssetSyncProgress {
   totalBytes: number;
 }
 
+/**
+ * An asset update downloaded while the launcher waits: "downloading" with its
+ * progress, then "ready" until Play installs it.
+ */
+export interface AssetPrefetchSummary {
+  status: "downloading" | "ready";
+  progress: AssetSyncProgress | null;
+}
+
 export interface AssetSyncSummary {
   enabled: boolean;
   status: AssetSyncStatus;
@@ -78,6 +87,8 @@ export interface AssetSyncSummary {
   lastSyncAt: string | null;
   progress: AssetSyncProgress | null;
   warning: AssetSyncWarning | null;
+  /** Background download of the next asset update, if there is one. */
+  prefetch: AssetPrefetchSummary | null;
 }
 
 export interface ServerOption {

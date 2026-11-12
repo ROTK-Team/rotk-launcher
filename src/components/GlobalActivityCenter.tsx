@@ -55,6 +55,7 @@ function stage(activity: GlobalActivity, copy: Copy): string {
     return installStage ? copy.install.progressPhases[installStage] : copy.footer.installing;
   }
   if (activity.kind === "asset-sync") {
+    if (activity.stage === "background") return copy.activity.backgroundDownload;
     const assetStage = activity.stage as AssetSyncProgress["phase"] | null;
     return assetStage ? copy.assets.status[assetStage] : copy.assets.updating;
   }

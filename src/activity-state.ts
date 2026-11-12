@@ -14,7 +14,7 @@ export type GlobalActivityKind =
 export interface GlobalActivity {
   id: "primary" | "launcher-update";
   kind: GlobalActivityKind;
-  stage: InstallProgress["phase"] | AssetSyncProgress["phase"] | "launching" | "checking" | "downloading" | null;
+  stage: InstallProgress["phase"] | AssetSyncProgress["phase"] | "launching" | "checking" | "downloading" | "background" | null;
   detail: string | null;
   progressPercent: number | null;
   completedBytes: number | null;
@@ -65,6 +65,24 @@ function assetActivity(snapshot: LauncherSnapshot): GlobalActivity | null {
     stage: progress?.phase ?? status,
     detail: progress?.assetName || null,
     progressPercent,
+    completedBytes: progress?.totalBytes ? progress.completedBytes : null,
+    totalBytes: progress?.totalBytes || null,
+    completedItems: progress?.totalAssets ? progress.assetsCompleted : null,
+    totalItems: progress?.totalAssets || null,
+  };
+}
+
+/** An asset update downloading while the launcher waits; Play stays available. */
+function prefetchActivity(snapshot: LauncherSnapshot): GlobalActivity | null {
+  const prefetch = snapshot.assetSync.prefetch;
+  if (prefetch?.status !== "downloading") return null;
+  const progress = prefetch.progress;
+  return {
+    id: "primary",
+    kind: "asset-sync",
+    stage: "background",
+    detail: progress?.assetName || null,
+    progressPercent: progress ? ratioPercent(progress.completedBytes, progress.totalBytes) : null,
     completedBytes: progress?.totalBytes ? progress.completedBytes : null,
     totalBytes: progress?.totalBytes || null,
     completedItems: progress?.totalAssets ? progress.assetsCompleted : null,
@@ -131,7 +149,8 @@ export function selectGlobalActivities(snapshot: LauncherSnapshot): GlobalActivi
   const primary = installActivity(snapshot)
     ?? assetActivity(snapshot)
     ?? integrityActivity(snapshot)
-    ?? launchActivity(snapshot);
+    ?? launchActivity(snapshot)
+    ?? prefetchActivity(snapshot);
   const update = updateActivity(snapshot);
   return [primary, update].filter((activity): activity is GlobalActivity => activity !== null);
 }

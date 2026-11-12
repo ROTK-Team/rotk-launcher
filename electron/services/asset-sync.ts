@@ -61,6 +61,8 @@ const MANIFEST_TIMEOUT_MS = 10_000;
 const DOWNLOAD_ATTEMPTS = 4;
 // A download that sends nothing for this long is dropped and resumed.
 const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
+// Nobody waits on a background download: fewer progress events are enough.
+const PREFETCH_PROGRESS_INTERVAL_MS = 500;
 const STATE_FILE_NAME = "asset-state.v1.json";
 const CACHE_DIRECTORY_NAME = "asset-cache";
 const BACKUP_DIRECTORY_NAME = "asset-backups";
@@ -122,6 +124,12 @@ export interface AssetSyncState {
 export interface AssetSyncOutcome {
   status: "up-to-date" | "updated" | "offline-warning";
   packVersion: string | null;
+}
+
+export interface AssetPrefetchOutcome {
+  packVersion: string;
+  /** Payloads the next sync will install, all in the cache now. */
+  pendingAssets: number;
 }
 
 export interface AssetSyncServiceOptions {
@@ -353,13 +361,15 @@ function relativeToNative(relativePath: string): string {
 
 /**
  * Each pending pack is downloaded, then extracted next to its target, with the
- * replaced original backed up: plan for about three times the download size.
+ * replaced original backed up: plan for the bytes still to download plus about
+ * twice the pack sizes. A pack already downloaded (by a background pass or an
+ * interrupted attempt) is on the drive already and is not counted twice.
  */
-async function ensureFreeSpace(directory: string, downloadBytes: number): Promise<void> {
-  if (downloadBytes === 0) return;
+async function ensureFreeSpace(directory: string, downloadBytes: number, packBytes: number): Promise<void> {
+  const requiredBytes = downloadBytes + 2 * packBytes;
+  if (requiredBytes === 0) return;
   const disk = await statfs(directory).catch(() => null);
   if (!disk) return;
-  const requiredBytes = downloadBytes * 3;
   if (Number(disk.bavail) * Number(disk.bsize) < requiredBytes) {
     throw new Error(`Espace disque insuffisant pour les assets : ${Math.ceil(requiredBytes / 1024 ** 3)} Go sont nécessaires.`);
   }
@@ -369,6 +379,13 @@ class DownloadStalledError extends Error {
   constructor(assetName: string) {
     super(`Le téléchargement de l’asset ${assetName} s’est interrompu.`);
     this.name = "DownloadStalledError";
+  }
+}
+
+/** A download that still did not match its SHA-256 after a clean second try. */
+class AssetHashMismatchError extends Error {
+  constructor(assetName: string) {
+    super(`L’asset ${assetName} est corrompu (empreinte SHA-256 inattendue).`);
   }
 }
 
@@ -402,6 +419,10 @@ export class AssetSyncService {
   private readonly fetchImpl: typeof fetch;
   private readonly onProgress: (progress: AssetSyncProgress) => void;
   private lastProgressAt = 0;
+  // Payloads a background pass downloaded twice without a SHA-256 match.
+  // Later background passes skip them until the launcher restarts; Play and
+  // Verify files still try them.
+  private readonly prefetchHashFailures = new Set<string>();
 
   constructor(options: AssetSyncServiceOptions) {
     this.statePath = join(options.userDataDirectory, STATE_FILE_NAME);
@@ -485,7 +506,7 @@ export class AssetSyncService {
     }
 
     const totalBytes = pending.reduce((sum, asset) => sum + asset.size, 0);
-    await ensureFreeSpace(dirname(root), totalBytes);
+    await ensureFreeSpace(dirname(root), await this.bytesToDownload(pending), totalBytes);
     let completedBytes = 0;
     let assetsCompleted = 0;
     const emit = (phase: AssetSyncProgress["phase"], assetName: string, force = false): void => {
@@ -549,13 +570,90 @@ export class AssetSyncService {
           .catch(() => undefined);
       }
     }
-    await this.pruneCache(manifest);
+    await this.pruneCache(new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`)));
     return { status: changed ? "updated" : "up-to-date", packVersion: manifest.packVersion };
   }
 
   /** Repair pass: re-hash every installed file and reinstall what drifted. */
   async verify(installRoot: string, signal?: AbortSignal): Promise<AssetSyncOutcome> {
     return this.sync(installRoot, { thorough: true, signal });
+  }
+
+  /**
+   * Download the new or changed packs of the feed into the cache, without
+   * installing them: the game folder and the state are left as they are. The
+   * next sync finds the payloads in the cache and checks their SHA-256 before
+   * installing them, like any cached pack. Cache entries that neither the feed
+   * nor the installed state uses any more are removed.
+   */
+  async prefetch(
+    installRoot: string,
+    options: { signal?: AbortSignal; onProgress?(progress: AssetSyncProgress): void } = {},
+  ): Promise<AssetPrefetchOutcome> {
+    const root = resolve(installRoot);
+    if (!(await exists(join(root, INSTALL_MARKER_NAME)))) {
+      throw new Error("Installe d’abord le client ROTK.");
+    }
+    this.useStorageFor(root);
+    const state = await this.readState();
+    const manifest = await this.fetchManifest(options.signal);
+    // A release replaced before Play, or the .part file of a cut pass, would
+    // otherwise stay until the next sync. Done before the free space check so
+    // their space counts. The installed payloads stay.
+    await this.pruneCache(new Set([...manifest.assets, ...(state?.assets ?? [])]
+      .flatMap(({ sha256 }) => [`${sha256}.pack`, `${sha256}.pack.part`])));
+    const records = new Map((state?.assets ?? []).map((asset) => [asset.name, asset]));
+    // Same test as sync(), minus the payloads that already failed their hash
+    // check here. An installed pack that only needs a repair is left to sync().
+    const pending = manifest.assets.filter((asset) => {
+      if (this.prefetchHashFailures.has(asset.sha256)) return false;
+      const record = records.get(asset.name);
+      return !record || record.version !== asset.version || record.sha256 !== asset.sha256;
+    });
+
+    const totalBytes = pending.reduce((sum, asset) => sum + asset.size, 0);
+    // Nothing left to download: the sync that installs checks the space it needs.
+    const downloadBytes = await this.bytesToDownload(pending);
+    if (downloadBytes > 0) await ensureFreeSpace(dirname(root), downloadBytes, totalBytes);
+    let completedBytes = 0;
+    let assetsCompleted = 0;
+    let lastProgressAt = 0;
+    const emit = (assetName: string, force = false): void => {
+      const now = Date.now();
+      if (!force && now - lastProgressAt < PREFETCH_PROGRESS_INTERVAL_MS) return;
+      lastProgressAt = now;
+      options.onProgress?.({
+        phase: "downloading",
+        assetName,
+        assetsCompleted,
+        totalAssets: pending.length,
+        completedBytes,
+        totalBytes,
+      });
+    };
+
+    for (const asset of pending) {
+      // Not hashed again on every pass: the sync that installs it does that.
+      const cached = await stat(join(this.cacheDirectory, `${asset.sha256}.pack`)).catch(() => null);
+      if (cached?.isFile() && cached.size === asset.size) {
+        completedBytes += asset.size;
+        assetsCompleted += 1;
+        continue;
+      }
+      emit(asset.name, true);
+      try {
+        await this.ensureCachedAsset(asset, options.signal, (amount) => {
+          completedBytes += amount;
+          emit(asset.name);
+        });
+      } catch (error) {
+        if (error instanceof AssetHashMismatchError) this.prefetchHashFailures.add(asset.sha256);
+        throw error;
+      }
+      assetsCompleted += 1;
+      emit(asset.name, true);
+    }
+    return { packVersion: manifest.packVersion, pendingAssets: pending.length };
   }
 
   /**
@@ -646,6 +744,24 @@ export class AssetSyncService {
   }
 
   /**
+   * What ensureCachedAsset() still has to fetch for these packs: nothing for a
+   * complete payload in the cache, the rest of a `.part` file, otherwise the
+   * whole size.
+   */
+  private async bytesToDownload(assets: AssetManifestEntry[]): Promise<number> {
+    let total = 0;
+    for (const asset of assets) {
+      const cachePath = join(this.cacheDirectory, `${asset.sha256}.pack`);
+      const cached = await stat(cachePath).catch(() => null);
+      if (cached?.isFile() && cached.size === asset.size) continue;
+      const partial = (await stat(`${cachePath}.part`).catch(() => null))?.size ?? 0;
+      // A part longer than the pack is dropped and downloaded again.
+      total += partial <= asset.size ? asset.size - partial : asset.size;
+    }
+    return total;
+  }
+
+  /**
    * Return the cache path holding the verified payload for `asset`,
    * downloading it first when the cache misses or no longer matches the
    * expected SHA-256. Downloads go to a `.part` file that survives failures,
@@ -687,7 +803,7 @@ export class AssetSyncService {
       }
       if (await sha256File(partialPath) === asset.sha256) break;
       await rm(partialPath, { force: true });
-      if (pass >= 2) throw new Error(`L’asset ${asset.name} est corrompu (empreinte SHA-256 inattendue).`);
+      if (pass >= 2) throw new AssetHashMismatchError(asset.name);
     }
     await retryFs(() => rename(partialPath, cachePath));
     return cachePath;
@@ -945,8 +1061,8 @@ export class AssetSyncService {
     if (!leftOver) await rm(this.legacyBackupDirectory, { recursive: true, force: true }).catch(() => undefined);
   }
 
-  private async pruneCache(manifest: AssetManifest): Promise<void> {
-    const keep = new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`));
+  /** Remove every cache entry whose file name is not in `keep`. */
+  private async pruneCache(keep: Set<string>): Promise<void> {
     try {
       for (const entry of await readdir(this.cacheDirectory)) {
         if (!keep.has(entry)) await rm(join(this.cacheDirectory, entry), { force: true });

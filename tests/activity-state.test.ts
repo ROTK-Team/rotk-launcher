@@ -57,6 +57,7 @@ function snapshot(overrides: Partial<LauncherSnapshot> = {}): LauncherSnapshot {
       lastSyncAt: null,
       progress: null,
       warning: null,
+      prefetch: null,
     },
     playerFont: { selected: "original", launcherSelected: "original", options: [] },
     integrityCheck: null,
@@ -110,6 +111,7 @@ describe("homepage activity selector", () => {
         packVersion: null,
         lastSyncAt: null,
         warning: null,
+        prefetch: null,
         progress: {
           phase: "downloading",
           assetName: "assets_x64_1.zip",
@@ -137,6 +139,7 @@ describe("homepage activity selector", () => {
         packVersion: null,
         lastSyncAt: null,
         warning: null,
+        prefetch: null,
         progress: {
           phase: "installing",
           assetName: "assets_x64_1.zip",
@@ -158,6 +161,7 @@ describe("homepage activity selector", () => {
         packVersion: null,
         lastSyncAt: null,
         warning: null,
+        prefetch: null,
         progress: null,
       },
     }));
@@ -173,11 +177,45 @@ describe("homepage activity selector", () => {
         packVersion: "1.1.0",
         lastSyncAt: null,
         warning: null,
+        prefetch: null,
         progress: null,
       },
       integrityCheck: { hashedFiles: 5, totalFiles: 10, hashedBytes: 50, totalBytes: 100 },
     }));
     expect(activity.kind).toBe("asset-sync");
+  });
+
+  it("shows a background download until a sync takes over", () => {
+    const downloading = {
+      status: "downloading" as const,
+      progress: {
+        phase: "downloading" as const,
+        assetName: "assets_x64_0",
+        assetsCompleted: 0,
+        totalAssets: 1,
+        completedBytes: 30,
+        totalBytes: 120,
+      },
+    };
+    const [background] = selectGlobalActivities(snapshot({
+      assetSync: { ...snapshot().assetSync, prefetch: downloading },
+    }));
+    expect(background).toMatchObject({
+      kind: "asset-sync",
+      stage: "background",
+      detail: "assets_x64_0",
+      progressPercent: 25,
+    });
+
+    const [sync] = selectGlobalActivities(snapshot({
+      phase: "launching",
+      assetSync: { ...snapshot().assetSync, status: "checking", prefetch: downloading },
+    }));
+    expect(sync).toMatchObject({ kind: "asset-sync", stage: "checking" });
+
+    expect(selectGlobalActivities(snapshot({
+      assetSync: { ...snapshot().assetSync, prefetch: { status: "ready", progress: null } },
+    }))).toEqual([]);
   });
 
   it("shows integrity progress before falling back to generic launch", () => {
