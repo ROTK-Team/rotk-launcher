@@ -1272,6 +1272,8 @@ function registerIpc(): void {
           runtime: launchRuntime,
           locale: currentLocale,
           logsRoot: join(app.getPath("userData"), "logs"),
+          // Game console mirror + stdout/stderr pipes only for a Debug report.
+          verboseGameOutput: diagnostics.debugState().enabled,
           bundledShimPath: resolveBundledShimPath(),
           bundledVivoxProxyPath: resolveBundledVivoxProxyPath(),
           bundledVivoxRuntimePath: resolveBundledVivoxRuntimePath(),

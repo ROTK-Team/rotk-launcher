@@ -83,6 +83,12 @@ export interface LaunchRequest {
   /** Launcher UI language, also used to select the game's launch locale. */
   locale: AppLocale;
   logsRoot: string;
+  /**
+   * Debug session only: the game mirrors every log line to its console and the
+   * launcher reads it through pipes. Otherwise the console is off and stdio is
+   * ignored; the files under Logs\ are unchanged either way.
+   */
+  verboseGameOutput?: boolean;
   bundledShimPath: string;
   bundledVivoxProxyPath: string;
   bundledVivoxRuntimePath: string;
@@ -357,6 +363,7 @@ function buildLaunchArguments(
   installId: string,
   localCreateSessionUrl: string,
   locale: AppLocale,
+  verboseGameOutput = false,
 ): string[] {
   const gatewayCreateSession = validateLocalCreateSessionUrl(localCreateSessionUrl);
   const voiceGrantOrigin = validateVoiceGrantOrigin(runtime.voiceGrantOrigin);
@@ -376,7 +383,8 @@ function buildLaunchArguments(
     `LaunchTelemetry:Url=${runtime.gatewayOrigin}/h1z1xx/live/`,
     // Override only this process, preserving any saved ClientConfig language.
     `Internationalization:Locale=${GAME_LOCALE[locale]}`,
-    "Logging:ConsoleLogLevel=999",
+    // The console copy only feeds a Debug report; outside Debug nobody reads it.
+    `Logging:ConsoleLogLevel=${verboseGameOutput ? 999 : 0}`,
     "Logging:FileLogLevel=999",
     "Logging:LocalLogLevel=999",
     `Logging:Directory=${join(logsRoot, installId)}`,
@@ -575,6 +583,7 @@ export class GameLauncher {
         installation.installId,
         sessionGateway.createSessionUrl,
         request.locale,
+        request.verboseGameOutput === true,
       );
 
       const executable = join(installationRoot, "H1Z1.exe");
@@ -583,7 +592,7 @@ export class GameLauncher {
         cwd: installationRoot,
         env: sanitizedEnvironment(launchIdentity),
         detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: request.verboseGameOutput === true ? ["ignore", "pipe", "pipe"] : "ignore",
         windowsHide: false,
         shell: false,
       });
