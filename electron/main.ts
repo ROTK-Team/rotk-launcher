@@ -1043,8 +1043,9 @@ function registerIpc(): void {
         await broadcastSnapshot();
         return { ok: true, value: { sourceRoot } };
       } catch (error) {
+        // A refused folder changes nothing: the phase stays what it was, so a
+        // wrong pick in the settings of an installed launcher keeps Play.
         const result = operationError<{ sourceRoot: string }>(error);
-        phase = "error";
         await broadcastSnapshot();
         return result;
       }
@@ -1077,8 +1078,9 @@ function registerIpc(): void {
         await broadcastSnapshot();
         return { ok: true, value: { destinationRoot } };
       } catch (error) {
+        // A refused folder changes nothing: the phase stays what it was, so a
+        // wrong pick in the settings of an installed launcher keeps Play.
         const result = operationError<{ destinationRoot: string }>(error);
-        phase = "error";
         await broadcastSnapshot();
         return result;
       }
