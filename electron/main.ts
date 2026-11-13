@@ -194,6 +194,9 @@ let updates: LauncherSnapshot["updates"] = [];
 let lastErrorRaw: string | null = null;
 // Kept until dismissed or the next Play, so a failed launch cannot hide it.
 let inputProfileRecovery: InputProfileRecovery | null = null;
+// H1Z1 froze before its window and the launcher started it again: said until
+// dismissed or the next Play, so the second start is not a surprise.
+let startupStallRelaunched = false;
 // Set when the server refuses a launch for launcher_update_required: the update
 // becomes mandatory (Play is blocked) until a newer launcher is installed.
 let updateRequired = false;
@@ -723,7 +726,7 @@ async function snapshot(): Promise<LauncherSnapshot> {
     error: lastErrorRaw ? localizeServiceError(lastErrorRaw, currentLocale) : null,
     notice: inputProfileRecovery
       ? MAIN_COPY[currentLocale].inputProfile[inputProfileRecovery.restored ? "restored" : "reset"](inputProfileRecovery.damagedCopy)
-      : null,
+      : startupStallRelaunched ? MAIN_COPY[currentLocale].stopGame.relaunched : null,
     gamePid,
     updateRequired: updateRequired || launcherUpdateBlocksPlay(launcherUpdate.state),
     canPlay:
@@ -1103,7 +1106,8 @@ function registerIpc(): void {
     trustedHandler(async () => {
       // The renderer shows an error before a notice: close them in that order.
       if (lastErrorRaw !== null) lastErrorRaw = null;
-      else inputProfileRecovery = null;
+      else if (inputProfileRecovery) inputProfileRecovery = null;
+      else startupStallRelaunched = false;
       await broadcastSnapshot();
     }),
   );
@@ -1241,16 +1245,17 @@ function registerIpc(): void {
     for (let waited = 0; diagnosticWorkInProgress() && waited < 60_000; waited += 500) {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
     }
-    const result = await play(true);
-    if (!result.ok) {
-      // Refused before it started (update required, key removed…): Play is free again.
-      if (phase === "launching" && !gameLauncher.isRunning()) phase = "ready";
-      if (!result.cancelled) lastErrorRaw = result.error ?? null;
-      await broadcastSnapshot();
-    }
+    const result = await play(true).catch((error: unknown) => operationError<{ pid: number }>(error));
+    if (result.ok) return;
+    // Refused before it started (update required, key removed…): Play is free
+    // again, and nobody is waiting on the answer but the window.
+    if (phase === "launching" && !gameLauncher.isRunning()) phase = "ready";
+    startupStallRelaunched = false;
+    if (!result.cancelled) lastErrorRaw ??= result.error ?? null;
+    await broadcastSnapshot();
+    if (quitWhenGameExits && !mainWindow && !gameLauncher.isRunning() && !diagnosticWorkInProgress()) app.quit();
   };
   const play = async (relaunch: boolean): Promise<OperationResult<{ pid: number }>> => {
-      if (!relaunch) stallRelaunchesLeft = STARTUP_STALL_RELAUNCHES;
       if (updateRequired || launcherUpdateBlocksPlay(launcherUpdate.state)) {
         return { ok: false, error: MAIN_COPY[currentLocale].update.required };
       }
@@ -1274,7 +1279,13 @@ function registerIpc(): void {
       const launchRuntime = activeRuntime();
       phase = "launching";
       lastErrorRaw = null;
-      inputProfileRecovery = null;
+      // Per accepted Play click: a refused click cannot refill the relaunches,
+      // and a relaunch keeps the notice its first start raised.
+      if (!relaunch) {
+        inputProfileRecovery = null;
+        stallRelaunchesLeft = STARTUP_STALL_RELAUNCHES;
+        startupStallRelaunched = false;
+      }
       await broadcastSnapshot();
       // A discovered update must be fully downloaded and installed before
       // starting the game; launching with a partially updated asset set is unsafe.
@@ -1328,10 +1339,14 @@ function registerIpc(): void {
               if (stallRelaunchesLeft > 0) {
                 stallRelaunchesLeft -= 1;
                 phase = "launching";
+                // Not the exit code of a game the launcher closed itself.
+                lastErrorRaw = null;
+                startupStallRelaunched = true;
                 void broadcastSnapshot();
                 void relaunchAfterStall();
                 return;
               }
+              startupStallRelaunched = false;
               lastErrorRaw = MAIN_COPY[currentLocale].stopGame.stalled;
             }
             void broadcastSnapshot();

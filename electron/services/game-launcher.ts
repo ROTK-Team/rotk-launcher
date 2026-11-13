@@ -607,19 +607,26 @@ export class GameLauncher {
       this.child = child;
       const spawnedAt = performance.now();
       let started = false;
-      // The marker may arrive split across two chunks: keep a short tail.
-      let startupTail = "";
-      const stallTimer = setTimeout(() => {
+      // Without the game's stdout there is no line to wait for, and a healthy
+      // game must never be taken for a frozen one: no pipe, no stall report.
+      const stallTimer = child.stdout ? setTimeout(() => {
         if (child.exitCode !== null) return;
         try { request.onStartupStalled?.(); } catch { /* The hook must not break the launch. */ }
-      }, GAME_STARTUP_STALL_MS);
-      stallTimer.unref?.();
+      }, GAME_STARTUP_STALL_MS) : undefined;
+      stallTimer?.unref?.();
+      // The marker may arrive split across two chunks: keep a short tail.
+      let startupTail = "";
+      let startupSeen = false;
       const watchStartup = (text: string): void => {
-        startupTail = (startupTail + text).slice(-(GAME_STARTUP_MARKER.length + text.length));
-        if (startupTail.includes(GAME_STARTUP_MARKER)) {
-          clearTimeout(stallTimer);
-          startupTail = "";
+        if (startupSeen) return;
+        const seen = startupTail + text;
+        if (!seen.includes(GAME_STARTUP_MARKER)) {
+          startupTail = seen.slice(-GAME_STARTUP_MARKER.length);
+          return;
         }
+        startupSeen = true;
+        startupTail = "";
+        clearTimeout(stallTimer);
       };
       for (const stream of ["stdout", "stderr"] as const) {
         child[stream]?.setEncoding("utf8");

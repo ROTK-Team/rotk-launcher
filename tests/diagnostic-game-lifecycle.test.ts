@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   vi.useRealTimers();
-  for (const child of children.splice(0)) { child.stdout.destroy(); child.stderr.destroy(); }
+  for (const child of children.splice(0)) { child.stdout?.destroy(); child.stderr.destroy(); }
   for (const root of roots.splice(0)) {
     if (!resolve(root).startsWith(resolve(join(tmpdir(), 'rotk-game-lifecycle-test-')))) throw new Error('Unsafe test cleanup');
     await rm(root, { recursive: true, force: true });
@@ -376,6 +376,18 @@ describe('a game that freezes before it starts', () => {
     f.child().stdout.write(`H1Z1.log: ${GAME_STARTUP_MARKER.slice(0, cut)}`);
     await vi.advanceTimersByTimeAsync(10);
     f.child().stdout.write(`${GAME_STARTUP_MARKER.slice(cut)}.\n`);
+    await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS * 2);
+    expect(f.request.onStartupStalled).not.toHaveBeenCalled();
+  });
+
+  it('never reports a stall when the game has no stdout to read', async () => {
+    mocks.spawn.mockImplementationOnce(() => {
+      const child = new GameChild();
+      (child as { stdout: PassThrough | null }).stdout = null;
+      children.push(child);
+      return child;
+    });
+    const f = await running();
     await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS * 2);
     expect(f.request.onStartupStalled).not.toHaveBeenCalled();
   });
