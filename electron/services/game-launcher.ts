@@ -181,9 +181,9 @@ export async function validateInstalledClient(installation: InstalledClientConfi
 
   const executable = await stat(join(root, "H1Z1.exe")).catch(() => null);
   if (!executable?.isFile()) throw new Error("H1Z1.exe est introuvable dans l’installation ROTK.");
-  if (!existsSync(join(root, "steam_api64.original.dll"))) {
-    throw new Error("La sauvegarde de steam_api64.dll est absente. Réimporte le client.");
-  }
+  // steam_api64.original.dll is not required: the install keeps it as a
+  // courtesy copy of the vanilla file, nothing reads it back, and the active
+  // shim is redeployed at every launch. Its absence used to refuse the launch.
   return root;
 }
 

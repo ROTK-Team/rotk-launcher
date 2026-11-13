@@ -151,6 +151,14 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(mocks.checkVoice).toHaveBeenCalledOnce();
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
+  it('launches without the vanilla steam_api64.dll backup, which nothing reads back', async () => {
+    const f = await fixture();
+    await rm(join(f.request.config.installation!.root, 'steam_api64.original.dll'));
+    const launched = f.launcher.launch(f.request).catch(error => error);
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    f.child().exit(0);
+    await launched;
+  });
   it('deploys the bundled Steam shim before attestation and refuses drift before spawn', async () => {
     const f = await fixture();
     const shim = join(f.request.config.installation!.root, 'steam_api64.dll');

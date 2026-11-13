@@ -225,7 +225,6 @@ const ENGLISH_ERRORS = new Map<string, string>([
   ["Le jeu était installé dans le dossier de ROTK Launcher, que chaque mise à jour ou désinstallation du launcher supprime. Si tu l’as déplacé, sélectionne-le à son nouvel emplacement ; sinon, réinstalle-le ailleurs, par exemple dans C:\\Games\\ROTK.", "The game was installed in the ROTK Launcher folder, which every launcher update or uninstall deletes. If you moved it, select it at its new location; otherwise install it again somewhere else, for example in C:\\Games\\ROTK."],
   ["L’installation ROTK ne correspond plus à celle enregistrée par le launcher.", "The ROTK installation no longer matches the one saved by the launcher."],
   ["H1Z1.exe est introuvable dans l’installation ROTK.", "H1Z1.exe could not be found in the ROTK installation."],
-  ["La sauvegarde de steam_api64.dll est absente. Réimporte le client.", "The steam_api64.dll backup is missing. Import the client again."],
   ["H1Z1 est déjà lancé depuis cette installation.", "H1Z1 is already running from this installation."],
   ["Installe d’abord le client ROTK.", "Install the ROTK client first."],
   ["Windows n’a pas retourné l’identifiant du processus H1Z1.", "Windows did not return an H1Z1 process identifier."],
