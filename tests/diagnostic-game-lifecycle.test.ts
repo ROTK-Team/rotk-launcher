@@ -4,7 +4,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GameLauncher, gameLauncherInternals, type GameLaunchDiagnostics, type LaunchRequest } from '../electron/services/game-launcher.js';
+import { GAME_STARTUP_MARKER, GAME_STARTUP_STALL_MS, GameLauncher, gameLauncherInternals, type GameLaunchDiagnostics, type LaunchRequest } from '../electron/services/game-launcher.js';
 import { localizeServiceError } from '../electron/i18n.js';
 import { RUNTIME_CONFIGS } from '../electron/services/runtime-config.js';
 
@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   vi.useRealTimers();
-  for (const child of children.splice(0)) { child.stdout.destroy(); child.stderr.destroy(); }
+  for (const child of children.splice(0)) { child.stdout?.destroy(); child.stderr.destroy(); }
   for (const root of roots.splice(0)) {
     if (!resolve(root).startsWith(resolve(join(tmpdir(), 'rotk-game-lifecycle-test-')))) throw new Error('Unsafe test cleanup');
     await rm(root, { recursive: true, force: true });
@@ -344,5 +344,61 @@ describe('a game that closes soon after a launch reported as started', () => {
     }
     expect(localizeServiceError(early, 'en')).toContain('App & browser control. If you did not close it yourself, start the game again;');
     expect(localizeServiceError(early, 'zh')).toContain('“智能应用控制”。如果不是你自己关闭的，');
+  });
+});
+
+describe('a game that freezes before it starts', () => {
+  async function running() {
+    vi.useFakeTimers();
+    const f = await fixture();
+    f.request.onStartupStalled = vi.fn();
+    const launched = f.launcher.launch(f.request);
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.advanceTimersByTimeAsync(3_100);
+    await expect(launched).resolves.toBe(4242);
+    return f;
+  }
+
+  it('reports the stall once when the startup line never comes', async () => {
+    const f = await running();
+    f.child().stdout.write('H1Z1 PlayClient (Live)Startup.log: [Logging]\n');
+    await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS);
+    expect(f.request.onStartupStalled).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS);
+    expect(f.request.onStartupStalled).toHaveBeenCalledOnce();
+    // The diagnostics still receive everything the game printed.
+    expect(f.diagnostics.onOutput).toHaveBeenCalledWith('stdout', 'H1Z1 PlayClient (Live)Startup.log: [Logging]\n');
+  });
+
+  it('stays quiet once the startup line arrives, even split across two chunks', async () => {
+    const f = await running();
+    const cut = 9;
+    f.child().stdout.write(`H1Z1.log: ${GAME_STARTUP_MARKER.slice(0, cut)}`);
+    await vi.advanceTimersByTimeAsync(10);
+    f.child().stdout.write(`${GAME_STARTUP_MARKER.slice(cut)}.\n`);
+    await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS * 2);
+    expect(f.request.onStartupStalled).not.toHaveBeenCalled();
+  });
+
+  it('never reports a stall when the game has no stdout to read', async () => {
+    mocks.spawn.mockImplementationOnce(() => {
+      const child = new GameChild();
+      (child as { stdout: PassThrough | null }).stdout = null;
+      children.push(child);
+      return child;
+    });
+    const f = await running();
+    await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS * 2);
+    expect(f.request.onStartupStalled).not.toHaveBeenCalled();
+  });
+
+  it('says nothing once the game has exited', async () => {
+    const f = await running();
+    f.child().stderr.write(`${GAME_STARTUP_MARKER}\n`);
+    await vi.advanceTimersByTimeAsync(1_000);
+    f.child().exit(0);
+    await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS);
+    expect(f.request.onStartupStalled).not.toHaveBeenCalled();
+    expect(f.request.onExit).toHaveBeenCalledExactlyOnceWith(0);
   });
 });

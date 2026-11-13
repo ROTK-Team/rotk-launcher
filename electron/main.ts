@@ -58,6 +58,7 @@ import { ConfigStore } from "./services/config-store.js";
 import { DiscordPresence } from "./services/discord-presence.js";
 import { adoptExistingClient, cleanupInstallLeftovers, inspectDestination, installClient, lostWithLauncherFolder } from "./services/installer.js";
 import {
+  GAME_STARTUP_STALL_MS,
   GameLauncher,
   assertExecutableNotRunning,
   stopGameFromInstallation,
@@ -193,6 +194,9 @@ let updates: LauncherSnapshot["updates"] = [];
 let lastErrorRaw: string | null = null;
 // Kept until dismissed or the next Play, so a failed launch cannot hide it.
 let inputProfileRecovery: InputProfileRecovery | null = null;
+// H1Z1 froze before its window and the launcher started it again: said until
+// dismissed or the next Play, so the second start is not a surprise.
+let startupStallRelaunched = false;
 // Set when the server refuses a launch for launcher_update_required: the update
 // becomes mandatory (Play is blocked) until a newer launcher is installed.
 let updateRequired = false;
@@ -722,7 +726,7 @@ async function snapshot(): Promise<LauncherSnapshot> {
     error: lastErrorRaw ? localizeServiceError(lastErrorRaw, currentLocale) : null,
     notice: inputProfileRecovery
       ? MAIN_COPY[currentLocale].inputProfile[inputProfileRecovery.restored ? "restored" : "reset"](inputProfileRecovery.damagedCopy)
-      : null,
+      : startupStallRelaunched ? MAIN_COPY[currentLocale].stopGame.relaunched : null,
     gamePid,
     updateRequired: updateRequired || launcherUpdateBlocksPlay(launcherUpdate.state),
     canPlay:
@@ -1102,7 +1106,8 @@ function registerIpc(): void {
     trustedHandler(async () => {
       // The renderer shows an error before a notice: close them in that order.
       if (lastErrorRaw !== null) lastErrorRaw = null;
-      else inputProfileRecovery = null;
+      else if (inputProfileRecovery) inputProfileRecovery = null;
+      else startupStallRelaunched = false;
       await broadcastSnapshot();
     }),
   );
@@ -1230,13 +1235,35 @@ function registerIpc(): void {
     }),
   );
 
-  ipcMain.handle(
-    IPC_CHANNELS.play,
-    trustedHandler(async (): Promise<OperationResult<{ pid: number }>> => {
+  // Some launches freeze before H1Z1 opens its window (no output after its
+  // startup settings) and only a relaunch helps. ACD (11/11): closing a game
+  // that never reached the lobby is fine. Bounded per Play click.
+  const STARTUP_STALL_RELAUNCHES = 2;
+  let stallRelaunchesLeft = 0;
+  const relaunchAfterStall = async (): Promise<void> => {
+    // The stalled session's report is finalized before Play is accepted again.
+    for (let waited = 0; diagnosticWorkInProgress() && waited < 60_000; waited += 500) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
+    }
+    const result = await play(true).catch((error: unknown) => operationError<{ pid: number }>(error));
+    if (result.ok) return;
+    // Refused before it started (update required, key removed…): Play is free
+    // again, and nobody is waiting on the answer but the window.
+    if (phase === "launching" && !gameLauncher.isRunning()) phase = "ready";
+    startupStallRelaunched = false;
+    if (!result.cancelled) lastErrorRaw ??= result.error ?? null;
+    await broadcastSnapshot();
+    if (quitWhenGameExits && !mainWindow && !gameLauncher.isRunning() && !diagnosticWorkInProgress()) app.quit();
+  };
+  const play = async (relaunch: boolean): Promise<OperationResult<{ pid: number }>> => {
       if (updateRequired || launcherUpdateBlocksPlay(launcherUpdate.state)) {
         return { ok: false, error: MAIN_COPY[currentLocale].update.required };
       }
-      if (phase !== "ready" || debugSettingWrite || diagnosticWorkInProgress()) return { ok: false, error: MAIN_COPY[currentLocale].clientNotReady };
+      // A relaunch after a stalled start keeps "launching" while it waits.
+      if (phase !== (relaunch ? "launching" : "ready") || debugSettingWrite || diagnosticWorkInProgress()) {
+        if (relaunch) phase = "ready";
+        return { ok: false, error: MAIN_COPY[currentLocale].clientNotReady };
+      }
       const selectedKey = activeKey();
       if (!selectedKey) {
         return {
@@ -1252,7 +1279,13 @@ function registerIpc(): void {
       const launchRuntime = activeRuntime();
       phase = "launching";
       lastErrorRaw = null;
-      inputProfileRecovery = null;
+      // Per accepted Play click: a refused click cannot refill the relaunches,
+      // and a relaunch keeps the notice its first start raised.
+      if (!relaunch) {
+        inputProfileRecovery = null;
+        stallRelaunchesLeft = STARTUP_STALL_RELAUNCHES;
+        startupStallRelaunched = false;
+      }
       await broadcastSnapshot();
       // A discovered update must be fully downloaded and installed before
       // starting the game; launching with a partially updated asset set is unsafe.
@@ -1263,6 +1296,7 @@ function registerIpc(): void {
         return { ok: false, error: assetResult.error };
       }
       let diagnosticLaunch: Awaited<ReturnType<DiagnosticController["beginLaunch"]>> | undefined;
+      let stalled = false;
       try {
         try { diagnosticLaunch = await diagnostics.beginLaunch(await diagnosticContext(launchRuntime)); }
         catch { /* A report directory failure cannot block an otherwise valid game launch. */ }
@@ -1293,9 +1327,28 @@ function registerIpc(): void {
             inputProfileRecovery = recovery;
             void broadcastSnapshot();
           },
+          onStartupStalled: () => {
+            if (!gameLauncher.stop()) return;
+            stalled = true;
+            startupLog.mark("game-startup-stalled", `no startup line after ${GAME_STARTUP_STALL_MS / 1000} s, closed, ${stallRelaunchesLeft} relaunch(es) left`);
+          },
           onExit: () => {
             gamePid = null;
             phase = "ready";
+            if (stalled) {
+              if (stallRelaunchesLeft > 0) {
+                stallRelaunchesLeft -= 1;
+                phase = "launching";
+                // Not the exit code of a game the launcher closed itself.
+                lastErrorRaw = null;
+                startupStallRelaunched = true;
+                void broadcastSnapshot();
+                void relaunchAfterStall();
+                return;
+              }
+              startupStallRelaunched = false;
+              lastErrorRaw = MAIN_COPY[currentLocale].stopGame.stalled;
+            }
             void broadcastSnapshot();
             if (quitWhenGameExits && !mainWindow && !diagnosticWorkInProgress()) app.quit();
           },
@@ -1338,8 +1391,8 @@ function registerIpc(): void {
         if (quitWhenGameExits && !mainWindow && !diagnosticWorkInProgress()) app.quit();
         return outcome;
       }
-    }),
-  );
+  };
+  ipcMain.handle(IPC_CHANNELS.play, trustedHandler(() => play(false)));
 
   ipcMain.handle(
     IPC_CHANNELS.stopGame,
