@@ -12,6 +12,8 @@ import { LauncherUpdatePrompt } from "./components/LauncherUpdatePrompt";
 import { WindowChrome } from "./components/WindowChrome";
 import { useI18n } from "./i18n";
 
+const BOOT_SLOW_AFTER_MS = 8_000;
+
 export default function App() {
   const { locale, copy } = useI18n();
   const [snapshot, setSnapshot] = useState<LauncherSnapshot | null>(null);
@@ -21,6 +23,9 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [transientError, setTransientError] = useState<string | null>(null);
   const [detectAttempted, setDetectAttempted] = useState(false);
+  // "slow" after a few seconds without a first snapshot, "failed" when the
+  // main process answered with an error.
+  const [bootState, setBootState] = useState<"starting" | "slow" | "failed">("starting");
   const [debugSessionBusy, setDebugSessionBusy] = useState(false);
   const [debugSessionFailed, setDebugSessionFailed] = useState(false);
   const debugSessionInFlight = useRef(false);
@@ -42,13 +47,17 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
     let previousPhase: LauncherSnapshot["phase"] | undefined;
+    // A drive that is slow to wake up under the game folder can hold the
+    // first snapshot for a while: say so instead of a logo with no end.
+    const slow = setTimeout(() => { if (mounted) setBootState((state) => state === "starting" ? "slow" : state); }, BOOT_SLOW_AFTER_MS);
     void window.rotk.getSnapshot().then((value) => {
       if (!mounted) return;
       previousPhase = value.phase;
       setSnapshot(value);
       if (!value.installationRoot) setSetupOpen(true);
       else if (!value.playerIdentity.configured) setIdentityOpen(true);
-    });
+    }).catch(() => { if (mounted) setBootState("failed"); })
+      .finally(() => clearTimeout(slow));
     const unsubscribe = window.rotk.onSnapshot((value) => {
       const installationFinished = previousPhase === "installing" && value.phase === "ready";
       previousPhase = value.phase;
@@ -64,6 +73,7 @@ export default function App() {
     });
     return () => {
       mounted = false;
+      clearTimeout(slow);
       unsubscribe();
     };
   }, []);
@@ -121,8 +131,13 @@ export default function App() {
   if (!snapshot) {
     return (
       <main className="boot-screen">
+        {/* The window has no frame: without this bar it could be neither moved nor closed. */}
+        <WindowChrome appVersion={null} />
         <img src="./branding/rotk-mark.svg" alt="ROTK" />
         <span>{copy.app.initializing}</span>
+        {bootState !== "starting" && (
+          <small role="status">{bootState === "slow" ? copy.app.initializingSlow : copy.app.initializingFailed}</small>
+        )}
       </main>
     );
   }

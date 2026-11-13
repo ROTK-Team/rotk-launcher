@@ -30,6 +30,8 @@ export interface Copy {
   };
   app: {
     initializing: string;
+    initializingSlow: string;
+    initializingFailed: string;
     operationFailed: string;
     operationInterrupted: string;
     notice: string;
@@ -232,6 +234,8 @@ const COPY: Record<AppLocale, Copy> = {
     },
     app: {
       initializing: "INITIALIZING LAUNCHER",
+      initializingSlow: "This is taking longer than usual: the launcher is reading its files, often on a drive that was asleep. If nothing changes, close the launcher and start it again.",
+      initializingFailed: "The launcher could not finish starting. Close it and start it again; if it happens again, send %APPDATA%\\ROTK Launcher\\startup.log to the ROTK team.",
       operationFailed: "The operation failed.",
       operationInterrupted: "OPERATION INTERRUPTED",
       notice: "NOTICE",
@@ -464,6 +468,8 @@ const COPY: Record<AppLocale, Copy> = {
     },
     app: {
       initializing: "INITIALISATION DU LAUNCHER",
+      initializingSlow: "C’est plus long que d’habitude : le launcher lit ses fichiers, souvent sur un disque qui était en veille. Si rien ne change, ferme le launcher puis relance-le.",
+      initializingFailed: "Le launcher n’a pas pu finir de démarrer. Ferme-le puis relance-le ; si cela se reproduit, envoie %APPDATA%\\ROTK Launcher\\startup.log à l’équipe ROTK.",
       operationFailed: "L’opération a échoué.",
       operationInterrupted: "OPÉRATION INTERROMPUE",
       notice: "INFORMATION",
@@ -696,6 +702,8 @@ const COPY: Record<AppLocale, Copy> = {
     },
     app: {
       initializing: "正在初始化启动器",
+      initializingSlow: "启动时间比平时长：启动器正在读取文件，通常是硬盘刚从休眠中唤醒。如果一直没有变化，请关闭启动器后重新打开。",
+      initializingFailed: "启动器未能完成启动。请关闭后重新打开；如果再次出现，请把 %APPDATA%\\ROTK Launcher\\startup.log 发给 ROTK 团队。",
       operationFailed: "操作失败。",
       operationInterrupted: "操作已中断",
       notice: "提示",
