@@ -186,6 +186,16 @@ export function launcherUpdateRequiredError(payload: unknown): Error {
   return error;
 }
 
+// Server failure codes (attestation/ledger.rs) about the challenge or the
+// policy, never about the measured files.
+const RETRYABLE_ATTESTATION_FAILURES = new Set([
+  "challenge_expired",
+  "challenge_replayed",
+  "challenge_unknown",
+  "policy_mismatch",
+  "policy_stale",
+]);
+
 function serviceError(status: number, value: unknown, attestationUnavailableReason?: string): Error {
   const payload = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   const errorCode = payload?.error ?? null;
@@ -207,6 +217,14 @@ function serviceError(status: number, value: unknown, attestationUnavailableReas
     );
   }
   if (errorCode === "attestation_failed") {
+    // The challenge, not the files, was refused (it expired during a long
+    // hash, or the policy changed meanwhile): a fresh attestation settles it,
+    // and Verify files would not.
+    if (typeof payload?.failureCode === "string" && RETRYABLE_ATTESTATION_FAILURES.has(payload.failureCode)) {
+      const error = new Error("The ROTK server could not validate the game file check this time. Click Play again.");
+      (error as { code?: string }).code = "attestation_retryable";
+      return error;
+    }
     return new Error(
       "The game files do not match the official ROTK installation. Use Verify files, then try again.",
     );

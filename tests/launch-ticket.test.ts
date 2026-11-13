@@ -266,6 +266,21 @@ describe("ROTK launch ticket client", () => {
     })).rejects.toThrow(/could not verify your game files.*could not be reached/s);
   });
 
+  it.each(["challenge_expired", "challenge_replayed", "challenge_unknown", "policy_mismatch", "policy_stale"])(
+    "marks a %s refusal as worth a fresh attestation", async (failureCode) => {
+      const fetchImpl = vi.fn(async () => jsonResponse({ error: "attestation_failed", failureCode }, 403)) as typeof fetch;
+      // Shown only if the fresh attestation is refused too: Verify files cannot help.
+      await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl, attestation }))
+        .rejects.toMatchObject({ code: "attestation_retryable", message: expect.not.stringContaining("Verify files") });
+    });
+
+  it("does not mark a refusal about the files as retryable", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ error: "attestation_failed", failureCode: "self_reported_deviations" }, 403)) as typeof fetch;
+    const error = await createLaunchTicket(launcherKey, endpoint, { fetchImpl, attestation }).catch((caught: unknown) => caught);
+    expect((error as Error).message).toContain("Use Verify files");
+    expect((error as { code?: string }).code).toBeUndefined();
+  });
+
   it("tells a timeout apart from a cancelled request", async () => {
     const hanging = vi.fn((_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
