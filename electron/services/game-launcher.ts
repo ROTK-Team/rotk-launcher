@@ -54,7 +54,7 @@ export type AttestationOutcome =
       readonly status: "attested";
       readonly block: unknown;
       /**
-       * The fingerprint read for the slots the challenge asked (#320 Â§B). It
+       * The fingerprint read for the slots the challenge asked (#320 §B). It
        * is what the TPM proof inside the block was signed over, so the ticket
        * request must carry exactly this object and not a fingerprint read at
        * another time.
