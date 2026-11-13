@@ -70,6 +70,7 @@ import type { InputProfileRecovery } from "./services/input-profile-recovery.js"
 import { collectHwid } from "./services/machine-identity.js";
 import { PathPolicyError, assertOutsideLauncherFolder, classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
 import { H1Z1_STEAM_APP_ID, locateSteamClient } from "./services/steam-locator.js";
+import { phaseAfterSelection } from "./services/setup-phase.js";
 import {
   runtimeConfigFor,
   runtimeConfigList,
@@ -441,7 +442,7 @@ async function applyRecommendedDestination(): Promise<void> {
     try {
       destinationRoot = await acceptDestination(candidate);
       destinationRecommended = true;
-      phase = "destination-selected";
+      phase = phaseAfterSelection(phase, "destination-selected");
       return;
     } catch {
       // Try the next one; the player can still pick a folder.
@@ -856,7 +857,7 @@ function registerIpc(): void {
         sourceDetected = true;
         destinationRoot = null;
         destinationRecommended = false;
-        phase = "source-selected";
+        phase = phaseAfterSelection(phase, "source-selected");
         await applyRecommendedDestination();
         lastErrorRaw = null;
         await broadcastSnapshot();
@@ -890,7 +891,7 @@ function registerIpc(): void {
         sourceDetected = false;
         destinationRoot = null;
         destinationRecommended = false;
-        phase = "source-selected";
+        phase = phaseAfterSelection(phase, "source-selected");
         await applyRecommendedDestination();
         lastErrorRaw = null;
         await broadcastSnapshot();
@@ -926,7 +927,7 @@ function registerIpc(): void {
           : join(parent, ROTK_INSTALL_DIRECTORY_NAME);
         destinationRoot = await acceptDestination(candidate);
         destinationRecommended = false;
-        phase = "destination-selected";
+        phase = phaseAfterSelection(phase, "destination-selected");
         lastErrorRaw = null;
         await broadcastSnapshot();
         return { ok: true, value: { destinationRoot } };
@@ -981,7 +982,7 @@ function registerIpc(): void {
       try {
         destinationRoot = await acceptDestination(destinationOnDrive(root));
         destinationRecommended = false;
-        phase = "destination-selected";
+        phase = phaseAfterSelection(phase, "destination-selected");
         lastErrorRaw = null;
         await broadcastSnapshot();
         return { ok: true, value: { destinationRoot } };
