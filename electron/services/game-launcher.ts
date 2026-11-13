@@ -510,9 +510,9 @@ export class GameLauncher {
 
     // Integrity attestation runs before the ticket exists: the whole point is
     // that a tampered installation never obtains one.
-    const outcome = request.attest
+    let outcome: AttestationOutcome = request.attest
       ? await request.attest()
-      : { status: "not-applicable", clientPatchMode: request.clientPatchModeFallback } as const;
+      : { status: "not-applicable", clientPatchMode: request.clientPatchModeFallback };
 
     // The durable website key reaches only the HTTPS account service. H1Z1
     // receives a short ticket and the Steam identity authenticated by it.
@@ -520,7 +520,17 @@ export class GameLauncher {
       request.identity.playerKey,
       request.runtime.launchTicketUrl,
       await ticketRequestOptions(request, outcome),
-    );
+    ).catch(async (error: unknown) => {
+      // A refused challenge (expired during a slow hash, policy changed
+      // meanwhile) is not a verdict on the files: attest once more.
+      if ((error as { code?: string } | null)?.code !== "attestation_retryable" || !request.attest) throw error;
+      outcome = await request.attest();
+      return createLaunchTicket(
+        request.identity.playerKey,
+        request.runtime.launchTicketUrl,
+        await ticketRequestOptions(request, outcome),
+      );
+    });
     let sessionGateway = await startLocalSessionGateway(launchIdentity.ticket);
     let measured: AttestationOutcome = outcome;
 
