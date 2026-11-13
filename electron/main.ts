@@ -926,6 +926,9 @@ function registerIpc(): void {
         // Server and role move together: a half-applied selection would launch
         // against one infrastructure with the other one's intent.
         await configStore.setLaunchProfile(serverId, role);
+        // A version refusal belongs to the server that sent it. Leaving that
+        // server frees Play; the other one answers for itself at its next launch.
+        if (serverId !== selectedServerId) updateRequired = false;
         selectedServerId = serverId;
         selectedRole = role;
         lastErrorRaw = null;
