@@ -20,6 +20,7 @@ import {
   type ServerId,
 } from "../../shared/launch-profile";
 import { isValidPlayerKey, normalizePlayerKey, PLAYER_KEY_HEX_LENGTH } from "../../shared/player-key";
+import { gameSessionActive } from "../../shared/primary-action";
 import { useI18n, type Copy as CopyText } from "../i18n";
 
 interface PlayerIdentityPanelProps {
@@ -67,7 +68,7 @@ export function PlayerIdentityPanel({ snapshot, open, onClose }: PlayerIdentityP
   const [expanded, setExpanded] = useState(false);
   const [working, setWorking] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
-  const locked = snapshot.phase === "launching" || snapshot.phase === "running";
+  const locked = gameSessionActive(snapshot);
   const storedKeys = LAUNCH_PROFILE_IDS.map((profile) => identity.keys[profile]).join("|");
   const extraKeyCount = SECONDARY_PROFILES.filter((profile) => identity.keys[profile] !== null).length;
   const hosts = useMemo(

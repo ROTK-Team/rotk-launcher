@@ -7,7 +7,8 @@ import { LauncherFooter } from "./components/LauncherFooter";
 import { NewsCarousel } from "./components/NewsCarousel";
 import { PlayerIdentityPanel } from "./components/PlayerIdentityPanel";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { hasLauncherUpdate, launcherUpdateBlocksPlay } from "../shared/launcher-update";
+import { hasLauncherUpdate } from "../shared/launcher-update";
+import { assetSyncActive, gameSessionActive, primaryAction } from "../shared/primary-action";
 import { LauncherUpdatePrompt } from "./components/LauncherUpdatePrompt";
 import { WindowChrome } from "./components/WindowChrome";
 import { useI18n } from "./i18n";
@@ -25,10 +26,9 @@ export default function App() {
   const [debugSessionFailed, setDebugSessionFailed] = useState(false);
   const debugSessionInFlight = useRef(false);
   const working = busy || debugSessionBusy || snapshot?.debugSession?.status === "preparing";
-  const debugSessionLocked = working || snapshot?.gamePid != null
-    || snapshot?.phase === "running" || snapshot?.phase === "launching" || snapshot?.phase === "installing"
+  const debugSessionLocked = working || snapshot?.phase === "installing"
     || snapshot?.debugSession?.status === "recording"
-    || snapshot?.assetSync.status === "checking" || snapshot?.assetSync.status === "downloading" || snapshot?.assetSync.status === "installing";
+    || (snapshot ? gameSessionActive(snapshot) || assetSyncActive(snapshot) : false);
 
   useEffect(() => {
     setTransientError(null);
@@ -133,16 +133,19 @@ export default function App() {
   const play = () => perform(() => window.rotk.play());
   const error = snapshot.error ?? transientError;
   const notice = error ? null : snapshot.notice;
+  // Same decision as the button's label: the click can no longer do
+  // something else than what the button says.
   const onPrimary = () => {
-    if (launcherUpdateBlocksPlay(snapshot.launcherUpdate) || snapshot.updateRequired) {
+    const action = primaryAction(snapshot, working);
+    if (!action.enabled) return;
+    if (action.kind === "update") {
       setUpdatePromptOpen(true);
       if (!hasLauncherUpdate(snapshot.launcherUpdate)) void window.rotk.checkLauncherUpdate();
-    }
-    else if (snapshot.canPlay) void play();
-    else if (snapshot.installationRoot && !snapshot.playerIdentity.configured) {
+    } else if (action.kind === "play") void play();
+    else if (action.kind === "add-key") {
       setSetupOpen(false);
       setIdentityOpen(true);
-    } else setSetupOpen(true);
+    } else if (action.kind === "setup") setSetupOpen(true);
   };
 
   return (
