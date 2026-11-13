@@ -417,6 +417,33 @@ describe("challenge handling", () => {
     ).rejects.toMatchObject({ name: "AttestationUnavailableError", notApplicable: false });
   });
 
+  it("asks once more when the request never reached the service", async () => {
+    const answers = [
+      () => { throw new TypeError("fetch failed"); },
+      () => new Response(JSON.stringify({ error: { code: "internal", message: "boom" } }),
+        { status: 500, headers: { "content-type": "application/json" } }),
+    ];
+    const fetchImpl = vi.fn(async () => answers.shift()!()) as unknown as typeof fetch;
+    // The second request was answered: its refusal is reported, not the lost first one.
+    await expect(requestAttestationChallenge(PLAYER_KEY, ENDPOINT, LAUNCHER_VERSION, { fetchImpl }))
+      .rejects.toThrow(/temporarily unavailable/);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after two unreachable requests, and at once after its own timeout", async () => {
+    const down = vi.fn(async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
+    await expect(requestAttestationChallenge(PLAYER_KEY, ENDPOINT, LAUNCHER_VERSION, { fetchImpl: down }))
+      .rejects.toThrow(/Unable to reach the ROTK integrity service/);
+    expect(down).toHaveBeenCalledTimes(2);
+
+    const hanging = vi.fn((_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+    })) as unknown as typeof fetch;
+    await expect(requestAttestationChallenge(PLAYER_KEY, ENDPOINT, LAUNCHER_VERSION, { fetchImpl: hanging, timeoutMs: 1 }))
+      .rejects.toThrow(/Unable to reach the ROTK integrity service/);
+    expect(hanging).toHaveBeenCalledOnce();
+  });
+
   it("refuses non-HTTPS endpoints", async () => {
     await expect(
       requestAttestationChallenge(PLAYER_KEY, "http://accounts.rotk.app/x", LAUNCHER_VERSION),
