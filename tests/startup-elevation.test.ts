@@ -19,7 +19,7 @@ function actions(elevated = false) {
     isAdministrator: vi.fn(async () => elevated),
     requestElevation: vi.fn(async () => "started" as const),
     releaseSingleInstanceLock: vi.fn(), initialize: vi.fn(async () => {}),
-    quit: vi.fn(), reportFailure: vi.fn(), mark: vi.fn(),
+    quit: vi.fn(), reportFailure: vi.fn(), mark: vi.fn(), retryAfterDecline: vi.fn(async () => false),
   } satisfies ElevatedStartupActions;
 }
 
@@ -43,14 +43,27 @@ describe("mandatory administrator startup", () => {
     expect(calls.reportFailure).not.toHaveBeenCalled();
   });
 
-  it("closes on UAC cancellation without opening the window or retrying", async () => {
+  it("explains a declined UAC prompt and closes when the player chooses Quit", async () => {
     const calls = { ...actions(), requestElevation: vi.fn(async () => "cancelled" as const) };
     await startWithRequiredElevation(options, calls);
     expect(calls.initialize).not.toHaveBeenCalled();
     expect(calls.requestElevation).toHaveBeenCalledOnce();
+    expect(calls.retryAfterDecline).toHaveBeenCalledOnce();
     expect(calls.mark).toHaveBeenCalledWith("elevation-cancelled");
     expect(calls.quit).toHaveBeenCalledOnce();
     expect(calls.reportFailure).not.toHaveBeenCalled();
+  });
+
+  it("shows the UAC prompt again only when the player asks for it", async () => {
+    const requestElevation = vi.fn<() => Promise<"started" | "cancelled">>()
+      .mockResolvedValueOnce("cancelled").mockResolvedValueOnce("started");
+    const calls = { ...actions(), requestElevation, retryAfterDecline: vi.fn(async () => true) };
+    await startWithRequiredElevation(options, calls);
+    expect(calls.requestElevation).toHaveBeenCalledTimes(2);
+    expect(calls.retryAfterDecline).toHaveBeenCalledOnce();
+    expect(calls.mark).toHaveBeenLastCalledWith("elevation-relaunched");
+    expect(calls.initialize).not.toHaveBeenCalled();
+    expect(calls.quit).toHaveBeenCalledOnce();
   });
 
   it("does not treat a relaunch argument as administrator proof or loop UAC", async () => {

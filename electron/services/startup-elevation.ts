@@ -66,6 +66,8 @@ export interface ElevatedStartupActions {
   initialize(): Promise<void>;
   quit(): void;
   reportFailure(reason: ElevationFailure): void;
+  /** The player declined the UAC prompt: true when they choose to see it again. */
+  retryAfterDecline(): Promise<boolean>;
   mark(event: string): void;
 }
 
@@ -102,12 +104,19 @@ export async function startWithRequiredElevation(
   }
   // The elevated replacement must acquire its own lock and recheck its token.
   actions.releaseSingleInstanceLock();
-  try {
-    const result = await actions.requestElevation(options.executablePath);
-    actions.mark(result === "started" ? "elevation-relaunched" : "elevation-cancelled");
-  } catch {
-    actions.mark("elevation-relaunch-failed");
-    actions.reportFailure("relaunch-failed");
+  // Declining UAC used to close the launcher without a word, which players
+  // take for a launcher that does not open. Say why, and offer the prompt
+  // again only when they ask for it.
+  for (;;) {
+    try {
+      const result = await actions.requestElevation(options.executablePath);
+      actions.mark(result === "started" ? "elevation-relaunched" : "elevation-cancelled");
+      if (result === "started" || !(await actions.retryAfterDecline())) break;
+    } catch {
+      actions.mark("elevation-relaunch-failed");
+      actions.reportFailure("relaunch-failed");
+      break;
+    }
   }
   actions.quit();
 }

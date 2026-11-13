@@ -38,6 +38,11 @@ export const MAIN_COPY = {
       development: "ROTK Launcher requires administrator rights. Start the development terminal as administrator, then run the launcher again.",
       "relaunch-failed": "Windows could not restart ROTK Launcher as administrator. The launcher will close. Try Run as administrator.",
     },
+    elevationDeclined: {
+      message: "ROTK Launcher needs Windows administrator rights to check and start the game. Click Yes in the Windows window that opens.",
+      retry: "Try again",
+      quit: "Quit",
+    },
     rendererGone: (reason: string) =>
       `The launcher window's process stopped (${reason}). Restart the launcher; if this happens again, send %APPDATA%\\ROTK Launcher\\startup.log to the ROTK team.`,
     launcherError: (id: string, message: string) => `Launcher error ${id}: ${message}`,
@@ -105,6 +110,11 @@ export const MAIN_COPY = {
       development: "ROTK Launcher exige les droits administrateur. Démarre le terminal de développement en tant qu’administrateur, puis relance le launcher.",
       "relaunch-failed": "Windows n’a pas pu relancer ROTK Launcher en tant qu’administrateur. Le launcher va se fermer. Essaie Exécuter en tant qu’administrateur.",
     },
+    elevationDeclined: {
+      message: "ROTK Launcher a besoin des droits administrateur Windows pour vérifier et lancer le jeu. Clique sur Oui dans la fenêtre de Windows qui va s’ouvrir.",
+      retry: "Réessayer",
+      quit: "Quitter",
+    },
     rendererGone: (reason: string) =>
       `Le processus de la fenêtre du launcher s’est arrêté (${reason}). Relance le launcher ; si cela se reproduit, envoie %APPDATA%\\ROTK Launcher\\startup.log à l’équipe ROTK.`,
     launcherError: (id: string, message: string) => `Erreur launcher ${id} : ${message}`,
@@ -171,6 +181,11 @@ export const MAIN_COPY = {
       required: "ROTK 启动器需要 Windows 管理员权限，即将关闭。请使用“以管理员身份运行”来启动。",
       development: "ROTK 启动器需要管理员权限。请以管理员身份打开开发终端，然后重新运行启动器。",
       "relaunch-failed": "Windows 无法以管理员身份重新启动 ROTK 启动器。启动器即将关闭。请尝试“以管理员身份运行”。",
+    },
+    elevationDeclined: {
+      message: "ROTK 启动器需要 Windows 管理员权限来检查并启动游戏。请在弹出的 Windows 窗口中点击“是”。",
+      retry: "重试",
+      quit: "退出",
     },
     rendererGone: (reason: string) =>
       `启动器窗口进程已停止（${reason}）。请重启启动器；如果再次出现，请把 %APPDATA%\\ROTK Launcher\\startup.log 发给 ROTK 团队。`,

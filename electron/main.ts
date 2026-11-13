@@ -1747,6 +1747,19 @@ if (singleInstanceLock) {
           const copy = MAIN_COPY[systemLocale()];
           dialog.showErrorBox(copy.startupTitle, copy.elevation[reason]);
         },
+        retryAfterDecline: async () => {
+          const copy = MAIN_COPY[systemLocale()];
+          const { response } = await dialog.showMessageBox({
+            type: "warning",
+            title: "ROTK Launcher",
+            message: copy.elevationDeclined.message,
+            buttons: [copy.elevationDeclined.retry, copy.elevationDeclined.quit],
+            defaultId: 0,
+            cancelId: 1,
+            noLink: true,
+          });
+          return response === 0;
+        },
       });
     })
     .catch((error: unknown) => {
