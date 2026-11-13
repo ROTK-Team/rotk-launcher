@@ -1662,6 +1662,7 @@ async function initialize(): Promise<void> {
     updater: app.isPackaged ? electronUpdater.autoUpdater : null,
     onChange: () => void broadcastSnapshot(),
     onDownloadError: (code) => startupLog.mark("launcher-update-failed", code),
+    onCheckError: (code) => startupLog.mark("launcher-update-check-failed", code),
   });
   diagnostics = new DiagnosticController({ directory: join(app.getPath("userData"), "diagnostics"),
     helperPath: resolveBundledDiagnosticsPath(), knownSecrets: () => Object.values(playerKeys).filter((key): key is string => typeof key === "string"),

@@ -127,6 +127,7 @@ export interface Copy {
     closeGame: string;
     check: string;
     requiredDetail: string;
+    manualDownload: string;
   };
   install: {
     notSelected: string;
@@ -338,6 +339,7 @@ const COPY: Record<AppLocale, Copy> = {
       closeGame: "Close the game before restarting the launcher.",
       check: "CHECK FOR UPDATE",
       requiredDetail: "The server requires a newer launcher. If the update cannot be found, check your connection and try again.",
+      manualDownload: "Still stuck? Download the launcher installer from rotk.app and install it over this one.",
     },
     install: {
       notSelected: "NOT SELECTED",
@@ -570,6 +572,7 @@ const COPY: Record<AppLocale, Copy> = {
       closeGame: "Ferme le jeu avant de redémarrer le launcher.",
       check: "RECHERCHER LA MISE À JOUR",
       requiredDetail: "Le serveur exige un launcher plus récent. Si la mise à jour reste introuvable, vérifie ta connexion puis réessaie.",
+      manualDownload: "Toujours bloqué ? Télécharge l’installateur du launcher sur rotk.app et installe-le par-dessus.",
     },
     install: {
       notSelected: "NON SÉLECTIONNÉ",
@@ -802,6 +805,7 @@ const COPY: Record<AppLocale, Copy> = {
       closeGame: "重启启动器前请先关闭游戏。",
       check: "检查更新",
       requiredDetail: "服务器要求使用更新版本的启动器。如果找不到更新，请检查网络连接后重试。",
+      manualDownload: "仍然无法更新？请在 rotk.app 下载启动器安装程序，并覆盖安装。",
     },
     install: {
       notSelected: "未选择",
