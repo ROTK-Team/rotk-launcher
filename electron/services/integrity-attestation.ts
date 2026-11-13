@@ -587,31 +587,38 @@ export async function measureInstallation(options: MeasureOptions): Promise<Meas
 
   onProgress?.({ phase: "measuring", hashedFiles: 0, totalFiles: expected.length, hashedBytes: 0, totalBytes });
 
-  for (const entry of expected) {
-    if (!isManifestPath(entry.path)) throw attestationError("The integrity manifest contains an invalid path.");
-    const absolute = join(installationRoot, ...entry.path.split("/"));
-    const fileStat = await stat(absolute).catch(() => null);
-    if (!fileStat?.isFile()) {
-      deviations.push({ path: entry.path, kind: "missing", observedSha256: null });
+  try {
+    for (const entry of expected) {
+      if (!isManifestPath(entry.path)) throw attestationError("The integrity manifest contains an invalid path.");
+      const absolute = join(installationRoot, ...entry.path.split("/"));
+      const fileStat = await stat(absolute).catch(() => null);
+      if (!fileStat?.isFile()) {
+        deviations.push({ path: entry.path, kind: "missing", observedSha256: null });
+        hashedFiles += 1;
+        continue;
+      }
+      const cacheKey = manifestPathKey(entry.path);
+      // Only an archive may take its digest from the cache; see isCachedArchive.
+      const cached = isCachedArchive(entry.path) ? cache.get(cacheKey) : undefined;
+      const digest = cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs
+        ? cached.sha256
+        // An antivirus or sync client can hold a game file for a moment.
+        : await retryFs(() => sha256File(absolute));
+      nextCache.set(cacheKey, { size: fileStat.size, mtimeMs: fileStat.mtimeMs, sha256: digest });
+      observed.push({ path: entry.path, size: fileStat.size, sha256: digest });
+      if (digest !== entry.sha256) {
+        deviations.push({ path: entry.path, kind: "mismatch", observedSha256: digest });
+      }
       hashedFiles += 1;
-      continue;
+      hashedBytes += fileStat.size;
+      if (hashedFiles % 50 === 0) {
+        onProgress?.({ phase: "measuring", hashedFiles, totalFiles: expected.length, hashedBytes, totalBytes });
+      }
     }
-    const cacheKey = manifestPathKey(entry.path);
-    // Only an archive may take its digest from the cache; see isCachedArchive.
-    const cached = isCachedArchive(entry.path) ? cache.get(cacheKey) : undefined;
-    const digest = cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs
-      ? cached.sha256
-      : await sha256File(absolute);
-    nextCache.set(cacheKey, { size: fileStat.size, mtimeMs: fileStat.mtimeMs, sha256: digest });
-    observed.push({ path: entry.path, size: fileStat.size, sha256: digest });
-    if (digest !== entry.sha256) {
-      deviations.push({ path: entry.path, kind: "mismatch", observedSha256: digest });
-    }
-    hashedFiles += 1;
-    hashedBytes += fileStat.size;
-    if (hashedFiles % 50 === 0) {
-      onProgress?.({ phase: "measuring", hashedFiles, totalFiles: expected.length, hashedBytes, totalBytes });
-    }
+  } catch (error) {
+    // Keep what was already hashed: the next Play must not hash it all again.
+    await saveCache(userDataDirectory, new Map([...cache, ...nextCache]));
+    throw error;
   }
 
   const unexpected = options.detectUnexpected
