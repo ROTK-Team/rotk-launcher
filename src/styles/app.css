@@ -1172,6 +1172,36 @@ button:focus-visible {
   box-shadow: -22px 0 70px rgba(0, 0, 0, 0.38);
 }
 
+.install-panel__installed {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--signal);
+}
+
+.install-panel__installed strong {
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  color: var(--muted);
+}
+
+.install-panel__installed span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--paper);
+}
+
+.install-panel__installed small {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--paper-dim);
+}
+
 .identity-panel {
   position: absolute;
   z-index: 41;

@@ -155,6 +155,16 @@ export function InstallPanel({
               </div>
             </div>
 
+            {snapshot.installationRoot && !installing && (
+              // The steps below only prepare another installation: say what is
+              // installed now, and that it stays in use until that one is done.
+              <div className="install-panel__installed">
+                <strong>{copy.install.installedClient}</strong>
+                <span title={snapshot.installationRoot}>{snapshot.installationRoot}</span>
+                <small>{copy.install.installedHint}</small>
+              </div>
+            )}
+
             <div className="install-steps">
               <button type="button" className={hasSource ? "install-step is-complete" : "install-step"} onClick={onSelectSource} disabled={installing || busy}>
                 <span className="install-step__index">{hasSource ? <Check size={16} /> : "01"}</span>

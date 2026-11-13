@@ -130,6 +130,8 @@ export interface Copy {
   };
   install: {
     notSelected: string;
+    installedClient: string;
+    installedHint: string;
     closeSetup: string;
     panelLabel: string;
     firstInstall: string;
@@ -341,6 +343,8 @@ const COPY: Record<AppLocale, Copy> = {
     },
     install: {
       notSelected: "NOT SELECTED",
+      installedClient: "INSTALLED CLIENT",
+      installedHint: "It stays the one you play with. The steps below prepare another installation, which replaces it only once it is finished.",
       closeSetup: "Close setup",
       panelLabel: "ROTK client installation",
       firstInstall: "CLIENT SETUP",
@@ -573,6 +577,8 @@ const COPY: Record<AppLocale, Copy> = {
     },
     install: {
       notSelected: "NON SÉLECTIONNÉ",
+      installedClient: "CLIENT INSTALLÉ",
+      installedHint: "C’est toujours celui avec lequel tu joues. Les étapes ci-dessous préparent une autre installation, qui ne le remplace qu’une fois terminée.",
       closeSetup: "Fermer la configuration",
       panelLabel: "Installation du client ROTK",
       firstInstall: "CONFIGURATION DU CLIENT",
@@ -805,6 +811,8 @@ const COPY: Record<AppLocale, Copy> = {
     },
     install: {
       notSelected: "未选择",
+      installedClient: "已安装的客户端",
+      installedHint: "游戏仍然使用这个客户端。下面的步骤只是准备另一个安装，完成后才会替换它。",
       closeSetup: "关闭设置",
       panelLabel: "ROTK 客户端安装",
       firstInstall: "客户端设置",
