@@ -109,6 +109,25 @@ describe("public ROTK runtime", () => {
     );
   });
 
+  it("mirrors game logs to the console only for a Debug session", () => {
+    const launch = (verbose?: boolean) => gameLauncherInternals.buildLaunchArguments(
+      "T".repeat(43),
+      DEFAULT_RUNTIME_CONFIG,
+      "C:\\ROTK\\logs",
+      "install-1",
+      "http://127.0.0.1:49152/rest/auth/session/create",
+      "fr",
+      verbose,
+    );
+    for (const args of [launch(), launch(false)]) {
+      expect(args).toContain("Logging:ConsoleLogLevel=0");
+      expect(args).toContain("Logging:FileLogLevel=999");
+    }
+    const debug = launch(true);
+    expect(debug).toContain("Logging:ConsoleLogLevel=999");
+    expect(debug).toContain("Logging:FileLogLevel=999");
+  });
+
   it.each([
     ["en", "en_us"],
     ["fr", "fr_fr"],
