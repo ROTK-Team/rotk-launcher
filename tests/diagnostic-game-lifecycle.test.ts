@@ -126,6 +126,19 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(f.request.attest).not.toHaveBeenCalled();
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
+  it.runIf(process.platform === 'win32')('launches when a read-only InputProfile_User.xml cannot take the shortcuts', async () => {
+    const f = await fixture();
+    const profile = join(f.request.config.installation!.root, 'InputProfile_User.xml');
+    const locked = '<Profile name="User"><ActionSet name="Generic"><Action name="OpenMap"><Trigger>M</Trigger></Action></ActionSet></Profile>';
+    await writeFile(profile, locked);
+    await chmod(profile, 0o444);
+    const launched = f.launcher.launch(f.request).catch(error => error);
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    expect(await readFile(profile, 'utf8')).toBe(locked);
+    await chmod(profile, 0o666);
+    f.child().exit(0);
+    await launched;
+  });
   it.runIf(process.platform === 'win32')('launches when UserOptions.ini cannot be rewritten', async () => {
     const f = await fixture();
     const options = join(f.request.config.installation!.root, 'UserOptions.ini');

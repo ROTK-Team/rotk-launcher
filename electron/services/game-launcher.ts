@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { access, copyFile, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, existsSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import { retryFs } from "./fs-safe.js";
 import { promisify } from "node:util";
@@ -306,8 +306,10 @@ async function prepareClient(
   // Both steps below refuse a profile the game left truncated: recover it first.
   const recovery = await recoverInputProfile(root, inputProfileState);
   if (recovery) request.onInputProfileRecovered?.(recovery);
-  await prepareWeaponStanceProfile(root, inputProfileState, WEAPON_STANCE_ENABLED);
-  await prepareInterfaceInputProfile(root, inputProfileState);
+  await keepLockedInputProfile(root, async () => {
+    await prepareWeaponStanceProfile(root, inputProfileState, WEAPON_STANCE_ENABLED);
+    await prepareInterfaceInputProfile(root, inputProfileState);
+  });
 
   const configPath = join(root, "ClientConfig.ini");
   const configBackupPath = join(root, "ClientConfig.original.ini");
@@ -347,6 +349,25 @@ async function updateUserOptions(root: string, update: (options: string) => stri
     console.warn("UserOptions.ini was not updated; launching anyway.", error);
   } finally {
     await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
+/**
+ * The launcher only adds its own shortcuts to InputProfile_User.xml. When the
+ * file is read-only or held by another program, the game starts with the
+ * profile as it is, like UserOptions.ini above: the player keeps every binding
+ * and only misses those shortcuts. A damaged profile still stops the launch.
+ */
+async function keepLockedInputProfile(root: string, update: () => Promise<void>): Promise<void> {
+  const locked = (error: unknown): boolean => ["EPERM", "EACCES", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "");
+  try {
+    // A read-only file is known at once; do not spend the rename retries on it.
+    await access(join(root, "InputProfile_User.xml"), fsConstants.W_OK)
+      .catch((error: unknown) => { if (locked(error)) throw error; });
+    await update();
+  } catch (error) {
+    if (!locked(error)) throw error;
+    console.warn("InputProfile_User.xml was not updated; launching anyway.", error);
   }
 }
 

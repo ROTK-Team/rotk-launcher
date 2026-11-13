@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrateStanceProfile, prepareWeaponStanceProfile } from "../electron/services/weapon-stance-profile.js";
@@ -17,6 +17,23 @@ describe("stance binding migration and rollback", () => {
       expect(restored).not.toContain('name="ToggleWeaponStance"');
       expect(restored).not.toContain('name="ROTKConsole"');
       expect(restored).toContain('<Trigger>M</Trigger>');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it("does not rewrite a profile and an ownership file that are already right", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rotk-stance-unchanged-"));
+    const state = join(root, "state");
+    const profile = join(root, "InputProfile_User.xml"), ownership = join(state, "weapon-stance.v1.json");
+    try {
+      await writeFile(profile, source);
+      await prepareWeaponStanceProfile(root, state, true);
+      const text = await readFile(profile, "utf8");
+      expect(text).toContain('name="ToggleWeaponStance"');
+      const before = new Date("2020-01-01T00:00:00Z");
+      await utimes(profile, before, before); await utimes(ownership, before, before);
+      await prepareWeaponStanceProfile(root, state, true);
+      expect(await readFile(profile, "utf8")).toBe(text);
+      expect((await stat(profile)).mtimeMs).toBe(before.getTime());
+      expect((await stat(ownership)).mtimeMs).toBe(before.getTime());
     } finally { await rm(root, { recursive: true, force: true }); }
   });
   it("ignores invalid ownership without touching the player's bindings", async () => {
