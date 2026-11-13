@@ -38,6 +38,12 @@ const GAME_STARTUP_STABILITY_MS = 3_000;
 // then closes this soon after its spawn with anything but exit code 0, that
 // code is the only clue the player can pass on.
 const GAME_EARLY_EXIT_MS = 60_000;
+// H1Z1 prints this line about 4 s after its spawn, right after its startup
+// settings. Some launches freeze before it, with no window and no further
+// output, and only a relaunch helps. Past this delay without the line, the
+// launch is reported as stalled; it is far above the slowest healthy start.
+export const GAME_STARTUP_MARKER = "Starting the game client";
+export const GAME_STARTUP_STALL_MS = 30_000;
 
 /**
  * What one attestation attempt produced.
@@ -116,6 +122,11 @@ export interface LaunchRequest {
   presence?: { start(pid: number): void; stop(): void };
   /** A damaged InputProfile_User.xml was set aside so the launch could go on. */
   onInputProfileRecovered?(recovery: InputProfileRecovery): void;
+  /**
+   * H1Z1 is still running but never printed GAME_STARTUP_MARKER within
+   * GAME_STARTUP_STALL_MS of its spawn. Called at most once per launch.
+   */
+  onStartupStalled?(): void;
   onExit(exitCode: number | null): void;
   /**
    * Called just before `onExit` when a launch that was reported as started
@@ -596,9 +607,26 @@ export class GameLauncher {
       this.child = child;
       const spawnedAt = performance.now();
       let started = false;
+      // The marker may arrive split across two chunks: keep a short tail.
+      let startupTail = "";
+      const stallTimer = setTimeout(() => {
+        if (child.exitCode !== null) return;
+        try { request.onStartupStalled?.(); } catch { /* The hook must not break the launch. */ }
+      }, GAME_STARTUP_STALL_MS);
+      stallTimer.unref?.();
+      const watchStartup = (text: string): void => {
+        startupTail = (startupTail + text).slice(-(GAME_STARTUP_MARKER.length + text.length));
+        if (startupTail.includes(GAME_STARTUP_MARKER)) {
+          clearTimeout(stallTimer);
+          startupTail = "";
+        }
+      };
       for (const stream of ["stdout", "stderr"] as const) {
         child[stream]?.setEncoding("utf8");
-        child[stream]?.on("data", (text: string) => diagnosticCallback(() => request.diagnostics?.onOutput(stream, text)));
+        child[stream]?.on("data", (text: string) => {
+          if (stream === "stdout") watchStartup(text);
+          diagnosticCallback(() => request.diagnostics?.onOutput(stream, text));
+        });
         child[stream]?.on("error", () => undefined);
       }
       diagnosticCallback(() => request.diagnostics?.onSpawned(child.pid!));
@@ -606,6 +634,7 @@ export class GameLauncher {
       const finalize = (code: number | null, signal: NodeJS.Signals | null = null): void => {
         if (finalized) return;
         finalized = true;
+        clearTimeout(stallTimer);
         // A startup failure is already reported by the rejected launch below.
         const earlyExit = started ? earlyExitMessage(code, performance.now() - spawnedAt) : null;
         try { request.presence?.stop(); } catch { /* Presence is optional. */ }

@@ -58,6 +58,7 @@ import { ConfigStore } from "./services/config-store.js";
 import { DiscordPresence } from "./services/discord-presence.js";
 import { adoptExistingClient, cleanupInstallLeftovers, inspectDestination, installClient, lostWithLauncherFolder } from "./services/installer.js";
 import {
+  GAME_STARTUP_STALL_MS,
   GameLauncher,
   assertExecutableNotRunning,
   stopGameFromInstallation,
@@ -1230,13 +1231,34 @@ function registerIpc(): void {
     }),
   );
 
-  ipcMain.handle(
-    IPC_CHANNELS.play,
-    trustedHandler(async (): Promise<OperationResult<{ pid: number }>> => {
+  // Some launches freeze before H1Z1 opens its window (no output after its
+  // startup settings) and only a relaunch helps. ACD (11/11): closing a game
+  // that never reached the lobby is fine. Bounded per Play click.
+  const STARTUP_STALL_RELAUNCHES = 2;
+  let stallRelaunchesLeft = 0;
+  const relaunchAfterStall = async (): Promise<void> => {
+    // The stalled session's report is finalized before Play is accepted again.
+    for (let waited = 0; diagnosticWorkInProgress() && waited < 60_000; waited += 500) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
+    }
+    const result = await play(true);
+    if (!result.ok) {
+      // Refused before it started (update required, key removed…): Play is free again.
+      if (phase === "launching" && !gameLauncher.isRunning()) phase = "ready";
+      if (!result.cancelled) lastErrorRaw = result.error ?? null;
+      await broadcastSnapshot();
+    }
+  };
+  const play = async (relaunch: boolean): Promise<OperationResult<{ pid: number }>> => {
+      if (!relaunch) stallRelaunchesLeft = STARTUP_STALL_RELAUNCHES;
       if (updateRequired || launcherUpdateBlocksPlay(launcherUpdate.state)) {
         return { ok: false, error: MAIN_COPY[currentLocale].update.required };
       }
-      if (phase !== "ready" || debugSettingWrite || diagnosticWorkInProgress()) return { ok: false, error: MAIN_COPY[currentLocale].clientNotReady };
+      // A relaunch after a stalled start keeps "launching" while it waits.
+      if (phase !== (relaunch ? "launching" : "ready") || debugSettingWrite || diagnosticWorkInProgress()) {
+        if (relaunch) phase = "ready";
+        return { ok: false, error: MAIN_COPY[currentLocale].clientNotReady };
+      }
       const selectedKey = activeKey();
       if (!selectedKey) {
         return {
@@ -1263,6 +1285,7 @@ function registerIpc(): void {
         return { ok: false, error: assetResult.error };
       }
       let diagnosticLaunch: Awaited<ReturnType<DiagnosticController["beginLaunch"]>> | undefined;
+      let stalled = false;
       try {
         try { diagnosticLaunch = await diagnostics.beginLaunch(await diagnosticContext(launchRuntime)); }
         catch { /* A report directory failure cannot block an otherwise valid game launch. */ }
@@ -1293,9 +1316,24 @@ function registerIpc(): void {
             inputProfileRecovery = recovery;
             void broadcastSnapshot();
           },
+          onStartupStalled: () => {
+            if (!gameLauncher.stop()) return;
+            stalled = true;
+            startupLog.mark("game-startup-stalled", `no startup line after ${GAME_STARTUP_STALL_MS / 1000} s, closed, ${stallRelaunchesLeft} relaunch(es) left`);
+          },
           onExit: () => {
             gamePid = null;
             phase = "ready";
+            if (stalled) {
+              if (stallRelaunchesLeft > 0) {
+                stallRelaunchesLeft -= 1;
+                phase = "launching";
+                void broadcastSnapshot();
+                void relaunchAfterStall();
+                return;
+              }
+              lastErrorRaw = MAIN_COPY[currentLocale].stopGame.stalled;
+            }
             void broadcastSnapshot();
             if (quitWhenGameExits && !mainWindow && !diagnosticWorkInProgress()) app.quit();
           },
@@ -1338,8 +1376,8 @@ function registerIpc(): void {
         if (quitWhenGameExits && !mainWindow && !diagnosticWorkInProgress()) app.quit();
         return outcome;
       }
-    }),
-  );
+  };
+  ipcMain.handle(IPC_CHANNELS.play, trustedHandler(() => play(false)));
 
   ipcMain.handle(
     IPC_CHANNELS.stopGame,
