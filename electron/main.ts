@@ -93,6 +93,7 @@ import { PlayerKeyStore, type PlayerKeySet } from "./services/player-key-store.j
 import type { AttestationProgress } from "./services/integrity-attestation.js";
 import { attestInstallation as runLaunchAttestation } from "./services/launch-attestation.js";
 import { DiagnosticController } from "./services/diagnostic-controller.js";
+import { keepsLauncherAlive, mayQuitWithoutWindow } from "./services/quit-policy.js";
 import { StartupLog } from "./services/startup-log.js";
 import { describeSystemError, isSystemError } from "./services/system-error.js";
 import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
@@ -237,6 +238,17 @@ function validDiagnosticDescription(value: unknown): value is string {
 
 function diagnosticWorkInProgress(): boolean {
   return debugSettingWrite || crashReportRequests > 0 || Boolean(diagnostics?.isBusy());
+}
+
+/** Quits a launcher whose window the player closed, once nothing is left to wait for. */
+function quitIfIdle(): void {
+  if (mayQuitWithoutWindow({
+    windowClosedByPlayer: quitWhenGameExits,
+    windowOpen: mainWindow !== null,
+    gameRunning: gameLauncher.isRunning(),
+    phase,
+    diagnosticWork: diagnosticWorkInProgress(),
+  })) app.quit();
 }
 
 function bundledResourcesRoot(): string {
@@ -591,6 +603,9 @@ async function broadcastSnapshot(): Promise<void> {
   // Before the services exist there is no snapshot to build; the renderer's
   // own getSnapshot() call waits for them.
   if (!servicesInitialized) return;
+  // Every change of state ends here, so this is where a windowless launcher
+  // learns that its game, its launch or its report is over.
+  quitIfIdle();
   const value = await snapshot();
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(IPC_CHANNELS.snapshotChanged, value);
@@ -668,7 +683,7 @@ function registerIpc(): void {
     } finally {
       debugSettingWrite = false;
       void broadcastSnapshot();
-      if (quitWhenGameExits && !mainWindow && !gameLauncher.isRunning() && !diagnosticWorkInProgress()) app.quit();
+      quitIfIdle();
     }
     return { ok: true, value: await snapshot() };
   }));
@@ -683,7 +698,7 @@ function registerIpc(): void {
     } catch { return { ok: false, error: diagnosticCopy().failed }; }
     finally {
       crashReportRequests--;
-      if (quitWhenGameExits && !mainWindow && !gameLauncher.isRunning() && phase !== "launching" && phase !== "running" && !diagnosticWorkInProgress()) app.quit();
+      quitIfIdle();
     }
   }));
   ipcMain.handle(IPC_CHANNELS.getDiagnosticReports, trustedHandler(async (): Promise<OperationResult<DiagnosticState>> => {
@@ -1187,7 +1202,6 @@ function registerIpc(): void {
               lastErrorRaw = MAIN_COPY[currentLocale].stopGame.stalled;
             }
             void broadcastSnapshot();
-            if (quitWhenGameExits && !mainWindow && !diagnosticWorkInProgress()) app.quit();
           },
         });
         gamePid = pid;
@@ -1225,7 +1239,7 @@ function registerIpc(): void {
           outcome = { ok: false, error: free ? copy.strayClosed : copy.strayNotClosed };
           await broadcastSnapshot();
         }
-        if (quitWhenGameExits && !mainWindow && !diagnosticWorkInProgress()) app.quit();
+        quitIfIdle();
         return outcome;
       }
   };
@@ -1573,7 +1587,9 @@ async function initialize(): Promise<void> {
       debugSettingWrite = true;
       void configStore.load().then((config) => configStore.save({ ...config, debugSessionEnabled: false }))
         .catch((error: unknown) => startupLog.mark("debug-setting-save-failed", errorMessage(error)))
-        .finally(() => { debugSettingWrite = false; });
+        // The saved setting frees Play and may be the last thing a windowless
+        // launcher was waiting for: say so, which also applies the quit rule.
+        .finally(() => { debugSettingWrite = false; void broadcastSnapshot(); });
     },
     // The player sees the reason; startup.log keeps the error behind it.
     onDebugFailure: (code, reason, error) => startupLog.mark(code, redactDiagnosticText([reason,
@@ -1665,7 +1681,7 @@ if (singleInstanceLock) {
     });
 
   app.on("window-all-closed", () => {
-    if (gameLauncher.isRunning() || phase === "launching" || phase === "running" || diagnosticWorkInProgress()) {
+    if (keepsLauncherAlive({ gameRunning: gameLauncher.isRunning(), phase, diagnosticWork: diagnosticWorkInProgress() })) {
       quitWhenGameExits = true;
       return;
     }
