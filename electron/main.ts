@@ -55,6 +55,7 @@ import {
   resolveBundledFontsPath,
 } from "./constants.js";
 import { ConfigStore } from "./services/config-store.js";
+import { assertVisualCppRuntime } from "./services/visual-cpp-runtime.js";
 import { DiscordPresence } from "./services/discord-presence.js";
 import { adoptExistingClient, cleanupInstallLeftovers, inspectDestination, installClient, lostWithLauncherFolder } from "./services/installer.js";
 import {
@@ -315,6 +316,20 @@ async function confirmCloseGame(message: string): Promise<boolean> {
     buttons: [copy.confirm, copy.cancel], defaultId: 1, cancelId: 1, noLink: true };
   const { response } = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
   return response === 0;
+}
+
+/**
+ * Play refuses a Visual C++ runtime that is missing or too old, but only after
+ * its asset download. Say it as soon as the installation is known instead: at
+ * launcher start and at the end of an install. Play still runs its own check.
+ */
+function warnAboutVisualCppRuntime(root: string): void {
+  void assertVisualCppRuntime(root).catch((error: unknown) => {
+    startupLog.mark("visual-cpp-runtime-refused", errorMessage(error));
+    // Keep an error that is already shown.
+    lastErrorRaw ??= rawErrorMessage(error);
+    void broadcastSnapshot();
+  });
 }
 
 async function installationRoot(): Promise<string | null> {
@@ -1196,6 +1211,7 @@ function registerIpc(): void {
         phase = "ready";
         progress = null;
         await broadcastSnapshot();
+        warnAboutVisualCppRuntime(installationRoot);
         // Best-effort first asset sync: a feed problem surfaces in the asset
         // summary without turning the completed installation into a failure.
         await runAssetSync("sync", true);
@@ -1655,6 +1671,7 @@ async function initialize(): Promise<void> {
   }
   if (config.installation && phase === "ready") {
     void cleanupInstallLeftovers(config.installation.root).catch(() => undefined);
+    warnAboutVisualCppRuntime(config.installation.root);
   }
   launcherUpdate = new LauncherUpdateService({
     // In development there is no installed package to update against;
