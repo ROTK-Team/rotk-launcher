@@ -84,6 +84,20 @@ button:focus-visible {
   color: var(--muted);
 }
 
+.boot-screen {
+  position: relative;
+}
+
+.boot-screen small {
+  max-width: 520px;
+  font-family: "Inter", system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--paper-dim);
+}
+
 .boot-screen img {
   width: 74px;
   height: 74px;
