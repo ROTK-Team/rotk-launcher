@@ -248,6 +248,35 @@ describe('game lifecycle remains independent of diagnostics', () => {
   });
 });
 
+describe('the H1Z1 process the launcher starts', () => {
+  it('runs from the game folder, detached, with its output piped and the ticket identity in its environment', async () => {
+    process.env.H1Z1_LEFTOVER = 'from another launcher';
+    process.env.STEAMAPPID = '433850';
+    try {
+      const f = await fixture();
+      const launched = f.launcher.launch(f.request).catch(error => error);
+      await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+      const [executable, , options] = mocks.spawn.mock.calls[0];
+      const root = f.request.config.installation!.root;
+      expect(executable).toBe(join(root, 'H1Z1.exe'));
+      // rotkc.dll and the proxies are loaded by name from this folder, and the
+      // launcher reads the game's own startup lines from its stdout.
+      expect(options).toMatchObject({ cwd: root, detached: true, shell: false, windowsHide: false,
+        stdio: ['ignore', 'pipe', 'pipe'] });
+      expect(options.env).toMatchObject({ STEAMID: '76561190000000000',
+        H1Z1_OVERRIDE_STEAMID: '76561190000000000', H1Z1_OVERRIDE_PERSONA: 'FixturePlayer' });
+      // Nothing inherited may name another identity or another Steam game.
+      expect(options.env).not.toHaveProperty('H1Z1_LEFTOVER');
+      expect(options.env).not.toHaveProperty('STEAMAPPID');
+      f.child().exit(0);
+      await launched;
+    } finally {
+      delete process.env.H1Z1_LEFTOVER;
+      delete process.env.STEAMAPPID;
+    }
+  });
+});
+
 describe('a game that closes soon after a launch reported as started', () => {
   const hint = 'Si tu ne l’as pas fermé toi-même, relance le jeu ; si ça recommence, Debug (dans les réglages) permet d’envoyer un rapport à ROTK.';
   // Fake timers from the start, so the stability window and the measured delay

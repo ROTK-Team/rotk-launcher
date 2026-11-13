@@ -8,9 +8,12 @@ const count = (value: string, needle: string): number =>
 
 describe("shotgun sprint patch wiring", () => {
   it("applies the server mode during attestation and rechecks before spawn", async () => {
-    const [launcher, main] = await Promise.all([
+    // The attestation pass moved from main.ts to its own service; its order
+    // and its patch-mode rules are pinned by launch-attestation.test.ts.
+    const [launcher, main, attestation] = await Promise.all([
       readFile(root + "electron/services/game-launcher.ts", "utf8"),
       readFile(root + "electron/main.ts", "utf8"),
+      readFile(root + "electron/services/launch-attestation.ts", "utf8"),
     ]);
 
     expect(launcher).not.toContain("removeRetiredGameplayPatch");
@@ -20,20 +23,20 @@ describe("shotgun sprint patch wiring", () => {
     expect(launcher).toContain("await assertGameplayPatchState(root, clientPatchMode);");
     expect(count(launcher, "await prepareClient(")).toBe(2);
 
-    expect(main).toContain("challenge.clientPatchMode ?? \"clean\"");
-    expect(main).toContain("await applyGameplayPatchMode(");
-    expect(main).toContain("await recordGameplayPatchState(");
-    expect(main).toContain("resolveBundledGameplayPatchPath()");
+    expect(attestation).toContain("challenge.clientPatchMode ?? \"clean\"");
+    expect(attestation).toContain("await applyGameplayPatchMode(");
+    expect(attestation).toContain("await recordGameplayPatchState(");
+    expect(main).toContain("gameplayPatch: resolveBundledGameplayPatchPath()");
     expect(main).toContain("bundledGameplayPatchPath: resolveBundledGameplayPatchPath()");
     expect(main).toContain("clientPatchModeFallback:");
   });
 
   it("attests dinput8.dll only when the server directs the patched mode", async () => {
-    const main = await readFile(root + "electron/main.ts", "utf8");
-    expect(main).toContain(
-      '{ installPath: "dinput8.dll", bundledPath: resolveBundledGameplayPatchPath() }',
+    const attestation = await readFile(root + "electron/services/launch-attestation.ts", "utf8");
+    expect(attestation).toContain(
+      '{ installPath: "dinput8.dll", bundledPath: context.bundled.gameplayPatch }',
     );
-    expect(main).toContain('...(clientPatchMode === "patched"');
+    expect(attestation).toContain('...(clientPatchMode === "patched"');
   });
 
   it("mirrors the override path in the shared attestation contract", async () => {
