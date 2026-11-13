@@ -135,6 +135,13 @@ export interface LoadBaseManifestOptions {
 export async function loadBaseManifest(options: LoadBaseManifestOptions): Promise<BaseManifest> {
   const url = validateManifestUrl(options.url);
   const cachePath = join(options.userDataDirectory, CACHE_FILE_NAME);
+  // The challenge names the build: a cached manifest for that build is the
+  // same document, so Play does not wait on GitHub (up to the timeout below
+  // where it is slow or blocked). A new build still goes to the network.
+  const cachedForBuild = await readFile(cachePath, "utf8")
+    .then((text) => parseBaseManifest(JSON.parse(stripByteOrderMark(text))))
+    .catch(() => null);
+  if (cachedForBuild?.buildId === options.expectedBuildId) return cachedForBuild;
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
