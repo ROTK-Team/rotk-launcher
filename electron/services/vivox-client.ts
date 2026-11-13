@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
+import { fileHashOrEmpty } from "./file-hash.js";
 import { atomicCopyFile, atomicWriteFile } from "./fs-safe.js";
 
 export const VIVOX_STOCK_V4_SHA256 =
@@ -60,9 +61,8 @@ async function sha256(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
-async function fileHash(filePath: string): Promise<string> {
-  return sha256(filePath).catch(() => "");
-}
+// "" for an absent file; a file held by another program is waited for, then reported.
+const fileHash = fileHashOrEmpty;
 
 async function atomicCopy(source: string, destination: string): Promise<void> {
   await atomicCopyFile(source, destination);
