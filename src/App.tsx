@@ -131,7 +131,9 @@ export default function App() {
   const selectDestination = () => perform(() => window.rotk.selectDestination());
   const install = () => perform(() => window.rotk.install());
   const play = () => perform(() => window.rotk.play());
-  const error = snapshot.error ?? transientError;
+  // The answer to the player's last click comes first: an older error still
+  // held by the main process must not hide it.
+  const error = transientError ?? snapshot.error;
   const notice = error ? null : snapshot.notice;
   const onPrimary = () => {
     if (launcherUpdateBlocksPlay(snapshot.launcherUpdate) || snapshot.updateRequired) {
@@ -155,9 +157,11 @@ export default function App() {
           <strong>{error ? copy.app.operationInterrupted : copy.app.notice}</strong>
           <span>{error ?? notice}</span>
           <button type="button" aria-label={copy.app.closeError} onClick={() => {
+            // Close what is shown, nothing else: an error or a notice behind it
+            // then takes its place instead of vanishing unread. The main
+            // process often holds the same text as the answer just shown.
+            if (transientError === null || transientError === snapshot.error) void window.rotk.dismissError();
             setTransientError(null);
-            // A renderer-only error must not dismiss the notice behind it.
-            if (snapshot.error || notice) void window.rotk.dismissError();
           }}>×</button>
         </div>
       )}

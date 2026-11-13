@@ -922,7 +922,10 @@ button:focus-visible {
 
 .error-toast {
   position: absolute;
-  z-index: 30;
+  /* Above the side panels and their backdrop (40, 41): a refusal answered to a
+     click made inside a panel used to sit blurred behind it, unreadable. The
+     panels open on the right, the toast sits on the left. */
+  z-index: 42;
   left: 28px;
   bottom: calc(var(--footer-height) + 20px);
   width: min(520px, 48vw);
