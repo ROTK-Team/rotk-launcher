@@ -204,7 +204,7 @@ describe("executable files are checked again right before H1Z1 starts", () => {
 });
 
 describe("a refused challenge is attested once more", () => {
-  const retryable = () => Object.assign(new Error("The game files do not match the official ROTK installation. Use Verify files, then try again."),
+  const retryable = () => Object.assign(new Error("The ROTK server could not validate the game file check this time. Click Play again."),
     { code: "attestation_retryable" });
 
   it("attests again and launches when the first challenge expired", async () => {
@@ -218,7 +218,7 @@ describe("a refused challenge is attested once more", () => {
   it("gives up after the second refusal and never starts H1Z1", async () => {
     const f = await fixture();
     mocks.createLaunchTicket.mockRejectedValueOnce(retryable()).mockRejectedValueOnce(retryable());
-    await expect(f.launcher.launch(f.request)).rejects.toThrow("Use Verify files");
+    await expect(f.launcher.launch(f.request)).rejects.toThrow("Click Play again");
     expect(f.attest).toHaveBeenCalledTimes(2);
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
