@@ -54,6 +54,11 @@ export function LauncherUpdatePrompt({
       )}
       {update.status === "error" && <p className="launcher-update-prompt__error" role="alert">{copy.update.failed}: {update.error}</p>}
       {!knownUpdate && <p role="status">{copy.update.requiredDetail}</p>}
+      {(!knownUpdate || update.status === "error") && (
+        <button type="button" className="launcher-update-prompt__link" onClick={() => void window.rotk.openWebsite("/play")}>
+          {copy.update.manualDownload}
+        </button>
+      )}
       {downloaded && running && <p role="status">{copy.update.closeGame}</p>}
       <div className="launcher-update-prompt__actions">
         <button type="button" className="launcher-update-prompt__primary" autoFocus

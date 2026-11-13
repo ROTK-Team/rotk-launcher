@@ -119,6 +119,21 @@ describe("launcher self-update service", () => {
     expect(service.state).toMatchObject({ status: "idle", error: null });
   });
 
+  it("logs a failed check once, with a short code, while staying silent for the player", async () => {
+    const updater = new FakeUpdater();
+    const onCheckError = vi.fn();
+    const service = new LauncherUpdateService({ updater, onChange: () => undefined, onCheckError });
+    // An interrupted update can leave app-update.yml filled with NUL bytes (#245).
+    const damaged = Object.assign(new Error("null byte is not allowed in input"), { name: "YAMLException" });
+    updater.checkForUpdates.mockImplementationOnce(async () => {
+      updater.emit("error", damaged);
+      throw damaged;
+    });
+    await service.check();
+    expect(service.state).toMatchObject({ status: "idle", error: null });
+    expect(onCheckError).toHaveBeenCalledExactlyOnceWith("YAMLException");
+  });
+
   it("never downloads without a known available update", () => {
     const { updater, service } = createService();
     expect(service.download()).toBe("no-update");
