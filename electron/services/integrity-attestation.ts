@@ -226,6 +226,9 @@ function parseChallenge(
   return challenge;
 }
 
+const CHALLENGE_NETWORK_ATTEMPTS = 2;
+const CHALLENGE_RETRY_DELAY_MS = 350;
+
 export async function requestAttestationChallenge(
   playerKey: string,
   endpointValue: string,
@@ -243,18 +246,27 @@ export async function requestAttestationChallenge(
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   const requestedAtMonotonicMs = performance.now();
   try {
-    let response: Response;
-    try {
-      response = await fetchImpl(endpoint, {
-        method: "POST",
-        headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({ launcherKey: playerKey, launcherVersion }),
-        cache: "no-store",
-        redirect: "error",
-        signal: controller.signal,
-      });
-    } catch {
-      throw attestationError("Unable to reach the ROTK integrity service");
+    let response: Response | undefined;
+    for (let attempt = 0; response === undefined; attempt += 1) {
+      try {
+        response = await fetchImpl(endpoint, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ launcherKey: playerKey, launcherVersion }),
+          cache: "no-store",
+          redirect: "error",
+          signal: controller.signal,
+        });
+      } catch {
+        // A challenge that never arrived was not used for anything, so a failed
+        // lookup or a dropped connection is asked once more, within the same
+        // overall timeout. One failed request used to make the whole
+        // attestation unavailable and, under enforcement, refuse the launch.
+        if (attempt === CHALLENGE_NETWORK_ATTEMPTS - 1 || controller.signal.aborted) {
+          throw attestationError("Unable to reach the ROTK integrity service");
+        }
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, CHALLENGE_RETRY_DELAY_MS));
+      }
     }
     let payload: unknown;
     try {
