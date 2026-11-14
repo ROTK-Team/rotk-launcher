@@ -117,6 +117,11 @@ export interface AssetSyncState {
   packVersion: string;
   syncedAt: string;
   assets: InstalledAssetRecord[];
+  /**
+   * The installation this state describes (the id in its install marker).
+   * Absent in states written before this field existed.
+   */
+  installId?: string;
 }
 
 export interface AssetSyncOutcome {
@@ -304,7 +309,18 @@ function isAssetSyncState(value: unknown): value is AssetSyncState {
       && typeof (asset as InstalledAssetRecord).version === "string"
       && isHex64((asset as InstalledAssetRecord).sha256)
       && Array.isArray((asset as InstalledAssetRecord).installedFiles)
-      && (asset as InstalledAssetRecord).installedFiles.every(isInstalledFileRecord));
+      && (asset as InstalledAssetRecord).installedFiles.every(isInstalledFileRecord))
+    && (state.installId === undefined || typeof state.installId === "string");
+}
+
+/** The id of the installation in `root`, from its install marker; null when it has none. */
+async function readInstallId(root: string): Promise<string | null> {
+  try {
+    const marker = JSON.parse(await readFile(join(root, INSTALL_MARKER_NAME), "utf8")) as { installId?: unknown } | null;
+    return typeof marker?.installId === "string" && marker.installId.length > 0 ? marker.installId : null;
+  } catch {
+    return null;
+  }
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -398,6 +414,8 @@ export class AssetSyncService {
   private readonly legacyBackupDirectory: string;
   private cacheDirectory: string;
   private backupDirectory: string;
+  /** Installation the current pass works on; stamped on the state it writes. */
+  private installId: string | null = null;
   private readonly feedUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly onProgress: (progress: AssetSyncProgress) => void;
@@ -435,6 +453,22 @@ export class AssetSyncService {
   }
 
   /**
+   * The state, when it describes the installation in `root`. The state file
+   * lives in the user data folder and used to follow the player to any other
+   * installation: after a reinstall elsewhere it listed files that the new
+   * client never received, no original was backed up there because the state
+   * called those files already replaced, and a later restore or a pack leaving
+   * the feed then deleted game files that had no backup. A state stamped with
+   * another installation is ignored, and that installation starts afresh.
+   */
+  private async stateOf(root: string): Promise<AssetSyncState | null> {
+    this.installId = await readInstallId(root);
+    const state = await this.readState();
+    if (state?.installId && this.installId && state.installId !== this.installId) return null;
+    return state;
+  }
+
+  /**
    * Bring the installed assets in line with the published feed. A feed that
    * cannot be fetched is only fatal when no sync ever completed: afterwards
    * the game keeps launching with the assets already on disk.
@@ -448,7 +482,7 @@ export class AssetSyncService {
       throw new Error("Installe d’abord le client ROTK.");
     }
     this.useStorageFor(root);
-    const state = await this.readState();
+    const state = await this.stateOf(root);
 
     let manifest: AssetManifest;
     try {
@@ -565,7 +599,7 @@ export class AssetSyncService {
   async restore(installRoot: string): Promise<void> {
     const root = resolve(installRoot);
     this.useStorageFor(root);
-    const state = await this.readState();
+    const state = await this.stateOf(root);
     for (const record of state?.assets ?? []) {
       for (const file of record.installedFiles) {
         await this.restoreOrRemove(root, file.path);
@@ -896,7 +930,8 @@ export class AssetSyncService {
   private async writeState(state: AssetSyncState): Promise<void> {
     await mkdir(dirname(this.statePath), { recursive: true });
     const temporaryPath = `${this.statePath}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, {
+    const stamped: AssetSyncState = this.installId ? { ...state, installId: this.installId } : state;
+    await writeFile(temporaryPath, `${JSON.stringify(stamped, null, 2)}\n`, {
       encoding: "utf8",
       flag: "wx",
     });
