@@ -864,7 +864,18 @@ export class AssetSyncService {
     const backupPath = join(this.backupDirectory, relativeToNative(relativePath));
     if (await exists(backupPath) || await exists(join(this.legacyBackupDirectory, relativeToNative(relativePath)))) return;
     await mkdir(dirname(backupPath), { recursive: true });
-    await copyFile(target, backupPath, fsConstants.COPYFILE_EXCL);
+    // Copied under another name, then renamed. A backup is only ever looked
+    // for by its name: one cut short by a crash or a closed launcher (these
+    // are multi-GB packs) used to stay there truncated, was never made again,
+    // and "restore vanilla" later put that broken file back in the game.
+    const temporary = `${backupPath}.rotk-${randomUUID()}.tmp`;
+    try {
+      await copyFile(target, temporary, fsConstants.COPYFILE_EXCL);
+      await retryFs(() => rename(temporary, backupPath));
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   /**
