@@ -42,11 +42,15 @@ const IDLE_STATE: LauncherUpdateSummary = {
 
 export type LauncherUpdateFailure = "unavailable" | "not-downloaded" | "no-update";
 
+/** A download with no progress for this long is reported as failed. */
+export const DOWNLOAD_STALL_MS = 60_000;
+
 export class LauncherUpdateService {
   private readonly updater: UpdaterLike | null;
   private readonly onChange: (state: LauncherUpdateSummary) => void;
   private readonly onDownloadError: (code: string) => void;
   private current: LauncherUpdateSummary = { ...IDLE_STATE };
+  private stallTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: LauncherUpdateOptions) {
     this.updater = options.updater;
@@ -72,6 +76,7 @@ export class LauncherUpdateService {
     });
     this.updater.on("download-progress", (progress) => {
       if (this.current.status !== "downloading") return;
+      this.watchForStall();
       this.transition({
         ...this.current,
         progressPercent: clampPercent(progress.percent),
@@ -140,6 +145,7 @@ export class LauncherUpdateService {
       progressPercent: 0,
       error: null,
     });
+    this.watchForStall();
     this.updater.downloadUpdate().catch(() => {
       // The terminal state is reported through the "error" event; this catch
       // only prevents an unhandled rejection when the download fails.
@@ -154,7 +160,33 @@ export class LauncherUpdateService {
     return null;
   }
 
+  /**
+   * The updater has no timeout of its own under Electron: a download that
+   * stops receiving data stayed on "downloading N%" for good, with no button
+   * left. Without progress for a while it becomes a failed download, which
+   * offers Retry. Data that arrives afterwards still completes it.
+   */
+  private watchForStall(): void {
+    if (this.stallTimer) clearTimeout(this.stallTimer);
+    this.stallTimer = setTimeout(() => {
+      this.stallTimer = null;
+      if (this.current.status !== "downloading") return;
+      this.transition({
+        ...this.current,
+        status: "error",
+        progressPercent: null,
+        error: "The download stopped receiving data.",
+      });
+      this.onDownloadError("stalled");
+    }, DOWNLOAD_STALL_MS);
+    this.stallTimer.unref?.();
+  }
+
   private transition(next: LauncherUpdateSummary): void {
+    if (next.status !== "downloading" && this.stallTimer) {
+      clearTimeout(this.stallTimer);
+      this.stallTimer = null;
+    }
     this.current = next;
     this.onChange(this.state);
   }
