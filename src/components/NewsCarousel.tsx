@@ -59,7 +59,8 @@ export function NewsCarousel({ updates }: NewsCarouselProps) {
   };
 
   const openActive = () => {
-    const path = active.id === "offline" ? "/updates" : `/updates/${encodeURIComponent(active.id)}`;
+    // The site opens the note in the language it was read in here (it knows fr and en).
+    const path = active.id === "offline" ? "/updates" : `/updates/${encodeURIComponent(active.id)}?lang=${locale}`;
     void window.rotk.openWebsite(path);
   };
 
