@@ -377,6 +377,50 @@ async function saveCache(userDataDirectory: string, cache: CacheMap): Promise<vo
   }
 }
 
+export interface WarmArchiveDigestsOptions {
+  installationRoot: string;
+  userDataDirectory: string;
+  /** Asked before each archive and before each write: true ends the pass. */
+  shouldStop(): boolean;
+}
+
+/**
+ * Hashes, ahead of Play, the archives whose digest is not in the cache yet:
+ * a fresh install, or packs an asset update just replaced. Play then finds
+ * them in the cache instead of reading about 17 GB while the player waits.
+ *
+ * Nothing about what a launch trusts changes: the cache holds the same
+ * entries a measurement would have written, checked against size and
+ * modification time when they are used. Returns how many archives it hashed.
+ */
+export async function warmArchiveDigests(options: WarmArchiveDigestsOptions): Promise<number> {
+  const { installationRoot, userDataDirectory, shouldStop } = options;
+  const archives: string[] = [];
+  await walkInstallation(installationRoot, (relative) => {
+    if (isCachedArchive(relative)) archives.push(relative);
+    return !shouldStop();
+  });
+  let hashed = 0;
+  for (const relative of archives) {
+    if (shouldStop()) break;
+    const absolute = join(installationRoot, ...relative.split("/"));
+    const fileStat = await stat(absolute).catch(() => null);
+    if (!fileStat?.isFile()) continue;
+    const key = manifestPathKey(relative);
+    // Read again each time: a launch may have rewritten the cache meanwhile.
+    const known = (await loadCache(userDataDirectory)).get(key);
+    if (known && known.size === fileStat.size && known.mtimeMs === fileStat.mtimeMs) continue;
+    const sha256 = await sha256File(absolute).catch(() => null);
+    // A launch that started during the read measures this file itself.
+    if (sha256 === null || shouldStop()) continue;
+    const cache = await loadCache(userDataDirectory);
+    cache.set(key, { size: fileStat.size, mtimeMs: fileStat.mtimeMs, sha256 });
+    await saveCache(userDataDirectory, cache);
+    hashed += 1;
+  }
+  return hashed;
+}
+
 export interface MeasureOptions {
   installationRoot: string;
   userDataDirectory: string;
