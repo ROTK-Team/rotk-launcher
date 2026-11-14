@@ -20,6 +20,7 @@ interface InstallPanelProps {
   onVerifyAssets(): void;
   onRestoreAssets(): void;
   onToggleAssetSync(enabled: boolean): void;
+  onToggleUpdateAutoDownload(enabled: boolean): void;
   onSelectFont(id: string): void;
   onSelectLauncherFont(id: string): void;
   debugSessionBusy: boolean;
@@ -53,6 +54,7 @@ export function InstallPanel({
   onVerifyAssets,
   onRestoreAssets,
   onToggleAssetSync,
+  onToggleUpdateAutoDownload,
   onSelectFont,
   onSelectLauncherFont,
   debugSessionBusy,
@@ -349,6 +351,18 @@ export function InstallPanel({
                 </label>
               </section>
             )}
+
+            <section className="asset-section">
+              <label className="asset-section__toggle">
+                <input
+                  type="checkbox"
+                  checked={snapshot.launcherUpdateAutoDownload}
+                  disabled={busy}
+                  onChange={(event) => onToggleUpdateAutoDownload(event.target.checked)}
+                />
+                <span>{copy.update.autoDownload}</span>
+              </label>
+            </section>
 
             {snapshot.installationRoot && !installing && (
               <FontPicker

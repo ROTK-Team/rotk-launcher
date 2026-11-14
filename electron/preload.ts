@@ -38,6 +38,7 @@ const api: RotkLauncherApi = {
   openWebsite: (path, serverId) => ipcRenderer.invoke(IPC_CHANNELS.openWebsite, path, serverId),
   checkLauncherUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.checkLauncherUpdate),
   downloadLauncherUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.downloadLauncherUpdate),
+  setLauncherUpdateAutoDownload: (enabled) => ipcRenderer.invoke(IPC_CHANNELS.setLauncherUpdateAutoDownload, enabled),
   installLauncherUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.installLauncherUpdate),
   verifyAssets: () => ipcRenderer.invoke(IPC_CHANNELS.verifyAssets),
   restoreVanillaAssets: () => ipcRenderer.invoke(IPC_CHANNELS.restoreVanillaAssets),

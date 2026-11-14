@@ -177,6 +177,8 @@ export interface LauncherSnapshot {
   runtime: RuntimeSummary;
   playerIdentity: PlayerIdentitySummary;
   launcherUpdate: LauncherUpdateSummary;
+  /** The player's setting: download a launcher update as soon as it is found. */
+  launcherUpdateAutoDownload: boolean;
   assetSync: AssetSyncSummary;
   playerFont: PlayerFontSummary;
   integrityCheck: IntegrityCheckSummary | null;
@@ -251,6 +253,7 @@ export interface RotkLauncherApi {
   checkLauncherUpdate(): Promise<void>;
   downloadLauncherUpdate(): Promise<OperationResult>;
   installLauncherUpdate(): Promise<OperationResult>;
+  setLauncherUpdateAutoDownload(enabled: boolean): Promise<OperationResult>;
   verifyAssets(): Promise<OperationResult>;
   restoreVanillaAssets(): Promise<OperationResult>;
   setAssetSyncEnabled(enabled: boolean): Promise<OperationResult>;
@@ -292,6 +295,7 @@ export const IPC_CHANNELS = {
   checkLauncherUpdate: "launcher:update-check",
   downloadLauncherUpdate: "launcher:update-download",
   installLauncherUpdate: "launcher:update-install",
+  setLauncherUpdateAutoDownload: "launcher:update-set-auto-download",
   verifyAssets: "asset-sync:verify",
   restoreVanillaAssets: "asset-sync:restore",
   setAssetSyncEnabled: "asset-sync:set-enabled",

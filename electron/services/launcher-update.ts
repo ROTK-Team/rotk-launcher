@@ -28,6 +28,12 @@ export interface UpdaterLike {
 
 export interface LauncherUpdateOptions {
   updater: UpdaterLike | null;
+  /**
+   * Asked each time an update is known and not downloaded yet: true starts
+   * the download without a click. The caller decides (the player's setting,
+   * no game running). Absent means never.
+   */
+  autoDownload?: () => boolean;
   onChange: (state: LauncherUpdateSummary) => void;
   /** Short failure code for logs; the raw message may carry signed URLs. */
   onDownloadError?: (code: string) => void;
@@ -51,6 +57,9 @@ export type LauncherUpdateFailure = "unavailable" | "not-downloaded" | "no-updat
 export const DOWNLOAD_STALL_MS = 60_000;
 
 export class LauncherUpdateService {
+  private readonly autoDownload: () => boolean;
+  /** The download in flight was started by the launcher, not by a click. */
+  private unattended = false;
   private readonly updater: UpdaterLike | null;
   private readonly onChange: (state: LauncherUpdateSummary) => void;
   private readonly onDownloadError: (code: string) => void;
@@ -59,6 +68,7 @@ export class LauncherUpdateService {
   private stallTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: LauncherUpdateOptions) {
+    this.autoDownload = options.autoDownload ?? (() => false);
     this.updater = options.updater;
     this.onChange = options.onChange;
     this.onDownloadError = options.onDownloadError ?? (() => undefined);
@@ -77,6 +87,7 @@ export class LauncherUpdateService {
         progressPercent: null,
         error: null,
       });
+      this.downloadIfAllowed();
     });
     this.updater.on("update-not-available", () => {
       this.transition({ ...IDLE_STATE, status: "up-to-date" });
@@ -102,11 +113,13 @@ export class LauncherUpdateService {
       // working offline. A failed download was user-initiated and deserves
       // a visible, retryable error.
       if (this.current.status === "downloading") {
+        // A download nobody asked for fails quietly: the update is offered
+        // again, and the next check retries it.
         this.transition({
           ...this.current,
-          status: "error",
+          status: this.unattended ? "update-available" : "error",
           progressPercent: null,
-          error: error.message,
+          error: this.unattended ? null : error.message,
         });
         this.onDownloadError(updateErrorCode(error));
       } else {
@@ -121,6 +134,8 @@ export class LauncherUpdateService {
 
   async check(): Promise<void> {
     if (!this.updater) return;
+    // Known but not downloaded (a game was running, or the setting was off).
+    this.downloadIfAllowed();
     if (
       this.current.status === "checking"
       || hasLauncherUpdate(this.current)
@@ -142,8 +157,16 @@ export class LauncherUpdateService {
     this.onCheckError(updateErrorCode(error instanceof Error ? error : new Error(String(error))));
   }
 
+  private downloadIfAllowed(): void {
+    if (this.current.status !== "update-available" || !this.autoDownload()) return;
+    this.download();
+    this.unattended = true;
+  }
+
   download(): LauncherUpdateFailure | null {
     if (!this.updater) return "unavailable";
+    // A click on a download already under way makes it the player's own.
+    this.unattended = false;
     if (this.current.status === "downloading" || this.current.status === "downloaded") return null;
     if (this.current.status !== "update-available" && this.current.status !== "error") {
       return "no-update";

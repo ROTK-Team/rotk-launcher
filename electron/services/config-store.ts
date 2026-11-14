@@ -25,6 +25,8 @@ export interface LauncherConfig {
   pendingInstallRoot?: string;
   /** Custom asset synchronization before launch. Defaults to enabled. */
   assetSyncEnabled?: boolean;
+  /** Download a launcher update as soon as it is found. Defaults to enabled. */
+  launcherUpdateAutoDownload?: boolean;
   /** Native diagnostic observer for the next launched game; defaults to enabled. */
   diagnosticCaptureEnabled?: boolean;
   /** Optional full-session performance recording; off until the player enables it. */
@@ -79,6 +81,7 @@ const FIELD_VALIDATORS: { [K in Exclude<keyof LauncherConfig, "schemaVersion">]-
   installation: isInstallation,
   pendingInstallRoot: (value) => typeof value === "string",
   assetSyncEnabled: isBoolean,
+  launcherUpdateAutoDownload: isBoolean,
   diagnosticCaptureEnabled: isBoolean,
   debugSessionEnabled: isBoolean,
   diagnosticUploadConsent: (value) => value === 1,
@@ -232,6 +235,12 @@ export class ConfigStore {
   async setAssetSyncEnabled(assetSyncEnabled: boolean): Promise<LauncherConfig> {
     const current = await this.load();
     const next: LauncherConfig = { ...current, assetSyncEnabled };
+    await this.save(next);
+    return next;
+  }
+
+  async setLauncherUpdateAutoDownload(launcherUpdateAutoDownload: boolean): Promise<LauncherConfig> {
+    const next: LauncherConfig = { ...await this.load(), launcherUpdateAutoDownload };
     await this.save(next);
     return next;
   }
