@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { LauncherUpdateSummary } from "../shared/contracts.js";
 import { hasLauncherUpdate, launcherUpdateBlocksPlay } from "../shared/launcher-update.js";
 import {
+  DOWNLOAD_STALL_MS,
   LauncherUpdateService,
   type DownloadProgressLike,
   type UpdateInfoLike,
@@ -152,6 +153,38 @@ describe("launcher self-update service", () => {
     updater.emit("update-downloaded");
     expect(service.install()).toBeNull();
     expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns a download that stops receiving data into a failed one, and still completes it if data comes back", async () => {
+    vi.useFakeTimers();
+    try {
+      const updater = new FakeUpdater();
+      const codes: string[] = [];
+      const service = new LauncherUpdateService({ updater, onChange: () => undefined, onDownloadError: (code) => codes.push(code) });
+      await service.check();
+      updater.emit("update-available", { version: "2.0.51" });
+      service.download();
+      // Progress keeps it alive, however long the whole download takes.
+      for (let step = 1; step <= 5; step += 1) {
+        await vi.advanceTimersByTimeAsync(DOWNLOAD_STALL_MS - 1_000);
+        updater.emit("download-progress", { percent: step * 10 });
+      }
+      expect(service.state).toMatchObject({ status: "downloading", progressPercent: 50 });
+      expect(codes).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(DOWNLOAD_STALL_MS);
+      expect(service.state).toMatchObject({ status: "error", availableVersion: "2.0.51" });
+      expect(codes).toEqual(["stalled"]);
+      // Reported once, and the late end of that same download is accepted.
+      await vi.advanceTimersByTimeAsync(DOWNLOAD_STALL_MS * 3);
+      expect(codes).toEqual(["stalled"]);
+      updater.emit("update-downloaded");
+      expect(service.state.status).toBe("downloaded");
+      await vi.advanceTimersByTimeAsync(DOWNLOAD_STALL_MS * 3);
+      expect(service.state.status).toBe("downloaded");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores stray progress events outside a download", async () => {
