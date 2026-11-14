@@ -205,7 +205,7 @@ let serverStatus: Partial<Record<ServerId, ServerStatus>> = {};
 let quitWhenGameExits = false;
 let crashReportRequests = 0;
 let assetSyncEnabled = true;
-let launcherUpdateAutoDownload = true;
+let launcherUpdateAutoDownload = false;
 let playerFontOptions: PlayerFontOption[] = [];
 let selectedPlayerFont = DEFAULT_PLAYER_FONT;
 let selectedLauncherFont = DEFAULT_PLAYER_FONT;
@@ -1636,7 +1636,7 @@ async function initialize(): Promise<void> {
   const config = await configStore.load();
   startupLog.mark("config-loaded");
   assetSyncEnabled = config.assetSyncEnabled ?? true;
-  launcherUpdateAutoDownload = config.launcherUpdateAutoDownload ?? true;
+  launcherUpdateAutoDownload = config.launcherUpdateAutoDownload ?? false;
   selectedServerId = config.serverId ?? DEFAULT_SERVER_ID;
   selectedRole = config.role ?? DEFAULT_PLAYER_ROLE;
   // A missing font bundle only hides the font choice; Play keeps the fonts as they are.
