@@ -111,6 +111,7 @@ export interface Copy {
     available: (version: string) => string;
     availableDetail: string;
     download: string;
+    autoDownload: string;
     downloading: string;
     restart: string;
     restartDetail: string;
@@ -322,6 +323,7 @@ const COPY: Record<AppLocale, Copy> = {
       available: (version) => `LAUNCHER UPDATE ${version} AVAILABLE`,
       availableDetail: "Get the latest improvements and fixes before playing.",
       download: "UPDATE",
+      autoDownload: "Download launcher updates automatically",
       downloading: "DOWNLOADING UPDATE",
       restart: "RESTART TO INSTALL",
       restartDetail: "Restart the launcher to install the update, then launch the game again.",
@@ -554,6 +556,7 @@ const COPY: Record<AppLocale, Copy> = {
       available: (version) => `MISE À JOUR ${version} DISPONIBLE`,
       availableDetail: "Profite des dernières améliorations et corrections avant de jouer.",
       download: "METTRE À JOUR",
+      autoDownload: "Télécharger les mises à jour du launcher automatiquement",
       downloading: "TÉLÉCHARGEMENT",
       restart: "REDÉMARRER POUR INSTALLER",
       restartDetail: "Redémarre le launcher pour installer la mise à jour, puis relance le jeu.",
@@ -786,6 +789,7 @@ const COPY: Record<AppLocale, Copy> = {
       available: (version) => `启动器更新 ${version} 可用`,
       availableDetail: "更新后即可获得最新的改进和修复。",
       download: "更新",
+      autoDownload: "自动下载启动器更新",
       downloading: "正在下载更新",
       restart: "重启以安装",
       restartDetail: "重启启动器以安装更新，然后重新启动游戏。",

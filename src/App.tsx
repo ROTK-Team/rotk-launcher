@@ -211,6 +211,7 @@ export default function App() {
         onVerifyAssets={() => void perform(() => window.rotk.verifyAssets())}
         onRestoreAssets={() => void perform(() => window.rotk.restoreVanillaAssets())}
         onToggleAssetSync={(enabled) => void perform(() => window.rotk.setAssetSyncEnabled(enabled))}
+        onToggleUpdateAutoDownload={(enabled) => void perform(() => window.rotk.setLauncherUpdateAutoDownload(enabled))}
         onSelectFont={(id) => void perform(() => window.rotk.setPlayerFont(id))}
         onSelectLauncherFont={(id) => void perform(() => window.rotk.setLauncherFont(id))}
         debugSessionBusy={debugSessionBusy}

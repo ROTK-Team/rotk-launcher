@@ -50,6 +50,7 @@ function snapshot(overrides: Partial<LauncherSnapshot> = {}): LauncherSnapshot {
       progressPercent: null,
       error: null,
     },
+    launcherUpdateAutoDownload: true,
     assetSync: {
       enabled: true,
       status: "up-to-date",

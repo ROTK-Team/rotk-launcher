@@ -25,6 +25,8 @@ export interface LauncherConfig {
   pendingInstallRoot?: string;
   /** Custom asset synchronization before launch. Defaults to enabled. */
   assetSyncEnabled?: boolean;
+  /** Download a launcher update as soon as it is found. Defaults to enabled. */
+  launcherUpdateAutoDownload?: boolean;
   /** Native diagnostic observer for the next launched game; defaults to enabled. */
   diagnosticCaptureEnabled?: boolean;
   /** Optional full-session performance recording; off until the player enables it. */
@@ -75,6 +77,7 @@ function isValidConfig(value: unknown): value is LauncherConfig {
     installationIsValid &&
     (candidate.pendingInstallRoot === undefined || typeof candidate.pendingInstallRoot === "string") &&
     (candidate.assetSyncEnabled === undefined || typeof candidate.assetSyncEnabled === "boolean") &&
+    (candidate.launcherUpdateAutoDownload === undefined || typeof candidate.launcherUpdateAutoDownload === "boolean") &&
     (candidate.diagnosticCaptureEnabled === undefined || typeof candidate.diagnosticCaptureEnabled === "boolean") &&
     (candidate.debugSessionEnabled === undefined || typeof candidate.debugSessionEnabled === "boolean") &&
     (candidate.diagnosticUploadConsent === undefined || candidate.diagnosticUploadConsent === 1) &&
@@ -90,6 +93,7 @@ function withoutLegacyIdentity(value: LauncherConfig): LauncherConfig {
   if (value.installation) next.installation = value.installation;
   if (value.pendingInstallRoot !== undefined) next.pendingInstallRoot = value.pendingInstallRoot;
   if (value.assetSyncEnabled !== undefined) next.assetSyncEnabled = value.assetSyncEnabled;
+  if (value.launcherUpdateAutoDownload !== undefined) next.launcherUpdateAutoDownload = value.launcherUpdateAutoDownload;
   if (value.diagnosticCaptureEnabled !== undefined) next.diagnosticCaptureEnabled = value.diagnosticCaptureEnabled;
   if (value.debugSessionEnabled !== undefined) next.debugSessionEnabled = value.debugSessionEnabled;
   if (value.diagnosticUploadConsent === 1) next.diagnosticUploadConsent = 1;
@@ -210,6 +214,12 @@ export class ConfigStore {
   async setAssetSyncEnabled(assetSyncEnabled: boolean): Promise<LauncherConfig> {
     const current = await this.load();
     const next: LauncherConfig = { ...current, assetSyncEnabled };
+    await this.save(next);
+    return next;
+  }
+
+  async setLauncherUpdateAutoDownload(launcherUpdateAutoDownload: boolean): Promise<LauncherConfig> {
+    const next: LauncherConfig = { ...await this.load(), launcherUpdateAutoDownload };
     await this.save(next);
     return next;
   }
