@@ -181,6 +181,8 @@ const discordPresence = new DiscordPresence();
 const LAUNCHER_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000;
 // The window is shown at the latest this long after its creation, painted or not.
 const WINDOW_SHOW_DEADLINE_MS = 5_000;
+// How often the publications are read again while the launcher stays open.
+const NEWS_REFRESH_INTERVAL_MS = 15 * 60 * 1_000;
 let installAbortController: AbortController | null = null;
 let phase: LauncherPhase = "unconfigured";
 let sourceRoot: string | null = null;
@@ -736,6 +738,18 @@ async function snapshot(): Promise<LauncherSnapshot> {
   };
 }
 
+/**
+ * Reads the publications in the launcher's language. A language switch while
+ * a read is in flight starts another one: the older answer is dropped.
+ */
+async function refreshNews(): Promise<void> {
+  const locale = currentLocale;
+  const latest = await updateFeed.getLatest(locale);
+  if (locale !== currentLocale) return;
+  updates = latest;
+  await broadcastSnapshot();
+}
+
 function statusOf(serverId: ServerId): ServerStatus {
   return serverStatus[serverId] ?? UNKNOWN_SERVER_STATUS;
 }
@@ -908,8 +922,11 @@ function registerIpc(): void {
     IPC_CHANNELS.setLocale,
     trustedHandler(async (_event, locale: unknown) => {
       if (!isAppLocale(locale)) throw new Error("Unsupported launcher locale");
+      const changed = locale !== currentLocale;
       currentLocale = locale;
       await broadcastSnapshot();
+      // The patch notes follow the launcher's language.
+      if (changed) void refreshNews();
     }),
   );
   ipcMain.handle(
@@ -1693,12 +1710,14 @@ async function initialize(): Promise<void> {
   servicesInitialized = true;
   resolveServicesReady();
   startupLog.mark("services-ready");
-  updates = await updateFeed.getLatest();
+  await refreshNews();
   await broadcastSnapshot();
   void launcherUpdate.check();
   setInterval(() => void launcherUpdate.check(), LAUNCHER_UPDATE_CHECK_INTERVAL_MS);
   void refreshServerStatus();
   setInterval(() => void refreshServerStatus(), SERVER_STATUS_POLL_INTERVAL_MS);
+  // A patch note published while the launcher is open shows up without a restart.
+  setInterval(() => void refreshNews().catch(() => undefined), NEWS_REFRESH_INTERVAL_MS);
 }
 
 if (singleInstanceLock) {

@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { retryFs } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import type { PublishedUpdate } from "../../shared/contracts.js";
+import type { AppLocale } from "../../shared/locale.js";
 import { WEBSITE_ORIGIN } from "../constants.js";
 
 const UPDATE_FEED_URL = `${WEBSITE_ORIGIN}/api/updates`;
@@ -47,6 +48,30 @@ function selectLauncherUpdates(updates: PublishedUpdate[]): PublishedUpdate[] {
 }
 
 function parseFeed(value: unknown): PublishedUpdate[] {
+  return selectLauncherUpdates(parseEntries(value));
+}
+
+/**
+ * The title and summary of each publication as `/api/updates?lang=` returns
+ * them, by id. That answer carries the text in the language asked for (in
+ * English when there is no translation) under `title` and `highlights`, and
+ * has no cover image: it completes the default answer, it does not replace it.
+ */
+function parseLocalizedText(value: unknown): Map<string, { title: string; summary: string }> {
+  const text = new Map<string, { title: string; summary: string }>();
+  const entries = value && typeof value === "object" ? (value as { updates?: unknown }).updates : null;
+  if (!Array.isArray(entries)) return text;
+  for (const entry of entries as Array<{ id?: unknown; title?: unknown; highlights?: unknown } | null>) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = readString(entry.id);
+    const title = readString(entry.title);
+    if (!id || !title) continue;
+    text.set(id, { title: title.slice(0, 120), summary: readString(entry.highlights).slice(0, 360) });
+  }
+  return text;
+}
+
+function parseEntries(value: unknown): PublishedUpdate[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Unexpected update feed response");
   }
@@ -85,7 +110,7 @@ function parseFeed(value: unknown): PublishedUpdate[] {
     });
   }
 
-  return selectLauncherUpdates(updates);
+  return updates;
 }
 
 function isCachedUpdate(value: unknown): value is PublishedUpdate {
@@ -105,39 +130,62 @@ function isCachedUpdate(value: unknown): value is PublishedUpdate {
 export class UpdateFeedService {
   private readonly cachePath: string;
 
-  constructor(userDataDirectory: string) {
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(userDataDirectory: string, fetchImpl: typeof fetch = fetch) {
     // v2 deliberately ignores the old Firestore-backed cache.
     this.cachePath = join(userDataDirectory, "updates-cache.v2.json");
+    this.fetchImpl = fetchImpl;
   }
 
-  async getLatest(): Promise<PublishedUpdate[]> {
+  /**
+   * The publications to show, with their text in the launcher's language.
+   * The site translates its patch notes; the launcher used to show them in
+   * English whatever its own language. English needs one request; another
+   * language adds the translated text to it. When that second request fails,
+   * the English text is shown rather than nothing.
+   */
+  async getLatest(locale: AppLocale = "en"): Promise<PublishedUpdate[]> {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 7_000);
-      let response: Response;
-      try {
-        response = await fetch(UPDATE_FEED_URL, {
-          method: "GET",
-          headers: { accept: "application/json" },
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timeout);
-      }
-      if (!response.ok) throw new Error(`Feed HTTP ${response.status}`);
-      const responseUrl = new URL(response.url || UPDATE_FEED_URL);
-      if (responseUrl.protocol !== "https:" || responseUrl.origin !== WEBSITE_ORIGIN) {
-        throw new Error("Feed redirected outside rotk.app");
-      }
-      const body = await response.text();
-      if (Buffer.byteLength(body, "utf8") > MAX_FEED_BYTES) throw new Error("Feed too large");
-      const updates = parseFeed(JSON.parse(body));
+      const [base, localized] = await Promise.all([
+        this.fetchFeed(UPDATE_FEED_URL),
+        locale === "en" ? null : this.fetchFeed(`${UPDATE_FEED_URL}?lang=${locale}`).catch(() => null),
+      ]);
+      const text = localized === null ? null : parseLocalizedText(localized);
+      const updates = selectLauncherUpdates(parseEntries(base).map((update) => {
+        const translated = text?.get(update.id);
+        if (!translated) return update;
+        return { ...update, title: translated.title, summary: translated.summary || update.summary };
+      }));
       if (updates.length === 0) throw new Error("Feed empty");
       await this.writeCache(updates);
       return updates;
     } catch {
       return this.readCache();
     }
+  }
+
+  private async fetchFeed(url: string): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7_000);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: "GET",
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) throw new Error(`Feed HTTP ${response.status}`);
+    const responseUrl = new URL(response.url || url);
+    if (responseUrl.protocol !== "https:" || responseUrl.origin !== WEBSITE_ORIGIN) {
+      throw new Error("Feed redirected outside rotk.app");
+    }
+    const body = await response.text();
+    if (Buffer.byteLength(body, "utf8") > MAX_FEED_BYTES) throw new Error("Feed too large");
+    return JSON.parse(body) as unknown;
   }
 
   private async readCache(): Promise<PublishedUpdate[]> {
