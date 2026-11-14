@@ -7,6 +7,8 @@ import { WEBSITE_ORIGIN } from "../constants.js";
 
 const UPDATE_FEED_URL = `${WEBSITE_ORIGIN}/api/updates`;
 const MAX_FEED_BYTES = 1_000_000;
+/** Room for a whole summary; the longest published one is under 400 characters. */
+const SUMMARY_MAX_LENGTH = 1_200;
 
 interface PublishedUpdateApiItem {
   id?: unknown;
@@ -66,7 +68,7 @@ function parseLocalizedText(value: unknown): Map<string, { title: string; summar
     const id = readString(entry.id);
     const title = readString(entry.title);
     if (!id || !title) continue;
-    text.set(id, { title: title.slice(0, 120), summary: readString(entry.highlights).slice(0, 360) });
+    text.set(id, { title: title.slice(0, 120), summary: readString(entry.highlights).slice(0, SUMMARY_MAX_LENGTH) });
   }
   return text;
 }
@@ -101,7 +103,7 @@ function parseEntries(value: unknown): PublishedUpdate[] {
       id,
       type,
       title: title.slice(0, 120),
-      summary: readString(entry.summary).slice(0, 360),
+      summary: readString(entry.summary).slice(0, SUMMARY_MAX_LENGTH),
       version: readString(entry.version) || null,
       category: readString(entry.category).slice(0, 64),
       coverImageUrl: normalizeCoverImage(readString(entry.coverImage)),

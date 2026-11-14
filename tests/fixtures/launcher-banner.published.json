@@ -1,0 +1,60 @@
+{
+  "banner": {
+    "enabled": true,
+    "mode": "message",
+    "message": {
+      "en": "Servers restart tonight at 6 pm CET",
+      "fr": "Redémarrage des serveurs ce soir à 18 h",
+      "zh": ""
+    },
+    "link": "/updates",
+    "messages": [
+      {
+        "message": {
+          "en": "Servers restart tonight at 6 pm CET",
+          "fr": "Redémarrage des serveurs ce soir à 18 h",
+          "zh": ""
+        },
+        "link": "/updates"
+      },
+      {
+        "message": { "en": "Double Crowns all weekend", "fr": "", "zh": "本周末双倍 Crowns" },
+        "link": null
+      }
+    ],
+    "eventKey": null,
+    "updatedAt": "2026-11-14T17:00:00.000Z"
+  },
+  "featured": [
+    {
+      "id": "double-crowns",
+      "label": { "en": "LIVE NOW", "fr": "EN COURS", "zh": "" },
+      "title": { "en": "Double Crowns weekend", "fr": "Week-end double Crowns", "zh": "" },
+      "summary": { "en": "Crowns ×2 on every placement.\n3 skins to win in game.", "fr": "", "zh": "" },
+      "image": "/images/final-duel.jpg",
+      "background": "/api/launcher/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.webp",
+      "link": "/tournaments",
+      "startsAt": "2026-11-14T16:00:00.000Z",
+      "endsAt": "2026-11-16T17:00:00.000Z"
+    },
+    {
+      "id": "plain",
+      "label": { "en": "", "fr": "", "zh": "" },
+      "title": { "en": "Winter map", "fr": "", "zh": "" },
+      "summary": { "en": "", "fr": "", "zh": "" },
+      "image": null,
+      "background": null,
+      "link": null,
+      "startsAt": null,
+      "endsAt": null
+    }
+  ],
+  "backgrounds": {
+    "mode": "rotate",
+    "seconds": 20,
+    "images": [
+      "/api/launcher/images/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.jpg",
+      "/images/gas-ridge.webp"
+    ]
+  }
+}

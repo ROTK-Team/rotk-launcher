@@ -15,6 +15,10 @@ function snapshot(overrides: Partial<LauncherSnapshot> = {}): LauncherSnapshot {
     },
     installationRoot: "C:\\H1Z1",
     updates: [],
+    events: [],
+    banner: null,
+    featured: [],
+    backgrounds: { images: [], rotateSeconds: null },
     runtime: {
       serverId: "game2",
       environment: "development",
@@ -51,6 +55,7 @@ function snapshot(overrides: Partial<LauncherSnapshot> = {}): LauncherSnapshot {
       error: null,
     },
     launcherUpdateAutoDownload: true,
+    preferences: { closeBehavior: "quit", gameStartBehavior: "keep", notifications: true, downloadSpeedLimit: 0 },
     assetSync: {
       enabled: true,
       status: "up-to-date",

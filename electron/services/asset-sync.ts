@@ -27,6 +27,7 @@ import {
 } from "../constants.js";
 import { assertSafeGeneratedStagingPath } from "./path-policy.js";
 import { extractZipEntry, readZipDirectory } from "./zip-archive.js";
+import { speedLimiter } from "./speed-limit.js";
 
 /**
  * Downloads the custom ROTK asset packs published on the dedicated GitHub
@@ -143,6 +144,13 @@ export interface AssetSyncServiceOptions {
   onFeedUnavailable?(reason: string): void;
   /** Overridable for tests only. */
   feedFallbackWaitMs?: number;
+  /** Bytes per second the pack downloads may use, read as they run; 0 means no limit. */
+  downloadSpeedLimit?(): number;
+}
+
+/** Where the cache and the backups of the installation at `root` are kept: next to it, outside the attested tree. */
+export function assetStorageFor(root: string): string {
+  return join(dirname(root), `.${basename(root)}-assets`);
 }
 
 function manifestError(reason: string): Error {
@@ -443,6 +451,7 @@ export class AssetSyncService {
   private readonly feedCachePath: string;
   private readonly onFeedUnavailable: (reason: string) => void;
   private readonly feedFallbackWaitMs: number;
+  private readonly downloadSpeedLimit: () => number;
   private lastProgressAt = 0;
 
   constructor(options: AssetSyncServiceOptions) {
@@ -457,6 +466,7 @@ export class AssetSyncService {
     this.feedCachePath = join(options.userDataDirectory, FEED_CACHE_FILE_NAME);
     this.onFeedUnavailable = options.onFeedUnavailable ?? (() => undefined);
     this.feedFallbackWaitMs = options.feedFallbackWaitMs ?? MANIFEST_FALLBACK_WAIT_MS;
+    this.downloadSpeedLimit = options.downloadSpeedLimit ?? (() => 0);
   }
 
   /**
@@ -464,7 +474,7 @@ export class AssetSyncService {
    * (`D:\Games\.ROTK-assets`), outside the attested tree.
    */
   private useStorageFor(root: string): void {
-    const base = join(dirname(root), `.${basename(root)}-assets`);
+    const base = assetStorageFor(root);
     this.cacheDirectory = join(base, CACHE_DIRECTORY_NAME);
     this.backupDirectory = join(base, BACKUP_DIRECTORY_NAME);
   }
@@ -909,6 +919,7 @@ export class AssetSyncService {
       });
       await pipeline(
         Readable.fromWeb(response.body as import("node:stream/web").ReadableStream),
+        speedLimiter(this.downloadSpeedLimit),
         meter,
         createWriteStream(partialPath, { flags: resumed ? "a" : "w" }),
         { signal: controller.signal },

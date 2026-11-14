@@ -91,14 +91,14 @@ describe("ROTK update feed parsing", () => {
       updates: [
         update("patch update #1", {
           title: "T".repeat(200),
-          summary: "S".repeat(500),
+          summary: "S".repeat(1_500),
           category: "C".repeat(100),
         }),
       ],
     });
 
     expect(parsed[0].title).toHaveLength(120);
-    expect(parsed[0].summary).toHaveLength(360);
+    expect(parsed[0].summary).toHaveLength(1_200);
     expect(parsed[0].category).toHaveLength(64);
     expect(parsed[0].siteUrl).toBe("https://rotk.app/updates/patch%20update%20%231");
   });

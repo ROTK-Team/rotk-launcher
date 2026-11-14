@@ -48,17 +48,17 @@ export function UpdateBanner({ snapshot, busy, onDownload, onInstall }: UpdateBa
         )}
       </div>
       {update.status === "update-available" && (
-        <button type="button" disabled={busy} onClick={onDownload}>
+        <button type="button" className="launcher-button" disabled={busy} onClick={onDownload}>
           {copy.update.download}
         </button>
       )}
       {update.status === "error" && (
-        <button type="button" disabled={busy} onClick={onDownload}>
+        <button type="button" className="launcher-button" disabled={busy} onClick={onDownload}>
           {copy.update.retry}
         </button>
       )}
       {update.status === "downloaded" && (
-        <button type="button" disabled={busy || running} onClick={onInstall}>
+        <button type="button" className="launcher-button" disabled={busy || running} onClick={onInstall}>
           {copy.update.restart}
         </button>
       )}

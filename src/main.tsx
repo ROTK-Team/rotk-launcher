@@ -6,7 +6,7 @@ import "@fontsource/inter/latin-600.css";
 import App from "./App";
 import { I18nProvider } from "./i18n";
 import "./styles/app.css";
-import "./styles/diagnostics.css";
+import "./styles/setup.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

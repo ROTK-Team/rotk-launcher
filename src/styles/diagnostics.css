@@ -1,9 +1,0 @@
-.debug-session-settings { margin-top: 23px; padding-top: 17px; border-top: 1px solid var(--line); }
-.debug-session-settings h3 { margin: 0 0 12px; font-size: 12px; font-weight: 600; }
-.debug-session-settings__toggle { display: flex; align-items: flex-start; gap: 9px; color: var(--paper-dim); font-size: 12px; line-height: 1.5; cursor: pointer; }
-.debug-session-settings__toggle input { flex: 0 0 auto; width: 14px; height: 14px; margin: 2px 0 0; accent-color: var(--signal); }
-.debug-session-settings__toggle:has(input:disabled) { opacity: 0.6; cursor: default; }
-.debug-session-settings__toggle input:focus-visible { outline: 2px solid var(--paper); outline-offset: 3px; }
-.debug-session-settings p { margin: 8px 0 0 23px; color: var(--muted); font-size: 11px; line-height: 1.6; }
-.debug-session-settings .debug-session-settings__status { color: var(--paper-dim); }
-.debug-session-settings .debug-session-settings__status.is-error { color: #efa79b; }
