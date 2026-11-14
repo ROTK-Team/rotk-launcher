@@ -47,6 +47,8 @@ export const MAIN_COPY = {
       "no-update": "No launcher update is available yet.",
       "not-downloaded": "The launcher update has not been downloaded yet.",
       gameRunning: "Close H1Z1 before updating the launcher.",
+      notInstalled: (version: string) =>
+        `Launcher update ${version} was downloaded but did not install: Windows or your antivirus may have blocked its installer. Download the installer from rotk.app and install it over this one.`,
     },
     stopGame: {
       title: "Close H1Z1",
@@ -113,6 +115,8 @@ export const MAIN_COPY = {
       "no-update": "Aucune mise à jour du launcher n’est disponible pour l’instant.",
       "not-downloaded": "La mise à jour du launcher n’a pas encore été téléchargée.",
       gameRunning: "Ferme H1Z1 avant de mettre à jour le launcher.",
+      notInstalled: (version: string) =>
+        `La mise à jour ${version} du launcher a été téléchargée mais ne s’est pas installée : Windows ou ton antivirus a peut-être bloqué son installateur. Télécharge l’installateur sur rotk.app et installe-le par-dessus.`,
       required: "Mets à jour le launcher ROTK avant de jouer.",
     },
     stopGame: {
@@ -181,6 +185,8 @@ export const MAIN_COPY = {
       "no-update": "暂时没有启动器更新。",
       "not-downloaded": "启动器更新还没有下载完成。",
       gameRunning: "请先关闭 H1Z1，再更新启动器。",
+      notInstalled: (version: string) =>
+        `启动器更新 ${version} 已下载但未能安装：Windows 或杀毒软件可能拦截了安装程序。请在 rotk.app 下载安装程序并覆盖安装。`,
     },
     stopGame: {
       title: "关闭 H1Z1",
