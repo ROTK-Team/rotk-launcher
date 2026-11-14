@@ -162,7 +162,7 @@ describe("launcher self-update service", () => {
     expect(service.state).toMatchObject({ status: "update-available", progressPercent: null });
   });
 
-  it("keeps a known update across timer checks and download failures without locking Play", async () => {
+  it("keeps a known update across timer checks and download failures, and never locks Play for it", async () => {
     const { updater, service } = createService();
     await service.check();
     updater.emit("update-available", { version: "2.0.24" });
@@ -171,18 +171,22 @@ describe("launcher self-update service", () => {
     await service.check();
     expect(updater.checkForUpdates).toHaveBeenCalledTimes(1);
     expect(service.state.status).toBe("update-available");
+    // Offered by the banner, but only a refusal from the server blocks Play.
+    expect(launcherUpdateBlocksPlay(service.state)).toBe(false);
     service.download();
     expect(hasLauncherUpdate(service.state)).toBe(true);
-    expect(launcherUpdateBlocksPlay(service.state)).toBe(true);
+    expect(launcherUpdateBlocksPlay(service.state)).toBe(false);
     updater.emit("error", new Error("offline"));
     await service.check();
     expect(service.state).toMatchObject({ status: "error", availableVersion: "2.0.24" });
-    // The banner keeps the error and Retry, but a failed download must not lock Play.
+    // The banner keeps the error and Retry.
     expect(hasLauncherUpdate(service.state)).toBe(true);
     expect(launcherUpdateBlocksPlay(service.state)).toBe(false);
     service.download();
     updater.emit("update-downloaded");
-    expect(launcherUpdateBlocksPlay(service.state)).toBe(true);
+    // Downloaded and waiting for a restart: still the player's choice.
+    expect(hasLauncherUpdate(service.state)).toBe(true);
+    expect(launcherUpdateBlocksPlay(service.state)).toBe(false);
   });
 
   it("reports a short code, never the raw updater message, for a failed download", async () => {
