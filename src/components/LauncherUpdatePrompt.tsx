@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { ArrowRight, Download, X } from "lucide-react";
 import type { LauncherSnapshot } from "../../shared/contracts";
 import { hasLauncherUpdate } from "../../shared/launcher-update";
+import { gameSessionActive } from "../../shared/primary-action";
 import { useI18n } from "../i18n";
 
 interface LauncherUpdatePromptProps {
@@ -24,7 +25,7 @@ export function LauncherUpdatePrompt({
   const visible = open && (knownUpdate || snapshot.updateRequired);
   const downloading = update.status === "downloading";
   const downloaded = update.status === "downloaded";
-  const running = snapshot.gamePid !== null || snapshot.phase === "running" || snapshot.phase === "launching";
+  const running = gameSessionActive(snapshot);
 
   useEffect(() => {
     if (visible) dialog.current?.showModal();

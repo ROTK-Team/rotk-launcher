@@ -1,6 +1,6 @@
 import { CircleAlert, Download, KeyRound, Play, RotateCcw, Settings2 } from "lucide-react";
-import { launcherUpdateBlocksPlay } from "../../shared/launcher-update";
 import type { LauncherSnapshot } from "../../shared/contracts";
+import { assetSyncActive, gameSessionActive, primaryAction, type PrimaryAction } from "../../shared/primary-action";
 import type { PlayerRole, ServerId } from "../../shared/launch-profile";
 import { useI18n, type Copy } from "../i18n";
 import { ServerSelect } from "./ServerSelect";
@@ -15,17 +15,14 @@ interface LauncherFooterProps {
   onSelectLaunchProfile(serverId: ServerId, role: PlayerRole): void;
 }
 
-function statusCopy(snapshot: LauncherSnapshot, copy: Copy): { label: string; detail: string } {
+function statusCopy(snapshot: LauncherSnapshot, copy: Copy, action: PrimaryAction): { label: string; detail: string } {
   if (snapshot.phase === "running") {
     return {
       label: copy.footer.inGame,
       detail: snapshot.gamePid ? `${copy.footer.process} ${snapshot.gamePid}` : copy.footer.activeProcess,
     };
   }
-  const assetSyncActive = snapshot.assetSync.status === "checking"
-    || snapshot.assetSync.status === "downloading"
-    || snapshot.assetSync.status === "installing";
-  if (snapshot.phase !== "installing" && assetSyncActive) {
+  if (snapshot.phase !== "installing" && assetSyncActive(snapshot)) {
     const progress = snapshot.assetSync.progress;
     const bytePercent = progress && progress.totalBytes > 0
       ? (progress.completedBytes / progress.totalBytes) * 100
@@ -60,6 +57,8 @@ function statusCopy(snapshot: LauncherSnapshot, copy: Copy): { label: string; de
   if (snapshot.phase === "ready" && !snapshot.playerIdentity.configured) {
     return { label: copy.footer.accountRequired, detail: copy.footer.missingAccountKey };
   }
+  // Says why Play is greyed out instead of a READY that cannot be clicked.
+  if (action.kind === "wait") return { label: copy.footer.ready, detail: copy.footer.finishingReport };
   if (snapshot.phase === "ready") return { label: copy.footer.ready, detail: snapshot.installationRoot ?? copy.footer.clientConfigured };
   return { label: copy.footer.setupRequired, detail: copy.footer.createIndependentInstall };
 }
@@ -74,23 +73,22 @@ export function LauncherFooter({
   onSelectLaunchProfile,
 }: LauncherFooterProps) {
   const { copy } = useI18n();
-  const status = statusCopy(snapshot, copy);
+  // One decision for the label, the click and the status line: see primaryAction.
+  const action = primaryAction(snapshot, busy);
+  const status = statusCopy(snapshot, copy, action);
   const ready = snapshot.canPlay;
-  const running = snapshot.phase === "running" || snapshot.phase === "launching";
+  const running = gameSessionActive(snapshot);
   const installing = snapshot.phase === "installing";
-  const updatePending = snapshot.updateRequired || launcherUpdateBlocksPlay(snapshot.launcherUpdate);
-  const needsAccountKey = snapshot.phase === "ready" && !snapshot.playerIdentity.configured;
-  const primaryLabel = updatePending && !running && !installing
-    ? copy.update.download
-    : ready
-    ? copy.footer.play
-    : running
-      ? copy.footer.inGame
-      : installing
-        ? copy.footer.installing
-        : needsAccountKey
-          ? copy.footer.addAccountKey
-          : copy.footer.install;
+  const primaryLabel = {
+    installing: copy.footer.installing,
+    "stop-game": copy.footer.inGame,
+    launching: copy.footer.launching,
+    update: copy.update.download,
+    play: copy.footer.play,
+    "add-key": copy.footer.addAccountKey,
+    wait: copy.footer.play,
+    setup: copy.footer.install,
+  }[action.kind];
 
   return (
     <footer className="launcher-footer">
@@ -119,14 +117,14 @@ export function LauncherFooter({
 
       <button
         type="button"
-        className={`play-button ${ready ? "is-ready" : ""} ${snapshot.phase === "running" ? "is-running" : ""}`}
+        className={`play-button ${ready ? "is-ready" : ""} ${action.kind === "stop-game" ? "is-running" : ""}`}
         // IN GAME stays clickable: it offers to close an H1Z1 whose window is gone.
-        disabled={busy || snapshot.phase === "launching" || installing}
-        onClick={snapshot.phase === "running" ? onStopGame : onPrimary}
-        title={snapshot.phase === "running" ? copy.footer.stopGame : undefined}
+        disabled={!action.enabled}
+        onClick={action.kind === "stop-game" ? onStopGame : onPrimary}
+        title={action.kind === "stop-game" ? copy.footer.stopGame : action.kind === "wait" ? copy.footer.finishingReport : undefined}
       >
         <span className="play-button__copy"><small>RETURN OF THE KING</small><strong>{primaryLabel}</strong></span>
-        {updatePending && !running && !installing ? <Download size={24} /> : <Play size={24} fill="currentColor" />}
+        {action.kind === "update" ? <Download size={24} /> : <Play size={24} fill="currentColor" />}
       </button>
     </footer>
   );

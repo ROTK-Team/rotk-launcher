@@ -73,6 +73,7 @@ export interface Copy {
     settings: string;
     playerIdentity: string;
     addAccountKey: string;
+    finishingReport: string;
     adminMode: string;
     selectServer: string;
     playersInGame: string;
@@ -275,6 +276,7 @@ const COPY: Record<AppLocale, Copy> = {
       settings: "Installation and settings",
       playerIdentity: "ROTK account key",
       addAccountKey: "ADD ROTK KEY",
+      finishingReport: "FINISHING THE LAST GAME'S REPORT",
       adminMode: "ADMIN",
       selectServer: "Choose the ROTK server and launch mode",
       playersInGame: "IN GAME",
@@ -507,6 +509,7 @@ const COPY: Record<AppLocale, Copy> = {
       settings: "Installation et réglages",
       playerIdentity: "Clé de compte ROTK",
       addAccountKey: "AJOUTER LA CLÉ ROTK",
+      finishingReport: "FIN DU RAPPORT DE LA DERNIÈRE PARTIE",
       adminMode: "ADMIN",
       selectServer: "Choisir le serveur ROTK et le mode de lancement",
       playersInGame: "EN JEU",
@@ -739,6 +742,7 @@ const COPY: Record<AppLocale, Copy> = {
       settings: "安装与设置",
       playerIdentity: "ROTK 账号密钥",
       addAccountKey: "添加 ROTK 密钥",
+      finishingReport: "正在完成上一局的报告",
       adminMode: "管理员",
       selectServer: "选择 ROTK 服务器和启动模式",
       playersInGame: "游戏中",
