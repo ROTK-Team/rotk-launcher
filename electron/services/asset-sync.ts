@@ -511,6 +511,22 @@ export class AssetSyncService {
       });
       emit("installing", asset.name, true);
       newRecords.push(await this.installAsset(root, asset, cachePath, ownedFiles));
+      // Recorded pack by pack. The state used to be written once, at the end:
+      // when a later pack failed, the packs already in place were on disk but
+      // not in the state, so the next pass installed them all over again and
+      // the attestation, which reads its expected hashes here, saw files that
+      // did not match. Packs not replaced yet keep their previous record, and
+      // the pack version stays the old one until the whole update is in.
+      // A first sync has no earlier state to keep in step with: it stays
+      // all or nothing, so a half-installed first set is never taken for a
+      // completed one.
+      if (state) {
+        const replaced = new Set(newRecords.map((record) => record.name));
+        await this.writeState({
+          ...state,
+          assets: [...state.assets.filter((record) => !replaced.has(record.name)), ...newRecords],
+        });
+      }
       assetsCompleted += 1;
       emit("installing", asset.name, true);
     }
