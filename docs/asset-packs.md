@@ -1,6 +1,6 @@
 # Asset packs — publishing custom assets through the dedicated GitHub repo
 
-Issue: [#10](https://github.com/h1z1rotk/rotk-launcher/issues/10)
+Issue: [#10](https://github.com/ROTK-Team/rotk-launcher/issues/10)
 
 For the combined BR1315 rank menu, staff gate and settings update, use the
 [rank menu release recipe](rank-menu-assets.md). Its three packs must be published
@@ -9,12 +9,12 @@ through the coordinated `.payload` archives and paired manifests described there
 ## 1. Overview
 
 The launcher synchronizes custom ROTK assets from a dedicated GitHub repository
-(`h1z1rotk/assets`) before every launch and right after an installation, without
+(`ROTK-Team/assets`) before every launch and right after an installation, without
 requiring a launcher release. The pipeline is implemented by
 `electron/services/asset-sync.ts` (+ `electron/services/zip-archive.ts`):
 
 1. Fetch `feed.json` from
-   `https://raw.githubusercontent.com/h1z1rotk/assets/main/feed.json`
+   `https://raw.githubusercontent.com/ROTK-Team/assets/main/feed.json`
    (HTTPS only, 10 s timeout, 1 MB cap).
 2. Diff the catalog against the local state (`asset-state.v1.json` in the launcher `userData`):
    an asset is (re)installed when it is new, its `version`/`sha256` changed, or one of
@@ -40,7 +40,7 @@ the launcher shows a warning and starts with the assets already on disk. Only a 
 sync that never completed is blocking (players can also disable the sync entirely in
 the setup panel — offline/dev mode).
 
-## 2. The `h1z1rotk/assets` repository
+## 2. The `ROTK-Team/assets` repository
 
 - `feed.json` at the root of `main` — the always-current manifest.
 - Binaries attached as **GitHub Release assets** (never committed): stable URLs, no
@@ -61,7 +61,7 @@ the setup panel — offline/dev mode).
     {
       "name": "rotk-ui-pack",
       "version": "1.0.0",
-      "url": "https://github.com/h1z1rotk/assets/releases/download/assets-v1.0.0/rotk-ui-pack.payload",
+      "url": "https://github.com/ROTK-Team/assets/releases/download/assets-v1.0.0/rotk-ui-pack.payload",
       "sha256": "<sha256 of the archive>",
       "size": 12345678,
       "installPath": ".",
@@ -70,7 +70,7 @@ the setup panel — offline/dev mode).
     {
       "name": "rotk-sound-bank",
       "version": "1.0.0",
-      "url": "https://github.com/h1z1rotk/assets/releases/download/assets-v1.0.0/rotk-sounds.pack",
+      "url": "https://github.com/ROTK-Team/assets/releases/download/assets-v1.0.0/rotk-sounds.pack",
       "sha256": "<sha256 of the file>",
       "size": 4567890,
       "installPath": "Resources/Assets/rotk-sounds.pack",
@@ -131,7 +131,7 @@ alone does not distribute the fix.
    -OutputDirectory <out> -PackVersion X.Y.Z`. It zips **each file into its own
    `.payload` archive**, enforces the section 4 caps, and writes both `feed.json` and the
    attestation payload manifest.
-2. Create the stable GitHub release `assets-vX.Y.Z` on `h1z1rotk/assets` and attach
+2. Create the stable GitHub release `assets-vX.Y.Z` on `ROTK-Team/assets` and attach
    the generated `.payload` files.
 3. Commit both `feed.json` and `asset-payloads.v1.json` to `main`, together.
 4. Publish the attestation payload manifest with the server policy.
