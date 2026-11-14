@@ -1610,6 +1610,7 @@ async function initialize(): Promise<void> {
   updateFeed = new UpdateFeedService(app.getPath("userData"));
   assetSync = new AssetSyncService({
     userDataDirectory: app.getPath("userData"),
+    onFeedUnavailable: (reason) => startupLog.mark("asset-feed-unavailable", reason),
     onProgress: (value) => {
       assetSyncStatus = value.phase === "checking"
         ? "checking"

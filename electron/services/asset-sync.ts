@@ -13,7 +13,7 @@ import {
   statfs,
   writeFile,
 } from "node:fs/promises";
-import { retryFs } from "./fs-safe.js";
+import { atomicWriteFile, retryFs } from "./fs-safe.js";
 import { constants as fsConstants } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -58,6 +58,11 @@ const MAX_TOTAL_ASSET_BYTES = 8 * 1024 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 20_000;
 const MAX_REDIRECTS = 5;
 const MANIFEST_TIMEOUT_MS = 10_000;
+// How long Play waits for the feed when the last manifest it served is on
+// disk. The request itself keeps its full budget and refreshes that copy when
+// it answers late, for the next launch.
+const MANIFEST_FALLBACK_WAIT_MS = 4_000;
+const FEED_CACHE_FILE_NAME = "asset-feed.v1.json";
 const DOWNLOAD_ATTEMPTS = 4;
 // A download that sends nothing for this long is dropped and resumed.
 const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
@@ -129,6 +134,10 @@ export interface AssetSyncServiceOptions {
   feedUrl?: string;
   fetchImpl?: typeof fetch;
   onProgress?(progress: AssetSyncProgress): void;
+  /** The feed could not be read in time; a short cause for the launcher log. */
+  onFeedUnavailable?(reason: string): void;
+  /** Overridable for tests only. */
+  feedFallbackWaitMs?: number;
 }
 
 function manifestError(reason: string): Error {
@@ -377,6 +386,18 @@ const NETWORK_ERROR_CODES = new Set([
 ]);
 
 /** Network drops, stalls and server-side hiccups are worth another attempt. */
+/** Why the feed was not read, short enough for a log line and free of URLs. */
+function feedFailureReason(error: unknown): string {
+  if (!(error instanceof Error)) return "error";
+  if (error.name === "AbortError" || error.name === "TimeoutError") return "timeout";
+  if (error instanceof SyntaxError) return "invalid-json";
+  if (error.message.startsWith("Manifeste")) return "invalid-manifest";
+  const status = /HTTP (\d{3})/.exec(error.message)?.[1];
+  if (status) return `HTTP ${status}`;
+  const code = (error as NodeJS.ErrnoException).code ?? (error.cause as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === "string" && /^[A-Z0-9_]{1,64}$/.test(code) ? code : "network";
+}
+
 function isRetryableDownloadError(error: unknown): boolean {
   if (error instanceof DownloadStalledError) return true;
   if (!(error instanceof Error)) return false;
@@ -401,6 +422,9 @@ export class AssetSyncService {
   private readonly feedUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly onProgress: (progress: AssetSyncProgress) => void;
+  private readonly feedCachePath: string;
+  private readonly onFeedUnavailable: (reason: string) => void;
+  private readonly feedFallbackWaitMs: number;
   private lastProgressAt = 0;
 
   constructor(options: AssetSyncServiceOptions) {
@@ -412,6 +436,9 @@ export class AssetSyncService {
     this.feedUrl = options.feedUrl ?? ASSET_FEED_URL;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.onProgress = options.onProgress ?? (() => undefined);
+    this.feedCachePath = join(options.userDataDirectory, FEED_CACHE_FILE_NAME);
+    this.onFeedUnavailable = options.onFeedUnavailable ?? (() => undefined);
+    this.feedFallbackWaitMs = options.feedFallbackWaitMs ?? MANIFEST_FALLBACK_WAIT_MS;
   }
 
   /**
@@ -451,8 +478,12 @@ export class AssetSyncService {
     const state = await this.readState();
 
     let manifest: AssetManifest;
+    // The feed did not answer and the last manifest it served is used instead.
+    let fromCache = false;
     try {
-      manifest = await this.fetchManifest(options.signal);
+      const latest = await this.latestManifest(options.signal, state !== null);
+      manifest = latest.manifest;
+      fromCache = latest.fromCache;
     } catch (error) {
       if (state) return { status: "offline-warning", packVersion: state.packVersion };
       throw error instanceof Error && error.message.startsWith("Manifeste")
@@ -502,10 +533,32 @@ export class AssetSyncService {
       });
     };
 
+    // Without the feed, a pack that is neither in the cache nor downloadable
+    // must not stop the launch: everything is fetched before anything is
+    // installed, so giving up here leaves the client exactly as it was.
+    const fetched = new Set<string>();
+    if (fromCache && state) {
+      for (const asset of pending) {
+        emit("downloading", asset.name, true);
+        try {
+          await this.ensureCachedAsset(asset, options.signal, (amount) => {
+            completedBytes += amount;
+            emit("downloading", asset.name);
+          });
+          fetched.add(asset.name);
+        } catch (error) {
+          if (options.signal?.aborted || !isRetryableDownloadError(error)) throw error;
+          return { status: "offline-warning", packVersion: state.packVersion };
+        }
+      }
+    }
+
     const newRecords: InstalledAssetRecord[] = [...keptRecords];
     for (const asset of pending) {
       emit("downloading", asset.name, true);
       const cachePath = await this.ensureCachedAsset(asset, options.signal, (amount) => {
+        // Already counted when the pack was fetched above.
+        if (fetched.has(asset.name)) return;
         completedBytes += amount;
         emit("downloading", asset.name);
       });
@@ -550,6 +603,7 @@ export class AssetSyncService {
       }
     }
     await this.pruneCache(manifest);
+    if (fromCache) return { status: "offline-warning", packVersion: manifest.packVersion };
     return { status: changed ? "updated" : "up-to-date", packVersion: manifest.packVersion };
   }
 
@@ -599,6 +653,51 @@ export class AssetSyncService {
     return target;
   }
 
+  /**
+   * The manifest to sync against. With `canFallBack` (a sync completed once),
+   * a feed that is slow, unreachable or broken no longer costs the whole
+   * timeout on every Play nor skips the pass: the last manifest it served is
+   * used, so files can still be checked and repaired from the packs on disk.
+   */
+  private async latestManifest(
+    signal: AbortSignal | undefined,
+    canFallBack: boolean,
+  ): Promise<{ manifest: AssetManifest; fromCache: boolean }> {
+    const request = this.fetchManifest(signal);
+    // Awaited further down, or left to finish on its own: never unhandled.
+    request.catch(() => undefined);
+    const cached = canFallBack ? await this.readCachedManifest() : null;
+    if (!cached) {
+      try {
+        return { manifest: await request, fromCache: false };
+      } catch (error) {
+        this.onFeedUnavailable(feedFailureReason(error));
+        throw error;
+      }
+    }
+    let waited: ReturnType<typeof setTimeout> | undefined;
+    const slow = new Promise<"slow">((resolveSlow) => { waited = setTimeout(() => resolveSlow("slow"), this.feedFallbackWaitMs); });
+    try {
+      const answer = await Promise.race([request, slow]);
+      if (answer !== "slow") return { manifest: answer, fromCache: false };
+      // Left running: a late answer still refreshes the copy on disk.
+      this.onFeedUnavailable("slow");
+    } catch (error) {
+      this.onFeedUnavailable(feedFailureReason(error));
+    } finally {
+      clearTimeout(waited);
+    }
+    return { manifest: cached, fromCache: true };
+  }
+
+  private async readCachedManifest(): Promise<AssetManifest | null> {
+    try {
+      return parseAssetManifest(JSON.parse(stripByteOrderMark(await readFile(this.feedCachePath, "utf8"))));
+    } catch {
+      return null;
+    }
+  }
+
   private async fetchManifest(signal?: AbortSignal): Promise<AssetManifest> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), MANIFEST_TIMEOUT_MS);
@@ -610,7 +709,10 @@ export class AssetSyncService {
       const response = await this.fetchFollowingRedirects(this.feedUrl, controller.signal);
       const body = await response.text();
       if (Buffer.byteLength(body, "utf8") > MAX_FEED_BYTES) throw new Error("Feed too large");
-      return parseAssetManifest(JSON.parse(stripByteOrderMark(body)));
+      const manifest = parseAssetManifest(JSON.parse(stripByteOrderMark(body)));
+      // Only a manifest that passed validation is kept for the next offline pass.
+      await atomicWriteFile(this.feedCachePath, body).catch(() => undefined);
+      return manifest;
     } catch (error) {
       controller.abort();
       throw error;
