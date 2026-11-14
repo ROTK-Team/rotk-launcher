@@ -84,6 +84,7 @@ import {
 } from "./services/server-status.js";
 import { UpdateFeedService } from "./services/update-feed.js";
 import { AssetSyncService, assetSyncInternals } from "./services/asset-sync.js";
+import { warmArchiveDigests } from "./services/integrity-attestation.js";
 import { DEFAULT_PLAYER_FONT, playerFont, playerFontPreview, readPlayerFontManifest } from "./services/player-fonts.js";
 import { LauncherUpdateService } from "./services/launcher-update.js";
 import { launcherUpdateBlocksPlay } from "../shared/launcher-update.js";
@@ -209,6 +210,11 @@ let playerFontOptions: PlayerFontOption[] = [];
 let selectedPlayerFont = DEFAULT_PLAYER_FONT;
 let selectedLauncherFont = DEFAULT_PLAYER_FONT;
 let assetSyncRunning = false;
+// The pass started on the launcher's own initiative, while it runs.
+let backgroundAssetSync: Promise<unknown> | null = null;
+let archiveDigestWarmup = false;
+// How often an open launcher looks for new asset packs on its own.
+const LAUNCH_PREPARATION_INTERVAL_MS = 15 * 60 * 1_000;
 let assetSyncStatus: AssetSyncStatus = "idle";
 let assetSyncWarning: AssetSyncWarning | null = null;
 let assetSyncProgress: AssetSyncProgress | null = null;
@@ -454,18 +460,69 @@ function assetSyncSummary(): AssetSyncSummary {
   };
 }
 
+/** Nothing is being installed, synchronised, launched or played. */
+function launcherIdle(): boolean {
+  return phase === "ready" && !assetSyncRunning && !gameLauncher.isRunning();
+}
+
+/**
+ * Hashes in the background the archives a launch would otherwise hash while
+ * the player waits. Gives way as soon as the launcher has something else to do.
+ */
+async function warmArchiveDigestCache(): Promise<void> {
+  if (archiveDigestWarmup || !launcherIdle()) return;
+  const root = await installationRoot();
+  if (!root) return;
+  archiveDigestWarmup = true;
+  try {
+    const hashed = await warmArchiveDigests({
+      installationRoot: root,
+      userDataDirectory: app.getPath("userData"),
+      shouldStop: () => !launcherIdle(),
+    });
+    if (hashed > 0) startupLog.mark("archive-digests-warmed", String(hashed));
+  } catch (error) {
+    startupLog.mark("archive-digest-warmup-failed", errorMessage(error));
+  } finally {
+    archiveDigestWarmup = false;
+  }
+}
+
+/**
+ * Does when the launcher opens, and every quarter of an hour after that, what
+ * Play used to start on the click: fetch the asset packs, then hash what
+ * changed. A failure here is silent; Play runs the same steps and reports it.
+ */
+async function prepareLaunch(): Promise<void> {
+  if (!launcherIdle() || backgroundAssetSync || archiveDigestWarmup) return;
+  backgroundAssetSync = runAssetSync("sync", true, true).catch(() => undefined);
+  await backgroundAssetSync;
+  backgroundAssetSync = null;
+  // Asset packs turned off: the pass above did nothing, the game files remain.
+  void warmArchiveDigestCache();
+}
+
+function startLaunchPreparation(): void {
+  void prepareLaunch();
+  setInterval(() => void prepareLaunch(), LAUNCH_PREPARATION_INTERVAL_MS);
+}
+
 /**
  * Synchronize the custom asset packs with the published feed. With `soft`,
  * a failure after at least one completed sync is downgraded to a warning so
  * the feed never prevents the game from launching with the assets on disk.
  */
-async function runAssetSync(mode: "sync" | "verify", soft: boolean): Promise<OperationResult> {
+async function runAssetSync(mode: "sync" | "verify", soft: boolean, unattended = false): Promise<OperationResult> {
   const root = await installationRoot();
   if (!root) return { ok: false, error: MAIN_COPY[currentLocale].clientNotReady };
   if (!assetSyncEnabled) return { ok: true };
+  // A pass the player asks for (Play, verify) waits for the one the launcher
+  // started by itself, then runs its own.
+  if (!unattended) await backgroundAssetSync;
   if (assetSyncRunning) return { ok: false, error: MAIN_COPY[currentLocale].assets.busy };
   assetSyncRunning = true;
-  assetSyncStatus = "checking";
+  // The launcher's own pass stays out of sight until it has a pack to download.
+  if (!unattended) assetSyncStatus = "checking";
   assetSyncWarning = null;
   assetSyncProgress = null;
   await broadcastSnapshot();
@@ -487,10 +544,17 @@ async function runAssetSync(mode: "sync" | "verify", soft: boolean): Promise<Ope
       return { ok: true };
     }
     assetSyncStatus = "error";
+    if (unattended) {
+      // The player asked for nothing: no error banner. Play reports it if it lasts.
+      logOperationError(error);
+      return { ok: false, error: rawErrorMessage(error) };
+    }
     return operationError(error);
   } finally {
     assetSyncRunning = false;
     assetSyncProgress = null;
+    // Packs this pass installed or replaced are hashed now, not at the next Play.
+    void warmArchiveDigestCache();
     await broadcastSnapshot();
   }
 }
@@ -1740,6 +1804,7 @@ if (singleInstanceLock) {
           session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
           session.defaultSession.setPermissionCheckHandler(() => false);
           await initialize();
+          startLaunchPreparation();
         },
         quit: () => app.quit(),
         mark: (event) => startupLog.mark(event),
