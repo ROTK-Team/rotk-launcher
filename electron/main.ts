@@ -113,6 +113,7 @@ import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
 import { startWithRequiredElevation, windowsElevation } from "./services/startup-elevation.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
+import { WINDOW_FAILURE_MEMORY_MS, windowRecovery } from "./services/window-recovery.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
 import type { DiagnosticSessionContext } from "./services/diagnostic-reports.js";
 import type { DiagnosticCaptureRequest, DiagnosticExportRequest, DiagnosticState } from "../shared/diagnostics.js";
@@ -1535,34 +1536,60 @@ function createWindow(): BrowserWindow {
   window.once("ready-to-show", () => showOnce("ready-to-show"));
   window.webContents.once("did-finish-load", () => showOnce("did-finish-load"));
   const showDeadline = setTimeout(() => showOnce("deadline"), WINDOW_SHOW_DEADLINE_MS);
+  // The page is always the one this process builds the path of, on the first
+  // load and when it is loaded again after a failure.
+  const loadPage = (): void => {
+    if (window.isDestroyed()) return;
+    const devServer = process.env.VITE_DEV_SERVER_URL;
+    // A failed load is reported through did-fail-load below.
+    if (devServer && !app.isPackaged) void window.loadURL(devServer).catch(() => undefined);
+    else void window.loadFile(join(app.getAppPath(), "dist", "index.html")).catch(() => undefined);
+  };
+  // A page that crashes or cannot load leaves a window with nothing in it,
+  // and this window has no frame: not even a button to close it. Load the
+  // page again; when that keeps failing (2.0.14: "Renderer process
+  // launch-failed"), say so once and close the window. A running game keeps
+  // its launcher: window-all-closed holds the process until the game ends, and
+  // starting the launcher again opens a new window.
+  const pageFailures: number[] = [];
+  const recoverPage = (reason: string, detail: string): void => {
+    if (window.isDestroyed()) return;
+    const now = Date.now();
+    while (pageFailures.length > 0 && now - pageFailures[0] > WINDOW_FAILURE_MEMORY_MS) pageFailures.shift();
+    const recovery = windowRecovery(reason, pageFailures.length);
+    if (recovery === "ignore") return;
+    pageFailures.push(now);
+    if (recovery === "reload") {
+      startupLog.mark("window-page-reloaded", detail);
+      setTimeout(loadPage, 300);
+      return;
+    }
+    startupLog.mark("window-closed-after-failure", detail);
+    void diagnostics?.recordLauncherError("launcher_renderer_gone", new Error(detail)).catch(() => undefined);
+    const copy = MAIN_COPY[currentLocale];
+    dialog.showErrorBox(copy.startupTitle, `${copy.rendererGone(detail)}\n\n${copy.startupSafety}`);
+    window.destroy();
+  };
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _validatedUrl, isMainFrame) => {
     // -3 (ABORTED) is a navigation replaced by another, not a failed page.
     if (!isMainFrame || errorCode === -3) return;
     startupLog.mark("did-fail-load", `${errorCode} ${errorDescription}`);
-    showOnce("did-fail-load");
+    recoverPage("load-failed", `load-failed ${errorCode} ${errorDescription}`);
   });
-  // A renderer that cannot start (2.0.14: "Renderer process launch-failed") or
-  // crashes leaves a window with nothing in it. Say so once and leave the
-  // decision to the player: quitting here would take a running game's launcher
-  // away with it.
-  let rendererFailureReported = false;
   window.webContents.on("render-process-gone", (_event, details) => {
     startupLog.mark("render-process-gone", `${details.reason} exitCode=${details.exitCode}`);
-    if (details.reason === "clean-exit" || rendererFailureReported) return;
-    rendererFailureReported = true;
-    void diagnostics?.recordLauncherError("launcher_renderer_gone", new Error(details.reason)).catch(() => undefined);
-    const copy = MAIN_COPY[currentLocale];
-    dialog.showErrorBox(copy.startupTitle, `${copy.rendererGone(details.reason)}\n\n${copy.startupSafety}`);
+    recoverPage(details.reason, `${details.reason} exitCode=${details.exitCode}`);
   });
+  // A page that stops answering is only logged: it may come back by itself.
+  window.on("unresponsive", () => startupLog.mark("window-unresponsive"));
+  window.on("responsive", () => startupLog.mark("window-responsive"));
   window.on("closed", () => {
     clearTimeout(showDeadline);
     if (mainWindow === window) mainWindow = null;
   });
   Menu.setApplicationMenu(null);
 
-  const devServer = process.env.VITE_DEV_SERVER_URL;
-  if (devServer && !app.isPackaged) void window.loadURL(devServer);
-  else void window.loadFile(join(app.getAppPath(), "dist", "index.html"));
+  loadPage();
   return window;
 }
 
