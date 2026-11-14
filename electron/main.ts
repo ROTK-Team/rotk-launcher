@@ -98,7 +98,7 @@ import { keepsLauncherAlive, mayQuitWithoutWindow } from "./services/quit-policy
 import { StartupLog } from "./services/startup-log.js";
 import { describeSystemError, isSystemError } from "./services/system-error.js";
 import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
-import { startWithRequiredElevation, windowsElevation } from "./services/startup-elevation.js";
+import { ELEVATION_RELAUNCH_ARGUMENT, startWithRequiredElevation, windowsElevation } from "./services/startup-elevation.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { WINDOW_FAILURE_MEMORY_MS, windowRecovery } from "./services/window-recovery.js";
@@ -123,6 +123,8 @@ const singleInstanceLock = app.requestSingleInstanceLock();
 if (singleInstanceLock) {
   startupLog.begin(
     `start ${app.getVersion()} packaged=${app.isPackaged} electron=${process.versions.electron} windows=${process.getSystemVersion()}`,
+    // The administrator relaunch goes on in the log of the process that asked for it.
+    process.argv.includes(ELEVATION_RELAUNCH_ARGUMENT),
   );
 } else {
   // Another launcher owns this user's lock: it receives "second-instance" and
@@ -132,6 +134,8 @@ if (singleInstanceLock) {
   // the owner on the same files (2.0.14 reports: a first instance stuck
   // without a window made every further click spawn a process that died at
   // once).
+  // Leaves a line in the owner's log: this exit used to leave no trace at all.
+  startupLog.mark("second-start-handed-over", `pid=${process.pid}`);
   app.quit();
 }
 
@@ -1742,5 +1746,6 @@ process.on("uncaughtException", (error) => {
 });
 
 process.on("unhandledRejection", (error) => {
+  startupLog.mark("unhandled-rejection", error instanceof Error ? error.message : String(error));
   void diagnostics?.recordLauncherError("launcher_unhandled_rejection", error).catch(() => undefined);
 });
