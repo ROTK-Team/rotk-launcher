@@ -205,6 +205,7 @@ let serverStatus: Partial<Record<ServerId, ServerStatus>> = {};
 let quitWhenGameExits = false;
 let crashReportRequests = 0;
 let assetSyncEnabled = true;
+let launcherUpdateAutoDownload = false;
 let playerFontOptions: PlayerFontOption[] = [];
 let selectedPlayerFont = DEFAULT_PLAYER_FONT;
 let selectedLauncherFont = DEFAULT_PLAYER_FONT;
@@ -707,6 +708,7 @@ async function snapshot(): Promise<LauncherSnapshot> {
     },
     playerIdentity: identitySummary(),
     launcherUpdate: launcherUpdate.state,
+    launcherUpdateAutoDownload,
     assetSync: assetSyncSummary(),
     playerFont: { selected: selectedPlayerFont, launcherSelected: selectedLauncherFont, options: playerFontOptions },
     debugSession: diagnostics?.debugState() ?? { enabled: false, status: "idle", fileName: null, error: null },
@@ -1390,6 +1392,19 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(
+    IPC_CHANNELS.setLauncherUpdateAutoDownload,
+    trustedHandler(async (_event, enabled: unknown): Promise<OperationResult> => {
+      if (typeof enabled !== "boolean") throw new Error("Unsupported launcher update setting");
+      await configStore.setLauncherUpdateAutoDownload(enabled);
+      launcherUpdateAutoDownload = enabled;
+      await broadcastSnapshot();
+      // Turned on with an update already found: it starts now.
+      void launcherUpdate.check();
+      return { ok: true };
+    }),
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.installLauncherUpdate,
     trustedHandler(async (): Promise<OperationResult> => {
       if (gameLauncher.isRunning() || phase === "launching" || phase === "running") {
@@ -1621,6 +1636,7 @@ async function initialize(): Promise<void> {
   const config = await configStore.load();
   startupLog.mark("config-loaded");
   assetSyncEnabled = config.assetSyncEnabled ?? true;
+  launcherUpdateAutoDownload = config.launcherUpdateAutoDownload ?? false;
   selectedServerId = config.serverId ?? DEFAULT_SERVER_ID;
   selectedRole = config.role ?? DEFAULT_PLAYER_ROLE;
   // A missing font bundle only hides the font choice; Play keeps the fonts as they are.
@@ -1660,6 +1676,8 @@ async function initialize(): Promise<void> {
     // In development there is no installed package to update against;
     // the updater stays inert and the snapshot reports "idle".
     updater: app.isPackaged ? electronUpdater.autoUpdater : null,
+    // Never while a game starts or runs: the download would compete with it.
+    autoDownload: () => launcherUpdateAutoDownload && phase !== "launching" && phase !== "running" && !gameLauncher.isRunning(),
     onChange: () => void broadcastSnapshot(),
     onDownloadError: (code) => startupLog.mark("launcher-update-failed", code),
   });
