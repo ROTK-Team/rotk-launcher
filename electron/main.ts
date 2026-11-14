@@ -178,7 +178,12 @@ const servicesReady = new Promise<void>((resolve) => {
 });
 const gameLauncher = new GameLauncher();
 const discordPresence = new DiscordPresence();
-const LAUNCHER_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1_000;
+// A launcher left open used to learn about a new release up to four hours
+// late, or after a restart. It now looks every quarter of an hour, and when
+// the player comes back to its window (at most once every five minutes).
+const LAUNCHER_UPDATE_CHECK_INTERVAL_MS = 15 * 60 * 1_000;
+const LAUNCHER_UPDATE_FOCUS_GAP_MS = 5 * 60 * 1_000;
+let launcherUpdateCheckedAt = 0;
 // The window is shown at the latest this long after its creation, painted or not.
 const WINDOW_SHOW_DEADLINE_MS = 5_000;
 let installAbortController: AbortController | null = null;
@@ -328,6 +333,12 @@ async function installationRoot(): Promise<string | null> {
  */
 function activeRuntime(): RuntimeConfig {
   return runtimeConfigFor(selectedServerId);
+}
+
+/** Looks for a launcher release; a no-op while a check runs or an update is already known. */
+function checkLauncherUpdate(): void {
+  launcherUpdateCheckedAt = Date.now();
+  void launcherUpdate.check().catch(() => undefined);
 }
 
 function activeProfile(): LaunchProfileId {
@@ -1558,6 +1569,10 @@ function createWindow(): BrowserWindow {
     clearTimeout(showDeadline);
     if (mainWindow === window) mainWindow = null;
   });
+  // Back on the launcher: the moment a player expects to see what is new.
+  window.on("focus", () => {
+    if (servicesInitialized && Date.now() - launcherUpdateCheckedAt >= LAUNCHER_UPDATE_FOCUS_GAP_MS) checkLauncherUpdate();
+  });
   Menu.setApplicationMenu(null);
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
@@ -1695,8 +1710,8 @@ async function initialize(): Promise<void> {
   startupLog.mark("services-ready");
   updates = await updateFeed.getLatest();
   await broadcastSnapshot();
-  void launcherUpdate.check();
-  setInterval(() => void launcherUpdate.check(), LAUNCHER_UPDATE_CHECK_INTERVAL_MS);
+  checkLauncherUpdate();
+  setInterval(checkLauncherUpdate, LAUNCHER_UPDATE_CHECK_INTERVAL_MS);
   void refreshServerStatus();
   setInterval(() => void refreshServerStatus(), SERVER_STATUS_POLL_INTERVAL_MS);
 }
