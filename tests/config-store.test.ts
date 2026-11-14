@@ -172,7 +172,7 @@ describe("ConfigStore", () => {
     expect((await new ConfigStore(directory).load()).debugSessionEnabled).toBe(false);
   });
 
-  it("falls back to a fresh state rather than trusting an unknown server", async () => {
+  it("goes back to the default server rather than trusting an unknown one, and keeps the installation", async () => {
     const directory = await temporaryDirectory();
     await writeFile(join(directory, "config.v1.json"), JSON.stringify({
       schemaVersion: 1,
@@ -183,7 +183,9 @@ describe("ConfigStore", () => {
 
     const loaded = await new ConfigStore(directory).load();
 
-    expect(loaded).toEqual({ schemaVersion: 1 });
+    // No serverId means GAME 2: the unknown one is never used. Forgetting the
+    // installation with it, as before, only sent the player back to setup.
+    expect(loaded).toEqual({ schemaVersion: 1, installation });
   });
 
   it("refuses to persist a server or role it does not define", async () => {
@@ -194,6 +196,43 @@ describe("ConfigStore", () => {
       .rejects.toThrow("Unknown ROTK server");
     await expect(store.setLaunchProfile("game2", "owner" as never))
       .rejects.toThrow("Unknown ROTK launch role");
+  });
+
+  it("keeps the installation when another field holds a value this build does not know", async () => {
+    const directory = await temporaryDirectory();
+    const stored = {
+      schemaVersion: 1, installation, assetSyncEnabled: false,
+      // Written by a newer launcher, or by hand.
+      serverId: "game9", role: "owner", playerFont: "Not A Font!", diagnosticUploadConsent: 2,
+    };
+    await writeFile(join(directory, "config.v1.json"), JSON.stringify(stored), "utf8");
+    await writeFile(join(directory, "config.v1.backup.json"), JSON.stringify(stored), "utf8");
+    const ignored: string[][] = [];
+
+    const config = await new ConfigStore(directory, [], null, (fields) => ignored.push(fields)).load();
+
+    // It used to come back as a fresh configuration: no installation, first-run panel.
+    expect(config).toEqual({ schemaVersion: 1, installation, assetSyncEnabled: false });
+    expect(ignored).toEqual([["diagnosticUploadConsent", "serverId", "role", "playerFont"]]);
+    // The file is left as it was: nothing is rewritten just because of that.
+    expect(JSON.parse(await readFile(join(directory, "config.v1.json"), "utf8"))).toEqual(stored);
+  });
+
+  it("falls back to the backup when only the installation record of the main file is damaged", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, "config.v1.json"),
+      JSON.stringify({ schemaVersion: 1, installation: { installId: 7 }, serverId: "game2" }), "utf8");
+    await writeFile(join(directory, "config.v1.backup.json"),
+      JSON.stringify({ schemaVersion: 1, installation, serverId: "game2" }), "utf8");
+
+    const config = await new ConfigStore(directory).load();
+    expect(config.installation).toEqual(installation);
+  });
+
+  it("still starts afresh from a file of another schema", async () => {
+    const directory = await temporaryDirectory();
+    await writeFile(join(directory, "config.v1.json"), JSON.stringify({ schemaVersion: 2, installation }), "utf8");
+    expect(await new ConfigStore(directory).load()).toEqual({ schemaVersion: 1 });
   });
 
   it("removes a corrupt legacy file instead of retaining a possible player key", async () => {
