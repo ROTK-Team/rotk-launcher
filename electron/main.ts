@@ -1595,6 +1595,7 @@ async function initialize(): Promise<void> {
         return false;
       }
     },
+    (fields) => startupLog.mark("config-fields-ignored", fields.join(",")),
   );
   playerKeyStore = new PlayerKeyStore(
     join(app.getPath("userData"), "player-keys.v2.json"),
