@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -13,7 +13,8 @@ import { DEFAULT_PREFERENCES, readPreferences, storedPreferences } from "../shar
 
 const roots: string[] = [];
 async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "vitest-settings-"));
+  // The physical path, as the launcher stores them: the temporary folder can be a short name or a link.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "vitest-settings-")));
   roots.push(root);
   return root;
 }
