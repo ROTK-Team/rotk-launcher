@@ -3,7 +3,6 @@ import { app } from "electron";
 
 export const APP_NAME = "ROTK Launcher";
 export const WEBSITE_ORIGIN = "https://rotk.app";
-export const WEBSITE_UPDATES_PATH = "/updates";
 export const FORBIDDEN_INSTALL_SEGMENTS = new Set([
   "steam",
   "steamlibrary",
