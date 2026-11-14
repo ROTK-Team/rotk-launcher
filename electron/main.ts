@@ -109,6 +109,7 @@ import {
 import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { StartupLog } from "./services/startup-log.js";
 import { describeSystemError, isSystemError } from "./services/system-error.js";
+import { acquireLockAfterHandoff, isElevationRelaunch } from "./services/instance-lock.js";
 import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
 import { startWithRequiredElevation, windowsElevation } from "./services/startup-elevation.js";
 import { createHash } from 'node:crypto';
@@ -136,7 +137,14 @@ if (!app.isPackaged && process.env.ROTK_USER_DATA_DIR) {
 }
 // Breadcrumbs from here to the first paint, in %APPDATA%\ROTK Launcher\startup.log.
 const startupLog = new StartupLog(app.getPath("userData"));
-const singleInstanceLock = app.requestSingleInstanceLock();
+// The administrator relaunch waits for the lock of the process that asked for
+// it, which now keeps it until it quits (see instance-lock.ts).
+const singleInstanceLock = acquireLockAfterHandoff({
+  request: () => app.requestSingleInstanceLock(),
+  relaunched: isElevationRelaunch(process.argv),
+  pause: (milliseconds) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds); },
+  now: () => Date.now(),
+});
 if (singleInstanceLock) {
   startupLog.begin(
     `start ${app.getVersion()} packaged=${app.isPackaged} electron=${process.versions.electron} windows=${process.getSystemVersion()}`,
@@ -1735,7 +1743,10 @@ if (singleInstanceLock) {
         argv: process.argv,
       }, {
         ...windowsElevation(resolveBundledDiagnosticsPath()),
-        releaseSingleInstanceLock: () => app.releaseSingleInstanceLock(),
+        // Kept until this process quits, a moment after the relaunch started:
+        // a second click during the Windows prompt finds the lock held and
+        // hands over, instead of taking it and asking for the rights again.
+        releaseSingleInstanceLock: () => undefined,
         initialize: async () => {
           session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
           session.defaultSession.setPermissionCheckHandler(() => false);
