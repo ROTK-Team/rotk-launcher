@@ -43,11 +43,6 @@ function statusCopy(snapshot: LauncherSnapshot, copy: Copy): { label: string; de
     return { label: copy.assets.updating, detail };
   }
   if (snapshot.phase === "launching") {
-    const assetProgress = snapshot.assetSync.progress;
-    if (assetProgress && assetProgress.totalBytes > 0) {
-      const percent = Math.min(100, Math.round((assetProgress.completedBytes / assetProgress.totalBytes) * 100));
-      return { label: copy.footer.launching, detail: `${copy.assets.updating} — ${percent}%` };
-    }
     const integrity = snapshot.integrityCheck;
     if (integrity && integrity.totalFiles > 0) {
       const percent = Math.min(100, Math.round((integrity.hashedFiles / integrity.totalFiles) * 100));

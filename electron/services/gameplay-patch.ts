@@ -479,14 +479,6 @@ async function assertGameplayPatchStateWithPolicy(
   }
 }
 
-/** Install or repair the exact two-byte shotgun sprint DirectInput proxy. */
-export async function deployGameplayPatch(
-  root: string,
-  bundledPatchPath: string,
-): Promise<"installed" | "replaced" | "up-to-date"> {
-  return deployGameplayPatchWithPolicy(root, bundledPatchPath, DEFAULT_POLICY);
-}
-
 /**
  * Restore the launcher baseline for the mode the server directed. `clean`
  * removes the marker first and then the DLL; `patched` installs or repairs
@@ -508,13 +500,6 @@ export async function assertGameplayPatchState(
   mode: GameplayPatchMode,
 ): Promise<void> {
   return assertGameplayPatchStateWithPolicy(root, mode, DEFAULT_POLICY);
-}
-
-/** Classify the current installation without mutating it. */
-export async function readGameplayPatchState(
-  root: string,
-): Promise<GameplayPatchInstallState> {
-  return gameplayPatchInstallStateWithPolicy(root, DEFAULT_POLICY);
 }
 
 /**

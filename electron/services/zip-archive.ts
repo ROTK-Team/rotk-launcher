@@ -251,7 +251,3 @@ export async function extractZipEntry(
   // Verify files and launch attestation retain their own integrity checks.
   return hash.digest("hex");
 }
-
-export const zipArchiveInternals = {
-  validateEntryName,
-};

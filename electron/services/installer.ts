@@ -17,7 +17,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { retryFs } from "./fs-safe.js";
-import { basename, dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import type { InstallProgress } from "../../shared/contracts.js";
 import {
   CRITICAL_CLIENT_FILES,
