@@ -114,6 +114,7 @@ import { startWithRequiredElevation, windowsElevation } from "./services/startup
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { collectDiagnosticClientContext } from "./services/diagnostic-client-context.js";
+import { clearUpdateAttempt, failedUpdateAttempt, recordUpdateAttempt } from "./services/update-attempt.js";
 import type { DiagnosticSessionContext } from "./services/diagnostic-reports.js";
 import type { DiagnosticCaptureRequest, DiagnosticExportRequest, DiagnosticState } from "../shared/diagnostics.js";
 import {
@@ -1396,8 +1397,14 @@ function registerIpc(): void {
         return { ok: false, error: MAIN_COPY[currentLocale].update.gameRunning };
       }
       if (installAbortController) return { ok: false, error: MAIN_COPY[currentLocale].installationInProgress };
+      // The launcher quits for the installer whatever happens to it next: keep
+      // a trace, so the next start can tell when the update did not install.
+      const state = launcherUpdate.state;
+      const target = state.status === "downloaded" ? state.availableVersion : null;
+      if (target) await recordUpdateAttempt(app.getPath("userData"), app.getVersion(), target).catch(() => undefined);
       const failure = launcherUpdate.install();
       if (!failure) return { ok: true };
+      if (target) await clearUpdateAttempt(app.getPath("userData")).catch(() => undefined);
       return { ok: false, error: MAIN_COPY[currentLocale].update[failure] };
     }),
   );
@@ -1631,6 +1638,14 @@ async function initialize(): Promise<void> {
   const assetState = await assetSync.readState().catch(() => null);
   assetSyncPackVersion = assetState?.packVersion ?? null;
   assetSyncLastAt = assetState?.syncedAt ?? null;
+  // An update that was downloaded and started, yet this is still the version
+  // that started it: its installer did not run. Say so instead of offering the
+  // same update again with no explanation.
+  const notInstalled = await failedUpdateAttempt(app.getPath("userData"), app.getVersion()).catch(() => null);
+  if (notInstalled) {
+    startupLog.mark("launcher-update-not-installed", notInstalled);
+    lastErrorRaw = MAIN_COPY[currentLocale].update.notInstalled(notInstalled);
+  }
   if (config.installation) {
     phase = "ready";
     try {
