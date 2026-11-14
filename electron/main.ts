@@ -516,11 +516,13 @@ async function runAssetSync(mode: "sync" | "verify", soft: boolean, unattended =
   const root = await installationRoot();
   if (!root) return { ok: false, error: MAIN_COPY[currentLocale].clientNotReady };
   if (!assetSyncEnabled) return { ok: true };
-  // Play waits for the pass the launcher started by itself, then runs its own.
-  if (mode === "sync" && !soft) await backgroundAssetSync;
+  // A pass the player asks for (Play, verify) waits for the one the launcher
+  // started by itself, then runs its own.
+  if (!unattended) await backgroundAssetSync;
   if (assetSyncRunning) return { ok: false, error: MAIN_COPY[currentLocale].assets.busy };
   assetSyncRunning = true;
-  assetSyncStatus = "checking";
+  // The launcher's own pass stays out of sight until it has a pack to download.
+  if (!unattended) assetSyncStatus = "checking";
   assetSyncWarning = null;
   assetSyncProgress = null;
   await broadcastSnapshot();
