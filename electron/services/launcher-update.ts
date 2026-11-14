@@ -23,7 +23,7 @@ export interface UpdaterLike {
   on(event: "error", listener: (error: Error) => void): unknown;
   checkForUpdates(): Promise<unknown>;
   downloadUpdate(): Promise<unknown>;
-  quitAndInstall(): void;
+  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
 }
 
 export interface LauncherUpdateOptions {
@@ -150,7 +150,10 @@ export class LauncherUpdateService {
   install(): LauncherUpdateFailure | null {
     if (!this.updater) return "unavailable";
     if (this.current.status !== "downloaded") return "not-downloaded";
-    this.updater.quitAndInstall();
+    // Silent, then start the launcher again. The default opened the installer
+    // wizard: several pages to click through, one of which offers to move the
+    // installation, before the player could reopen the launcher by hand.
+    this.updater.quitAndInstall(true, true);
     return null;
   }
 

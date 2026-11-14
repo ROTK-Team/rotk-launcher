@@ -151,7 +151,8 @@ describe("launcher self-update service", () => {
     service.download();
     updater.emit("update-downloaded");
     expect(service.install()).toBeNull();
-    expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
+    // Silent install, then the launcher starts again: no wizard to click through.
+    expect(updater.quitAndInstall).toHaveBeenCalledExactlyOnceWith(true, true);
   });
 
   it("ignores stray progress events outside a download", async () => {
