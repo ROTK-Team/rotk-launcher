@@ -232,5 +232,3 @@ async function readSidecarSha256(path: string): Promise<string | null> {
   const digest = raw.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
   return isSha256Hex(digest) ? digest : null;
 }
-
-export const baseManifestInternals = { CACHE_FILE_NAME, validateManifestUrl };
