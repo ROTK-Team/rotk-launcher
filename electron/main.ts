@@ -96,6 +96,7 @@ import { attestInstallation as runLaunchAttestation } from "./services/launch-at
 import { DiagnosticController } from "./services/diagnostic-controller.js";
 import { keepsLauncherAlive, mayQuitWithoutWindow } from "./services/quit-policy.js";
 import { StartupLog } from "./services/startup-log.js";
+import { readWhenFree } from "./services/startup-read.js";
 import { describeSystemError, isSystemError } from "./services/system-error.js";
 import { acquireLockAfterHandoff, isElevationRelaunch } from "./services/instance-lock.js";
 import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
@@ -1557,7 +1558,11 @@ async function initialize(): Promise<void> {
     },
     join(app.getPath("userData"), "player-key.v1.json"),
   );
-  playerKeys = await playerKeyStore.load();
+  // A file held by an antivirus or a sync tool used to close the launcher
+  // with an error box; the window is up, so wait for it instead.
+  playerKeys = await readWhenFree(() => playerKeyStore.load(), {
+    onWait: (code) => startupLog.mark("player-keys-held", code),
+  });
   startupLog.mark("player-keys-loaded");
   updateFeed = new UpdateFeedService(app.getPath("userData"));
   assetSync = new AssetSyncService({
@@ -1571,7 +1576,9 @@ async function initialize(): Promise<void> {
       void broadcastSnapshot();
     },
   });
-  const config = await configStore.load();
+  const config = await readWhenFree(() => configStore.load(), {
+    onWait: (code) => startupLog.mark("config-held", code),
+  });
   startupLog.mark("config-loaded");
   assetSyncEnabled = config.assetSyncEnabled ?? true;
   selectedServerId = config.serverId ?? DEFAULT_SERVER_ID;
