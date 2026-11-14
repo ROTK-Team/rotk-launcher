@@ -32,7 +32,7 @@ import { extractZipEntry, readZipDirectory } from "./zip-archive.js";
  * Downloads the custom ROTK asset packs published on the dedicated GitHub
  * repository and installs them into the ROTK client folder. The feed never
  * replaces the bundled launcher patches (steam shim, vivox) and can never
- * deliver executable code: binaries stay in the signed launcher.
+ * deliver executable code: binaries only ship inside the launcher.
  */
 
 export const ASSET_FEED_URL = "https://raw.githubusercontent.com/ROTK-Team/assets/main/feed.json";
@@ -67,7 +67,7 @@ const BACKUP_DIRECTORY_NAME = "asset-backups";
 
 /**
  * The feed distributes data files only. Anything Windows may execute or load
- * as a module keeps being shipped inside the signed launcher instead.
+ * as a module keeps being shipped inside the launcher instead.
  */
 const BLOCKED_EXTENSIONS = new Set([
   "exe", "dll", "sys", "bat", "cmd", "ps1", "msi", "scr", "com", "vbs", "lnk",
