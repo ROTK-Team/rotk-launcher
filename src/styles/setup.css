@@ -1,0 +1,402 @@
+/* The install assistant (the whole window under the title bar) and the settings
+   page (between the title bar and the footer). Body text is never under 12px. */
+
+.launcher-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 1px solid var(--signal);
+  background: var(--signal);
+  color: #fff;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.launcher-button:hover:not(:disabled) { background: var(--signal-dark); border-color: var(--signal-dark); }
+.launcher-button:disabled { border-color: #292927; background: #292927; color: #8a8882; cursor: default; }
+.launcher-button--ghost { border-color: rgba(255, 255, 255, 0.3); background: transparent; color: var(--paper); }
+.launcher-button--ghost:hover:not(:disabled) { border-color: var(--paper); background: rgba(255, 255, 255, 0.06); }
+.launcher-button--ghost:disabled { background: transparent; }
+.launcher-button--quiet { border-color: transparent; background: transparent; color: var(--paper-dim); }
+.launcher-button--quiet:hover:not(:disabled) { border-color: transparent; background: rgba(255, 255, 255, 0.06); color: var(--paper); }
+.launcher-button--big { min-width: 220px; min-height: 56px; font-size: 15px; }
+/* An action that deletes: said by its colour before the confirmation says it in words. */
+.launcher-button--danger:not(:disabled) { border-color: rgba(255, 107, 97, 0.6); color: #ff6b61; }
+.launcher-button--danger:hover:not(:disabled) { border-color: #ff6b61; background: rgba(255, 107, 97, 0.08); }
+/* On red, the red focus ring of the other buttons cannot be seen. */
+.launcher-button:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
+
+.launcher-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--paper-dim);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.launcher-link:hover:not(:disabled) { color: var(--paper); }
+.launcher-link:focus-visible { outline-offset: 2px; }
+
+.setup-wizard,
+.settings-page {
+  position: absolute;
+  z-index: 41;
+  inset: 72px 0 0;
+  outline: 0;
+  background:
+    linear-gradient(90deg, #080808 0%, #080808 52%, rgba(8, 8, 8, 0.72) 100%),
+    url("../../public/branding/rotk-launcher-art.png") right center / auto 100% no-repeat,
+    #080808;
+  animation: setup-in 180ms ease-out;
+}
+
+@keyframes setup-in { from { opacity: 0; } }
+
+.setup-wizard code,
+.settings-page code {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--paper);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Install assistant --------------------------------------------------- */
+
+.setup-wizard { display: grid; grid-template-rows: auto 1fr auto; }
+
+.setup-steps { display: flex; align-items: center; gap: 14px; margin: 0; padding: 20px 64px; border-bottom: 1px solid var(--line); list-style: none; }
+.setup-steps li { display: flex; align-items: center; gap: 10px; color: var(--muted); font-family: var(--display); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; }
+.setup-steps li + li::before { content: ""; width: 44px; height: 1px; margin-right: 4px; background: var(--line); }
+.setup-steps li span { display: grid; place-items: center; width: 26px; height: 26px; background: #292927; font-size: 12px; }
+.setup-steps li[data-state="current"] { color: var(--paper); }
+.setup-steps li[data-state="current"] span { background: var(--signal); color: #fff; }
+.setup-steps li[data-state="done"] { color: var(--paper-dim); }
+.setup-steps li[data-state="done"] span { border: 1px solid #5d9a5d; background: transparent; color: #7ec27e; }
+
+.setup-body { min-height: 0; overflow-y: auto; padding: 40px 64px 24px; }
+.setup-body > * { max-width: 680px; }
+.setup-body h2 { margin: 0; font-family: var(--display); font-size: 40px; line-height: 1.05; letter-spacing: -0.015em; }
+.setup-lead { margin: 16px 0 28px; color: var(--paper-dim); font-size: 15px; line-height: 1.6; }
+
+.setup-actions { display: flex; align-items: center; gap: 12px; min-height: 93px; padding: 18px 64px; border-top: 1px solid var(--line); background: rgba(8, 8, 8, 0.92); }
+.setup-actions > span { flex: 1; }
+
+.setup-error {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: start;
+  margin: 0 0 16px;
+  padding: 12px 12px 12px 14px;
+  border-left: 3px solid var(--signal);
+  background: #1a0f0e;
+}
+
+.setup-error > svg { margin-top: 1px; color: #ff6b61; }
+.setup-error p { margin: 0; color: var(--paper); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.setup-error button { display: grid; place-items: center; width: 26px; height: 26px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.setup-error button:hover { color: var(--paper); }
+
+.setup-found { display: flex; gap: 16px; align-items: flex-start; }
+.setup-found__check { flex: 0 0 auto; display: grid; place-items: center; width: 40px; height: 40px; background: var(--signal); color: #fff; }
+.setup-found > div { min-width: 0; display: grid; gap: 6px; justify-items: start; }
+.setup-found strong { font-family: var(--display); font-size: 15px; letter-spacing: 0.06em; }
+.setup-found p { margin: 0; color: var(--paper-dim); font-size: 13px; line-height: 1.5; }
+
+.setup-note { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 0; padding: 12px 14px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); color: var(--paper-dim); font-size: 13px; line-height: 1.5; }
+.setup-note > svg { flex: 0 0 auto; margin-top: 2px; }
+.setup-note--plain { margin: 0; padding: 0; border: 0; background: transparent; }
+.setup-note--warning { border-color: rgba(217, 161, 60, 0.4); color: #e6b657; }
+.setup-spin { animation: setup-spin 1s linear infinite; }
+@keyframes setup-spin { to { transform: rotate(360deg); } }
+
+.setup-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.setup-choice { display: grid; gap: 8px; align-content: start; justify-items: start; padding: 18px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.025); }
+.setup-choice > svg { color: var(--signal); }
+.setup-choice strong { font-family: var(--display); font-size: 13px; letter-spacing: 0.07em; }
+.setup-choice p { margin: 0 0 6px; color: var(--paper-dim); font-size: 12.5px; line-height: 1.5; }
+
+.setup-drives { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px; }
+
+.setup-drive {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  justify-items: start;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--paper-dim);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.setup-drive:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.4); }
+.setup-drive:disabled { cursor: default; opacity: 0.55; }
+.setup-drive[aria-checked="true"] { border-color: var(--signal); background: rgba(225, 6, 0, 0.09); color: var(--paper); }
+.setup-drive strong { font-family: var(--display); font-size: 20px; letter-spacing: 0.03em; color: var(--paper); }
+.setup-drive small { font-size: 12px; }
+.setup-drive--other strong { font-size: 13px; letter-spacing: 0.07em; line-height: 1.6; }
+.setup-drive em { margin-top: 4px; padding: 2px 6px; background: var(--signal); color: #fff; font-family: var(--display); font-size: 9px; font-style: normal; font-weight: 700; letter-spacing: 0.08em; }
+
+/* Where the game goes, said once and in full, whatever the way it was chosen. */
+.setup-path { display: flex; align-items: center; gap: 16px; margin: 12px 0 0; padding: 14px 18px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.025); }
+.setup-path > svg { flex: 0 0 auto; color: var(--signal); }
+.setup-path p { flex: 1 1 auto; display: grid; gap: 4px; justify-items: start; min-width: 0; margin: 0; }
+.setup-path .launcher-link { flex: 0 0 auto; }
+.setup-path span { color: var(--muted); font-family: var(--display); font-size: 10px; letter-spacing: 0.13em; }
+.setup-path code { max-width: 100%; overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.setup-path small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+.setup-copy { margin-top: 30px; }
+.setup-copy__head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 10px; }
+.setup-copy__head span { color: var(--paper); font-size: 14px; }
+.setup-copy__head strong { color: var(--paper); font-family: var(--display); font-size: 56px; line-height: 1; }
+.setup-track { display: block; height: 8px; overflow: hidden; background: #2b2b29; }
+.setup-track i { display: block; height: 100%; background: var(--signal); transition: width 250ms linear; }
+.setup-copy__meta { display: flex; justify-content: space-between; gap: 16px; min-height: 19px; margin: 10px 0 0; color: var(--paper-dim); font-size: 12.5px; }
+.setup-copy__leave { margin: 18px 0 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+.setup-phases { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 22px 0 18px; padding: 0; list-style: none; }
+.setup-phases li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+.setup-phases li i { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 50%; }
+.setup-phases li[data-state="done"] { color: var(--paper-dim); }
+.setup-phases li[data-state="done"] svg { color: #7ec27e; }
+.setup-phases li[data-state="current"] { color: var(--paper); }
+.setup-phases li[data-state="current"] i { border-color: var(--signal); background: var(--signal); }
+
+.setup-key { display: grid; gap: 12px; justify-items: start; max-width: 600px; }
+.setup-key__path { margin: 0; color: var(--paper-dim); font-size: 12.5px; line-height: 1.5; }
+.key-field { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0 0 0 14px; border: 1px solid rgba(255, 255, 255, 0.3); background: #0a0a0a; }
+.key-field:focus-within { border-color: var(--paper); }
+.key-field > svg { flex: 0 0 auto; color: var(--signal); }
+.key-field input { flex: 1; min-width: 0; height: 46px; border: 0; outline: 0; background: transparent; color: var(--paper); font: 14px Consolas, "Cascadia Mono", monospace; }
+.key-field input::placeholder { color: #807e78; font-family: "Inter", sans-serif; font-size: 13px; }
+.key-field .launcher-button { min-height: 46px; margin: -1px; }
+.key-field input:disabled { opacity: 0.6; }
+.key-field__tool { flex: 0 0 auto; display: grid; place-items: center; width: 38px; height: 46px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.key-field__tool:hover:not(:disabled) { color: var(--paper); background: rgba(255, 255, 255, 0.05); }
+.key-field__tool:disabled { opacity: 0.4; cursor: default; }
+.key-field__tool + .launcher-button { margin-left: 0; }
+.setup-key__invalid { margin: 0; color: #ff6b61; font-size: 12.5px; }
+
+/* --- Title bar ----------------------------------------------------------- */
+
+.window-chrome__nav { display: flex; align-self: stretch; align-items: stretch; gap: 6px; -webkit-app-region: no-drag; }
+.window-chrome__nav button { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 0; background: transparent; color: var(--paper-dim); font-family: var(--display); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; cursor: pointer; transition: color 150ms ease, background 150ms ease; }
+.window-chrome__nav button::after { content: ""; position: absolute; inset: auto 14px 0; height: 3px; background: transparent; }
+.window-chrome__nav button:hover:not(:disabled) { color: var(--paper); background: rgba(255, 255, 255, 0.04); }
+.window-chrome__nav button[aria-current="page"] { color: var(--paper); }
+.window-chrome__nav button[aria-current="page"]::after { background: var(--signal); }
+.window-chrome__nav button:disabled { opacity: 0.4; cursor: default; }
+.window-chrome__nav button:focus-visible { outline-offset: -3px; }
+
+/* The wrappers that make a covered part of the window unreachable: no box of their own. */
+.launcher-home { display: contents; }
+
+/* The flag a language is recognized by. */
+.language-flag { flex: 0 0 auto; width: 30px; height: 20px; }
+.setup-languages { grid-template-columns: repeat(3, minmax(0, 200px)); }
+.setup-languages .setup-drive { gap: 12px; padding: 22px 20px; }
+.setup-languages .setup-drive strong { font-family: "Inter", "Microsoft YaHei", sans-serif; font-size: 16px; font-weight: 600; letter-spacing: 0; }
+
+/* --- Settings page ------------------------------------------------------- */
+
+/* A page of the window: the footer stays, with the server and the main button. */
+.settings-page {
+  z-index: 11;
+  inset: 72px 0 var(--footer-height);
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  background: #080808;
+}
+
+.settings-nav { display: flex; flex-direction: column; justify-content: space-between; min-height: 0; padding: 26px 0 20px; border-right: 1px solid var(--line); background: #0b0b0b; }
+.settings-nav > div { display: grid; }
+.settings-nav button { position: relative; display: flex; align-items: center; gap: 14px; height: 46px; padding: 0 20px 0 var(--gutter); border: 0; background: transparent; color: var(--muted); font-family: var(--display); font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-align: left; cursor: pointer; transition: color 150ms ease, background 150ms ease; }
+.settings-nav button:hover { color: var(--paper-dim); background: rgba(255, 255, 255, 0.025); }
+.settings-nav button[aria-selected="true"] { color: var(--paper); background: rgba(255, 255, 255, 0.05); }
+.settings-nav button[aria-selected="true"]::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--signal); }
+.settings-nav button[aria-selected="true"] svg { color: var(--signal); }
+.settings-nav small { padding: 0 var(--gutter); color: #77756f; font-size: 11px; }
+
+.settings-panel { min-width: 0; overflow-y: auto; padding: 32px 56px 36px; }
+/* A long page scrolls at its edge, with a bar as quiet as the rest. */
+.settings-panel, .setup-body { scrollbar-width: thin; scrollbar-color: #3a3a37 transparent; }
+.settings-panel > * { max-width: 780px; }
+.settings-panel > header h2 { margin: 0; font-family: var(--display); font-size: 30px; line-height: 1.1; }
+.settings-panel > header p { margin: 8px 0 24px; color: var(--paper-dim); font-size: 13.5px; line-height: 1.5; }
+
+.settings-group { margin: 0 0 16px; border: 1px solid var(--line); background: #0d0d0d; }
+.settings-group > h3 { margin: 0; padding: 12px 20px; border-bottom: 1px solid var(--line); background: #111110; color: var(--muted); font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: 0.13em; text-transform: uppercase; }
+
+.settings-row { display: flex; justify-content: space-between; align-items: center; gap: 28px; min-height: 64px; padding: 14px 20px; }
+.settings-row + .settings-row, .settings-row + div > .settings-row, div + .settings-row { border-top: 1px solid var(--line); }
+.settings-row__text { min-width: 0; }
+.settings-row__text > strong { display: block; color: var(--paper); font-size: 13.5px; font-weight: 500; line-height: 1.4; }
+/* A long folder is cut with an ellipsis instead of running under the button. */
+.settings-row__text > strong > code { display: block; }
+.settings-row__hint { margin-top: 4px; color: var(--paper-dim); font-size: 12.5px; line-height: 1.55; }
+.settings-row__control { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; }
+.settings-row__track { height: 4px; margin-top: 10px; }
+.settings-page code { font-size: 13px; }
+.settings-copyable { max-width: 380px; user-select: text; cursor: text; color: var(--paper-dim) !important; }
+
+.settings-status { color: #7ec27e; font-family: var(--display); font-size: 11px; letter-spacing: 0.08em; }
+.settings-status[data-status="warning"] { color: #e6b657; }
+.settings-status[data-status="error"], .settings-status[data-status="disabled"] { color: #ff6b61; }
+.settings-status[data-status="idle"], .settings-status[data-status="checking"], .settings-status[data-status="downloading"], .settings-status[data-status="installing"] { color: var(--paper-dim); }
+
+/* A switch, square like the rest of the launcher. */
+.settings-switch { position: relative; display: block; width: 44px; height: 24px; }
+.settings-switch input { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.settings-switch input:disabled { cursor: default; }
+.settings-switch i { position: absolute; inset: 0; background: #3a3a37; transition: background 150ms ease; }
+.settings-switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: #c9c7c1; transition: transform 150ms ease, background 150ms ease; }
+.settings-switch input:checked + i { background: var(--signal); }
+.settings-switch input:checked + i::after { background: #fff; transform: translateX(20px); }
+.settings-switch input:focus-visible + i { outline: 2px solid var(--paper); outline-offset: 2px; }
+.settings-switch input:disabled + i { opacity: 0.45; }
+
+.settings-segments { display: flex; border: 1px solid rgba(255, 255, 255, 0.3); }
+.settings-segments button { min-height: 40px; padding: 0 14px; white-space: nowrap; border: 0; background: transparent; color: var(--paper-dim); font-size: 13px; cursor: pointer; }
+.settings-segments button + button { border-left: 1px solid rgba(255, 255, 255, 0.3); }
+.settings-segments button:hover { color: var(--paper); }
+.settings-segments button[aria-checked="true"] { background: var(--paper); color: var(--ink); }
+.settings-segments button:disabled { cursor: default; opacity: 0.55; }
+.settings-segments button:focus-visible { outline-offset: -2px; }
+
+.settings-advanced { margin: 0 0 16px; }
+.settings-advanced summary { padding: 6px 0 12px; color: var(--muted); font-family: var(--display); font-size: 11px; font-weight: 700; letter-spacing: 0.13em; cursor: pointer; }
+.settings-advanced summary:hover { color: var(--paper); }
+.settings-advanced__lead { margin: 0 0 14px; color: var(--paper-dim); font-size: 12.5px; line-height: 1.55; }
+
+.settings-note { margin: 0; padding: 12px 20px; border-top: 1px solid var(--line); color: var(--paper-dim); font-size: 12.5px; line-height: 1.55; }
+.settings-note.is-error { color: #efa79b; }
+.settings-legal { margin: 18px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+/* --- Account tab ---------------------------------------------------------- */
+
+.account-keys__note { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 16px; color: var(--paper-dim); font-size: 12.5px; line-height: 1.5; }
+.account-keys__note svg { flex: 0 0 auto; margin-top: 1px; color: #7ec27e; }
+.key-row { display: grid; gap: 10px; padding: 16px 20px; }
+.key-row + .key-row { border-top: 1px solid var(--line); }
+.key-row__head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.key-row__head label { color: var(--paper); font-size: 13.5px; font-weight: 500; }
+.key-row__hint { margin: 0; color: var(--paper-dim); font-size: 12.5px; line-height: 1.55; }
+.settings-feedback { min-height: 20px; margin: 0; color: var(--paper-dim); font-size: 12.5px; }
+.settings-feedback.is-success { color: #7ec27e; }
+.settings-feedback.is-error { color: #ff6b61; }
+
+/* --- Appearance tab ------------------------------------------------------- */
+
+/* Choosing on the left, seeing on the right: this page is wider than the others for it. */
+.settings-panel > .look { max-width: 920px; }
+.look { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: start; gap: 28px; }
+.look__choose, .look__see { display: grid; gap: 14px; min-width: 0; }
+.look__specimen { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.look__hint, .look__caption p { margin: 0; color: var(--paper-dim); font-size: 12.5px; line-height: 1.55; }
+
+/* What is being dressed, each with the font it wears today. */
+.look__targets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.look__targets button { position: relative; display: flex; align-items: center; gap: 14px; min-width: 0; height: 64px; padding: 0 16px; border: 1px solid var(--line); background: #0d0d0d; color: var(--muted); text-align: left; cursor: pointer; transition: color 150ms ease, border-color 150ms ease, background 150ms ease; }
+.look__targets button:hover { color: var(--paper-dim); }
+.look__targets button[aria-checked="true"] { border-color: rgba(255, 255, 255, 0.4); background: #151514; color: var(--paper); }
+.look__targets button[aria-checked="true"]::after { content: ""; position: absolute; inset: auto -1px -1px; height: 2px; background: var(--signal); }
+.look__targets button[aria-checked="true"] svg { color: var(--signal); }
+.look__targets svg { flex: 0 0 auto; }
+.look__target { display: grid; gap: 3px; min-width: 0; }
+.look__target small { color: var(--muted); font-family: var(--display); font-size: 10px; font-weight: 700; letter-spacing: 0.13em; }
+.look__target .look__specimen { height: 22px; font-size: 15px; font-weight: 500; line-height: 22px; }
+
+/* Every font written in its own letters; the bar and the tick mark the one in use. */
+.look__fonts { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); background: #0d0d0d; }
+.look__fonts button { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; height: 42px; padding: 0 14px 0 18px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--paper-dim); font-size: 15px; font-weight: 500; text-align: left; cursor: pointer; transition: color 150ms ease, background 150ms ease; }
+.look__fonts button:nth-child(-n+2) { border-top: 0; }
+.look__fonts button:nth-child(odd) { border-right: 1px solid var(--line); }
+.look__fonts button[data-shown="true"] { background: rgba(255, 255, 255, 0.06); color: var(--paper); }
+.look__fonts button[aria-selected="true"] { color: var(--paper); }
+.look__fonts button[aria-selected="true"]::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--signal); }
+/* A game font keeps its own height: the row gives it a line of its own size, and cuts what goes past. */
+.look__fonts .look__specimen { height: 40px; line-height: 40px; }
+.look__fonts svg { flex: 0 0 auto; color: var(--signal); }
+.look__fonts button:disabled { cursor: default; opacity: 0.55; }
+.look__fonts button:focus-visible { outline-offset: -2px; }
+@media (max-width: 1180px) { .look__fonts button { padding: 0 10px 0 14px; font-size: 14px; } }
+
+/* A small screen of what the font dresses. Every size follows its width (cqw): the
+   same picture at every window size, and lines of fixed height so that a tall font
+   moves nothing. */
+.look__stage { container-type: inline-size; position: relative; aspect-ratio: 16 / 9; overflow: hidden; border: 1px solid var(--line); background: var(--ink); color: var(--paper); }
+.look__stage * { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+
+.look__stage--game { background: linear-gradient(rgba(6, 6, 6, 0.5), rgba(6, 6, 6, 0.86)), url("../../public/branding/rotk-launcher-art.png") center 18% / cover var(--ink); }
+.look__hud { position: absolute; max-width: 70cqw; height: 5cqw; color: var(--paper-dim); font-size: 2.5cqw; line-height: 5cqw; }
+.look__hud--tl { top: 3.2cqw; left: 3.6cqw; }
+.look__hud--tr { top: 3.2cqw; right: 3.6cqw; padding: 0 1.8cqw; background: rgba(0, 0, 0, 0.6); color: var(--paper); }
+.look__hud--bl { bottom: 3.2cqw; left: 3.6cqw; }
+.look__hud--br { right: 3.6cqw; bottom: 3.2cqw; }
+.look__center { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 1.4cqw; padding: 0 5cqw; }
+.look__center small { height: 4cqw; color: #ff6862; font-size: 2.3cqw; line-height: 4cqw; letter-spacing: 0.14em; text-transform: uppercase; }
+.look__center strong { max-width: 100%; height: 10cqw; font-size: 7.4cqw; font-weight: 400; line-height: 10cqw; }
+.look__chips { display: flex; gap: 1.4cqw; max-width: 100%; margin-top: 1.2cqw; }
+.look__chips span { height: 5.8cqw; padding: 0 2.6cqw; border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(6, 6, 6, 0.5); font-size: 2.4cqw; line-height: 5.5cqw; }
+.look__chips span:first-child { border-color: var(--signal); background: var(--signal); }
+
+/* The rows take their height on the children: on the stage itself, cqw would be measured on the window. */
+.look__stage--launcher { display: flex; flex-direction: column; background: linear-gradient(90deg, var(--ink) 34%, rgba(6, 6, 6, 0.35)), url("../../public/branding/rotk-launcher-art.png") right center / auto 100% no-repeat var(--ink); }
+.look__bar { flex: 0 0 10cqw; display: flex; align-items: stretch; gap: 5cqw; padding: 0 3.6cqw; border-bottom: 1px solid var(--line); background: var(--ink); }
+.look__bar strong, .look__bar span { display: flex; align-items: center; }
+.look__bar strong { font-size: 3cqw; font-weight: 700; letter-spacing: 0.04em; }
+.look__bar span { font-size: 2.1cqw; font-weight: 700; letter-spacing: 0.1em; box-shadow: inset 0 -2px var(--signal); }
+.look__page { flex: 1 1 0; display: grid; align-content: center; gap: 1.8cqw; min-width: 0; padding: 0 3.6cqw; }
+.look__page strong { max-width: 66cqw; height: 8.6cqw; font-size: 6.6cqw; font-weight: 700; line-height: 8.6cqw; text-transform: uppercase; }
+.look__page p { max-width: 66cqw; height: 4.4cqw; color: var(--paper-dim); font-size: 2.6cqw; line-height: 4.4cqw; }
+.look__foot { flex: 0 0 13cqw; display: flex; align-items: stretch; justify-content: space-between; border-top: 1px solid var(--line); background: #0a0a0a; }
+.look__foot span { display: flex; align-items: center; gap: 1.8cqw; padding: 0 3.6cqw; font-size: 2.5cqw; }
+.look__foot span::before { content: ""; flex: 0 0 auto; width: 1.5cqw; height: 1.5cqw; border-radius: 50%; background: #7ec27e; }
+.look__foot b { display: grid; place-items: center; width: 27cqw; background: var(--signal); font-size: 3.6cqw; font-weight: 700; letter-spacing: 0.04em; }
+
+/* The name of the font on the stage, and whether it is the one in use. */
+.look__caption { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 14px; }
+.look__caption strong { min-width: 0; color: var(--paper); font-size: 20px; font-weight: 500; line-height: 28px; }
+.look__caption .look__specimen { height: 28px; }
+.look__caption p { grid-column: 1 / -1; }
+.look__caption .look__warning { min-height: 19px; color: #e6b657; }
+.look__current { display: flex; align-items: center; gap: 6px; color: #7ec27e; font-family: var(--display); font-size: 10px; font-weight: 700; letter-spacing: 0.13em; }
+
+/* --- Confirmation, and the buttons of the older parts ---------------------- */
+
+.launcher-button--danger-solid { border-color: #c8261c; background: #c8261c; }
+.launcher-button--danger-solid:hover:not(:disabled) { border-color: #a31d15; background: #a31d15; }
+
+.launcher-dialog { width: min(520px, calc(100vw - 48px)); padding: 30px 32px 28px; border: 1px solid rgba(255, 255, 255, 0.2); border-top: 3px solid var(--signal); background: #0d0d0d; color: var(--paper); box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6); }
+.launcher-dialog::backdrop { background: rgba(0, 0, 0, 0.66); backdrop-filter: blur(4px); }
+.launcher-dialog h2 { margin: 0 0 14px; font-family: var(--display); font-size: 24px; line-height: 1.1; }
+.launcher-dialog code { display: block; overflow: hidden; margin-bottom: 12px; color: var(--paper); font: 13px Consolas, "Cascadia Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.launcher-dialog p { margin: 0; color: var(--paper-dim); font-size: 13.5px; line-height: 1.6; }
+.launcher-dialog__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
+
+.launcher-update-prompt__actions .launcher-button { flex: 1 1 200px; }
+.update-banner > .launcher-button { flex-shrink: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-wizard, .settings-page, .setup-spin { animation: none; }
+  .setup-track i, .settings-switch i, .settings-switch i::after { transition: none; }
+}

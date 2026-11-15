@@ -56,6 +56,17 @@ export const MAIN_COPY = {
       notInstalled: (version: string) =>
         `Launcher update ${version} was downloaded but did not install: Windows or your antivirus may have blocked its installer. Download the installer from rotk.app and install it over this one.`,
     },
+    settings: {
+      notInstalled: "The game is not installed.",
+      folderUnavailable: "This folder could not be opened.",
+      linkUnavailable: "This link could not be opened.",
+      repairNoSource: "This game is used where it already was: there is no other copy to repair it from. Verify its files in Steam, or install the game again.",
+      tray: { open: "Open ROTK Launcher", quit: "Quit" },
+      notifications: {
+        installDone: { title: "ROTK is installed", body: "Come back to the launcher to play." },
+        updateReady: { title: "Launcher update ready", body: "Open the launcher to install it." },
+      },
+    },
     stopGame: {
       title: "Close H1Z1",
       message: "Use this only if the game window is already gone or no longer responds. A match in progress is lost.",
@@ -132,6 +143,17 @@ export const MAIN_COPY = {
       notInstalled: (version: string) =>
         `La mise à jour ${version} du launcher a été téléchargée mais ne s’est pas installée : Windows ou ton antivirus a peut-être bloqué son installateur. Télécharge l’installateur sur rotk.app et installe-le par-dessus.`,
       required: "Mets à jour le launcher ROTK avant de jouer.",
+    },
+    settings: {
+      notInstalled: "Le jeu n’est pas installé.",
+      folderUnavailable: "Ce dossier n’a pas pu être ouvert.",
+      linkUnavailable: "Ce lien n’a pas pu être ouvert.",
+      repairNoSource: "Ce jeu est utilisé là où il était déjà : il n’y a pas d’autre copie pour le réparer. Vérifie ses fichiers dans Steam, ou réinstalle le jeu.",
+      tray: { open: "Ouvrir ROTK Launcher", quit: "Quitter" },
+      notifications: {
+        installDone: { title: "ROTK est installé", body: "Reviens sur le launcher pour jouer." },
+        updateReady: { title: "Mise à jour du launcher prête", body: "Ouvre le launcher pour l’installer." },
+      },
     },
     stopGame: {
       title: "Fermer H1Z1",
@@ -210,6 +232,17 @@ export const MAIN_COPY = {
       notInstalled: (version: string) =>
         `启动器更新 ${version} 已下载但未能安装：Windows 或杀毒软件可能拦截了安装程序。请在 rotk.app 下载安装程序并覆盖安装。`,
     },
+    settings: {
+      notInstalled: "游戏尚未安装。",
+      folderUnavailable: "无法打开此文件夹。",
+      linkUnavailable: "无法打开此链接。",
+      repairNoSource: "此游戏在原位置直接使用：没有其他副本可用于修复。请在 Steam 中验证文件，或重新安装游戏。",
+      tray: { open: "打开 ROTK Launcher", quit: "退出" },
+      notifications: {
+        installDone: { title: "ROTK 已安装", body: "回到启动器即可开始游戏。" },
+        updateReady: { title: "启动器更新已就绪", body: "打开启动器即可安装。" },
+      },
+    },
     stopGame: {
       title: "关闭 H1Z1",
       message: "仅在游戏窗口已消失或无响应时使用。正在进行的对局将会丢失。",
@@ -237,6 +270,7 @@ export const MAIN_COPY = {
 const ENGLISH_ERRORS = new Map<string, string>([
   ["Une erreur inattendue est survenue.", "An unexpected error occurred."],
   ["Installation annulée.", "Installation cancelled."],
+  ["Ce dossier n’est pas l’installation ROTK de ce launcher : rien n’a été supprimé.", "This folder is not this launcher’s ROTK installation: nothing was deleted."],
   ["Installation annulée", "Installation cancelled."],
   ["Impossible de résoudre le disque de destination.", "The destination drive could not be resolved."],
   ["Le chemin doit être absolu.", "The path must be absolute."],
@@ -379,6 +413,7 @@ const CHINESE_ERRORS = new Map<string, string>([
   ["The ROTK integrity service is temporarily unavailable", "ROTK 校验服务暂时不可用。"],
   ["Too many ROTK integrity checks. Wait a moment and try again", "校验请求过于频繁，请稍后再试。"],
   ["Installation annulée.", "安装已取消。"],
+  ["Ce dossier n’est pas l’installation ROTK de ce launcher : rien n’a été supprimé.", "此文件夹不是本启动器的 ROTK 安装：未删除任何内容。"],
   ["H1Z1 est déjà lancé depuis cette installation.", "H1Z1 正在运行，请先关闭游戏。"],
   ["Le flux d’assets ROTK est indisponible. Vérifie ta connexion puis réessaie.", "无法连接 ROTK 资源服务器，请检查网络后重试。"],
   ["Cette version de H1Z1 n’est pas encore prise en charge par ROTK. Vérifie les fichiers du jeu dans Steam puis réessaie.", "ROTK 暂不支持这个版本的 H1Z1。请在 Steam 中验证游戏文件完整性后重试。"],

@@ -15,9 +15,10 @@ import {
   statfs,
   utimes,
   writeFile,
+  rmdir,
 } from "node:fs/promises";
 import { retryFs } from "./fs-safe.js";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { InstallProgress } from "../../shared/contracts.js";
 import {
   CRITICAL_CLIENT_FILES,
@@ -587,6 +588,58 @@ export async function installClient(request: InstallRequest): Promise<Installati
   await writeJsonAtomically(join(destinationRoot, INSTALL_MARKER_NAME), marker);
   await rm(join(destinationRoot, INSTALL_PENDING_MARKER_NAME), { force: true }).catch(() => undefined);
   return marker;
+}
+
+/**
+ * A client adopted where it stood is its own source: the folder is the
+ * player's copy of H1Z1, not one the launcher made. The marker keeps the folder
+ * of the first adoption, so a game moved since (or whose drive letter changed)
+ * and picked again is known by the launcher's own record, `configuredSourceRoot`.
+ */
+export function adoptedInPlace(marker: InstallationMarker, root: string, configuredSourceRoot?: string): boolean {
+  const here = resolve(root).toLocaleLowerCase("en-US");
+  return [marker.sourceRoot, configuredSourceRoot].some((source) => source !== undefined && resolve(source).toLocaleLowerCase("en-US") === here);
+}
+
+/**
+ * Removes a ROTK installation from the disk. Nothing is deleted unless the
+ * folder passes the rules of an install (never a Steam folder, a drive root, a
+ * link, the launcher's folder) and carries the marker of this very
+ * installation. A client adopted in place is left on the disk ("kept"): only
+ * the launcher forgets it. The marker goes last, so a deletion that stops
+ * halfway (a file held by another program) leaves a folder that is still
+ * recognized and can be removed again.
+ */
+export async function removeInstallation(
+  installation: { root: string; installId: string; sourceRoot?: string },
+  launcherFolder: string | null,
+  /** The asset cache and backups kept next to the installation. */
+  assetStorage?: string,
+): Promise<"removed" | "kept"> {
+  const root = await validateInstallDestination(installation.root);
+  assertOutsideLauncherFolder(root, launcherFolder);
+  const removeAssetStorage = async (): Promise<void> => {
+    if (assetStorage) await rm(assetStorage, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
+  };
+  // Already gone, by hand or by an earlier attempt: what was kept next to it goes too.
+  if (await inspectDestination(root) === "absent") {
+    await removeAssetStorage();
+    return "removed";
+  }
+  const marker = await readInstallationMarker(root);
+  if (!marker || marker.installId !== installation.installId) {
+    throw new PathPolicyError("Ce dossier n’est pas l’installation ROTK de ce launcher : rien n’a été supprimé.");
+  }
+  if (adoptedInPlace(marker, root, installation.sourceRoot)) return "kept";
+  for (const entry of await readdir(root)) {
+    if (entry !== INSTALL_MARKER_NAME) await rm(join(root, entry), { recursive: true, force: true, maxRetries: 3 });
+  }
+  await rm(join(root, INSTALL_MARKER_NAME), { force: true });
+  // Emptied and no longer marked: a folder Windows still holds (an Explorer
+  // window on it) must not fail an uninstall that could then never be asked again.
+  await rmdir(root).catch(() => undefined);
+  await removeAssetStorage();
+  return "removed";
 }
 
 const LEFTOVER_FILE = /^\.rotk-staging-|\.rotk-part$|\.rotk-[0-9a-f-]{36}\.tmp$/i;

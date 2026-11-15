@@ -1,4 +1,4 @@
-import { CircleAlert, Download, KeyRound, Play, RotateCcw, Settings2 } from "lucide-react";
+import { Download, Play } from "lucide-react";
 import type { LauncherSnapshot } from "../../shared/contracts";
 import { assetSyncActive, gameSessionActive, primaryAction, type PrimaryAction } from "../../shared/primary-action";
 import type { PlayerRole, ServerId } from "../../shared/launch-profile";
@@ -9,8 +9,6 @@ interface LauncherFooterProps {
   snapshot: LauncherSnapshot;
   busy: boolean;
   onPrimary(): void;
-  onSetup(): void;
-  onIdentity(): void;
   onStopGame(): void;
   onSelectLaunchProfile(serverId: ServerId, role: PlayerRole): void;
 }
@@ -62,8 +60,6 @@ export function LauncherFooter({
   snapshot,
   busy,
   onPrimary,
-  onSetup,
-  onIdentity,
   onStopGame,
   onSelectLaunchProfile,
 }: LauncherFooterProps) {
@@ -100,15 +96,6 @@ export function LauncherFooter({
         disabled={busy || running || installing}
         onSelect={onSelectLaunchProfile}
       />
-
-      <div className="footer-tools">
-        <button type="button" onClick={onIdentity} disabled={installing} aria-label={copy.footer.playerIdentity} title={copy.footer.playerIdentity}>
-          <KeyRound size={19} />
-        </button>
-        <button type="button" onClick={onSetup} disabled={installing} aria-label={copy.footer.settings} title={copy.footer.settings}>
-          {snapshot.error ? <CircleAlert size={20} /> : snapshot.installationRoot ? <Settings2 size={20} /> : <RotateCcw size={20} />}
-        </button>
-      </div>
 
       <button
         type="button"

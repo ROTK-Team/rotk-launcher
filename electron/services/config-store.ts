@@ -8,6 +8,7 @@ import {
   type PlayerRole,
   type ServerId,
 } from "../../shared/launch-profile.js";
+import type { LauncherPreferences } from "../../shared/preferences.js";
 
 export interface InstalledClientConfig {
   installId: string;
@@ -45,6 +46,8 @@ export interface LauncherConfig {
   playerFont?: string;
   /** Same ids, for the launcher's own interface; absent means its stock fonts. */
   launcherFont?: string;
+  /** What the player changed in the settings; an absent field keeps its default. */
+  preferences?: Partial<LauncherPreferences>;
 }
 
 interface StoredConfigCandidate {
@@ -89,6 +92,9 @@ const FIELD_VALIDATORS: { [K in Exclude<keyof LauncherConfig, "schemaVersion">]-
   role: isPlayerRole,
   playerFont: isFontId,
   launcherFont: isFontId,
+  // Kept as stored, and read field by field (storedPreferences): a value of
+  // another launcher version stays in the file instead of taking the others with it.
+  preferences: (value) => value !== null && typeof value === "object" && !Array.isArray(value),
 };
 
 /**
@@ -241,6 +247,20 @@ export class ConfigStore {
 
   async setLauncherUpdateAutoDownload(launcherUpdateAutoDownload: boolean): Promise<LauncherConfig> {
     const next: LauncherConfig = { ...await this.load(), launcherUpdateAutoDownload };
+    await this.save(next);
+    return next;
+  }
+
+  async setPreferences(preferences: Partial<LauncherPreferences>): Promise<LauncherConfig> {
+    const current = await this.load();
+    const next: LauncherConfig = { ...current, preferences: { ...current.preferences, ...preferences } };
+    await this.save(next);
+    return next;
+  }
+
+  /** Forgets the installed client (it was uninstalled); every other setting stays. */
+  async clearInstallation(): Promise<LauncherConfig> {
+    const { installation: _removed, pendingInstallRoot: _pending, ...next } = await this.load();
     await this.save(next);
     return next;
   }

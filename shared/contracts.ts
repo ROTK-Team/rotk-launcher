@@ -20,6 +20,68 @@ export interface PublishedUpdate {
   siteUrl: string;
 }
 
+/** A competition of the ROTK site that a player can join or watch right now. */
+export interface LauncherEvent {
+  id: string;
+  name: string;
+  /** Who runs it. */
+  host: string;
+  mode: string;
+  region: string;
+  phase: "running" | "applications" | "roster";
+  startsAt: string | null;
+  applicationsCloseAt: string | null;
+  /** Path of its page on the ROTK site. */
+  sitePath: string;
+}
+
+/**
+ * What the site's staff chose for the line of the home page: a message of
+ * their own, the latest publication, the competitions, or nothing. "auto"
+ * shows the competitions when there are some.
+ */
+export interface LauncherBanner {
+  /** The staff's switch: off hides the line and keeps what was chosen for it. */
+  enabled: boolean;
+  mode: "auto" | "message" | "news" | "event" | "off";
+  /** The staff's messages, shown one after the other. */
+  messages: BannerMessage[];
+  /** One competition to show rather than all the live ones. */
+  eventKey: string | null;
+}
+
+export interface BannerMessage {
+  /** The staff's text by language, empty when not written; the window falls back to English. */
+  text: Record<AppLocale, string>;
+  /** Path on the ROTK site the message leads to. */
+  link: string | null;
+}
+
+/** A card the site's staff shows before the publications on the home page: a temporary event. */
+export interface FeaturedCard {
+  id: string;
+  /** By language, empty when not written; the window falls back to English. */
+  label: Record<AppLocale, string>;
+  title: Record<AppLocale, string>;
+  summary: Record<AppLocale, string>;
+  /** An image of the ROTK site, or empty. */
+  imageUrl: string;
+  /** An image of the ROTK site for the back of the page while this card is the one shown, or empty. */
+  backgroundUrl: string;
+  /** Path on the ROTK site the card leads to. */
+  link: string | null;
+  /** When the card stops being shown. */
+  endsAt: string | null;
+}
+
+/** Images the site's staff chose for the back of the home page. */
+export interface HomeBackgrounds {
+  /** Images of the ROTK site, in the staff's order; none keeps the launcher's own art. */
+  images: string[];
+  /** Seconds each image stays when they rotate; null shows the first one only. */
+  rotateSeconds: number | null;
+}
+
 export interface InstallProgress {
   phase: "scanning" | "copying" | "verifying" | "configuring" | "finalizing";
   completedBytes: number;
@@ -174,11 +236,17 @@ export interface LauncherSnapshot {
   selection: InstallSelection;
   installationRoot: string | null;
   updates: PublishedUpdate[];
+  events: LauncherEvent[];
+  /** Null when the site gave no choice: the home page then decides as "auto". */
+  banner: LauncherBanner | null;
+  featured: FeaturedCard[];
+  backgrounds: HomeBackgrounds;
   runtime: RuntimeSummary;
   playerIdentity: PlayerIdentitySummary;
   launcherUpdate: LauncherUpdateSummary;
   /** The player's setting: download a launcher update as soon as it is found. */
   launcherUpdateAutoDownload: boolean;
+  preferences: LauncherPreferences;
   assetSync: AssetSyncSummary;
   playerFont: PlayerFontSummary;
   integrityCheck: IntegrityCheckSummary | null;
@@ -254,6 +322,23 @@ export interface RotkLauncherApi {
   downloadLauncherUpdate(): Promise<OperationResult>;
   installLauncherUpdate(): Promise<OperationResult>;
   setLauncherUpdateAutoDownload(enabled: boolean): Promise<OperationResult>;
+  /** Changes the given preferences; the others keep their value. */
+  setPreferences(preferences: Partial<LauncherPreferences>): Promise<OperationResult>;
+  /** Opens the game folder in the file explorer. */
+  openInstallFolder(): Promise<OperationResult>;
+  /** Opens the launcher's own folder, on its startup log. */
+  openLogsFolder(): Promise<OperationResult>;
+  /** Opens the ROTK Discord invitation. */
+  openDiscord(): Promise<OperationResult>;
+  /**
+   * The game folder: the bytes it takes on the disk, and whether it is a client
+   * adopted where it stood (uninstalling then leaves the folder alone).
+   */
+  getInstallInfo(): Promise<OperationResult<{ bytes: number; adopted: boolean }>>;
+  /** Copies again, from the H1Z1 this installation was made from, the files that are missing or of the wrong size. */
+  repairGame(): Promise<OperationResult<{ installationRoot: string }>>;
+  /** Removes the game. The window asks the player first. */
+  uninstallGame(): Promise<OperationResult>;
   verifyAssets(): Promise<OperationResult>;
   restoreVanillaAssets(): Promise<OperationResult>;
   setAssetSyncEnabled(enabled: boolean): Promise<OperationResult>;
@@ -296,6 +381,13 @@ export const IPC_CHANNELS = {
   downloadLauncherUpdate: "launcher:update-download",
   installLauncherUpdate: "launcher:update-install",
   setLauncherUpdateAutoDownload: "launcher:update-set-auto-download",
+  setPreferences: "launcher:set-preferences",
+  openInstallFolder: "launcher:open-install-folder",
+  openLogsFolder: "launcher:open-logs-folder",
+  openDiscord: "launcher:open-discord",
+  getInstallInfo: "launcher:install-info",
+  repairGame: "launcher:repair-game",
+  uninstallGame: "launcher:uninstall-game",
   verifyAssets: "asset-sync:verify",
   restoreVanillaAssets: "asset-sync:restore",
   setAssetSyncEnabled: "asset-sync:set-enabled",
@@ -307,4 +399,5 @@ export const IPC_CHANNELS = {
   snapshotChanged: "launcher:snapshot-changed",
 } as const;
 import type { AppLocale } from "./locale.js";
+import type { LauncherPreferences } from "./preferences.js";
 import type { LaunchProfileId, PlayerRole, ServerId } from "./launch-profile.js";

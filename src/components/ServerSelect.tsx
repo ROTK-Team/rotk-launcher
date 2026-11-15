@@ -56,7 +56,10 @@ export function ServerSelect({ snapshot, disabled, onSelect }: ServerSelectProps
       if (!container.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      // Handled: the page under the menu stays open.
+      event.preventDefault();
+      setOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
