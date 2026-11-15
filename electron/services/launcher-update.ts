@@ -31,6 +31,11 @@ export interface LauncherUpdateOptions {
   onChange: (state: LauncherUpdateSummary) => void;
   /** Short failure code for logs; the raw message may carry signed URLs. */
   onDownloadError?: (code: string) => void;
+  /**
+   * A check that failed (GitHub unreachable, damaged update configuration
+   * after an interrupted update). Silent for the player, but logged.
+   */
+  onCheckError?: (code: string) => void;
 }
 
 const IDLE_STATE: LauncherUpdateSummary = {
@@ -46,12 +51,14 @@ export class LauncherUpdateService {
   private readonly updater: UpdaterLike | null;
   private readonly onChange: (state: LauncherUpdateSummary) => void;
   private readonly onDownloadError: (code: string) => void;
+  private readonly onCheckError: (code: string) => void;
   private current: LauncherUpdateSummary = { ...IDLE_STATE };
 
   constructor(options: LauncherUpdateOptions) {
     this.updater = options.updater;
     this.onChange = options.onChange;
     this.onDownloadError = options.onDownloadError ?? (() => undefined);
+    this.onCheckError = options.onCheckError ?? (() => undefined);
     if (!this.updater) return;
 
     this.updater.autoDownload = false;
@@ -97,8 +104,8 @@ export class LauncherUpdateService {
           error: error.message,
         });
         this.onDownloadError(updateErrorCode(error));
-      } else if (this.current.status === "checking") {
-        this.transition({ ...IDLE_STATE });
+      } else {
+        this.checkFailed(error);
       }
     });
   }
@@ -118,13 +125,16 @@ export class LauncherUpdateService {
     this.transition({ ...IDLE_STATE, status: "checking" });
     try {
       await this.updater.checkForUpdates();
-    } catch {
-      this.resetIfChecking();
+    } catch (error) {
+      this.checkFailed(error);
     }
   }
 
-  private resetIfChecking(): void {
-    if (this.current.status === "checking") this.transition({ ...IDLE_STATE });
+  // The rejection and the "error" event can both report one failed check.
+  private checkFailed(error: unknown): void {
+    if (this.current.status !== "checking") return;
+    this.transition({ ...IDLE_STATE });
+    this.onCheckError(updateErrorCode(error instanceof Error ? error : new Error(String(error))));
   }
 
   download(): LauncherUpdateFailure | null {
