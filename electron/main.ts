@@ -1742,7 +1742,7 @@ if (singleInstanceLock) {
           await initialize();
         },
         quit: () => app.quit(),
-        mark: (event) => startupLog.mark(event),
+        mark: (event, detail) => startupLog.mark(event, detail),
         reportFailure: (reason) => {
           const copy = MAIN_COPY[systemLocale()];
           dialog.showErrorBox(copy.startupTitle, copy.elevation[reason]);

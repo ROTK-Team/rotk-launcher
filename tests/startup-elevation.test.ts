@@ -3,6 +3,7 @@ import { resolve, join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   ELEVATION_RELAUNCH_ARGUMENT,
+  StartupHelperDamagedError,
   startWithRequiredElevation,
   windowsElevation,
   type ElevatedStartupActions,
@@ -76,6 +77,18 @@ describe("mandatory administrator startup", () => {
     calls.isAdministrator.mockRejectedValueOnce(new Error("timed out"));
     await startWithRequiredElevation(options, calls);
     expect(calls.reportFailure).toHaveBeenCalledWith("check-failed");
+    expect(calls.mark).toHaveBeenCalledWith("elevation-check-failed", "timed out");
+    expect(calls.initialize).not.toHaveBeenCalled();
+    expect(calls.requestElevation).not.toHaveBeenCalled();
+    expect(calls.quit).toHaveBeenCalledOnce();
+  });
+
+  it("tells the player to reinstall, not to run as administrator, when the helper is damaged", async () => {
+    const calls = actions();
+    calls.isAdministrator.mockRejectedValueOnce(new StartupHelperDamagedError("Startup helper integrity check failed."));
+    await startWithRequiredElevation(options, calls);
+    expect(calls.reportFailure).toHaveBeenCalledExactlyOnceWith("helper-damaged");
+    expect(calls.mark).toHaveBeenCalledWith("elevation-helper-damaged", "Startup helper integrity check failed.");
     expect(calls.initialize).not.toHaveBeenCalled();
     expect(calls.requestElevation).not.toHaveBeenCalled();
     expect(calls.quit).toHaveBeenCalledOnce();
@@ -164,5 +177,27 @@ describe("Windows elevation transport", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    ["a sidecar zeroed by an interrupted update", "\0".repeat(64)],
+    ["an empty sidecar", ""],
+  ])("reports %s as a damaged helper", async (_label, sidecar) => {
+    const output = resolve("release");
+    await mkdir(output, { recursive: true });
+    const directory = await mkdtemp(join(output, "integrity-proof-"));
+    try {
+      const native = join(directory, "ROTK.Diagnostics.exe");
+      await writeFile(native, "not executable");
+      await writeFile(`${native}.sha256`, sidecar);
+      await expect(windowsElevation(native).isAdministrator()).rejects.toBeInstanceOf(StartupHelperDamagedError);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a missing helper as damaged", async () => {
+    const missing = join(resolve("release"), "missing-helper", "ROTK.Diagnostics.exe");
+    await expect(windowsElevation(missing).isAdministrator()).rejects.toBeInstanceOf(StartupHelperDamagedError);
   });
 });
