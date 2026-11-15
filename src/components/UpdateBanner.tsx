@@ -3,6 +3,7 @@ import { Download } from "lucide-react";
 import type { LauncherSnapshot } from "../../shared/contracts";
 import { useI18n } from "../i18n";
 import { hasLauncherUpdate } from "../../shared/launcher-update";
+import { gameSessionActive } from "../../shared/primary-action";
 
 interface UpdateBannerProps {
   snapshot: LauncherSnapshot;
@@ -16,7 +17,7 @@ export function UpdateBanner({ snapshot, busy, onDownload, onInstall }: UpdateBa
   const [dismissed, setDismissed] = useState<string | null>(null);
   const update = snapshot.launcherUpdate;
   const notification = `${update.availableVersion}:${update.status}`;
-  const running = snapshot.gamePid !== null || snapshot.phase === "running" || snapshot.phase === "launching";
+  const running = gameSessionActive(snapshot);
 
   if (!hasLauncherUpdate(update) || dismissed === notification) return null;
 
