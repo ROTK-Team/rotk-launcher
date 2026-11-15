@@ -37,6 +37,27 @@ describe("StartupLog", () => {
     ].join("\n"));
   });
 
+  it("lets the administrator relaunch go on in the same log, so the previous run is kept", async () => {
+    const directory = join(root, "ROTK Launcher");
+    // The run that failed, then one start of the launcher: two processes.
+    const failed = new StartupLog(directory, fixedClock());
+    failed.begin("start run-1");
+    failed.mark("render-process-gone", "launch-failed exitCode=18");
+    const shortcut = new StartupLog(directory, fixedClock());
+    shortcut.begin("start run-2");
+    shortcut.mark("elevation-relaunched");
+    const administrator = new StartupLog(directory, fixedClock());
+    administrator.begin("start run-2", true);
+    administrator.mark("window-shown", "did-finish-load");
+
+    const current = await readFile(join(directory, STARTUP_LOG_NAME), "utf8");
+    expect(current.split("\n").map((line) => line.slice(25))).toEqual([
+      "start run-2", "elevation-relaunched", "start run-2", "window-shown did-finish-load", "",
+    ]);
+    // It used to hold the two lines of the shortcut process instead.
+    expect(await readFile(join(directory, PREVIOUS_STARTUP_LOG_NAME), "utf8")).toContain("launch-failed exitCode=18");
+  });
+
   it("keeps the previous run's log under startup.previous.log", async () => {
     const log = new StartupLog(root, fixedClock());
     log.begin("start run-1");

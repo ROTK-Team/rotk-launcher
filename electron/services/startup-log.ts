@@ -39,8 +39,18 @@ export class StartupLog {
    * Opens this run's log. The previous run's lines move to
    * startup.previous.log so a player whose launcher died can still hand over
    * the run that failed after a successful restart.
+   *
+   * With `continued`, the header is added to the log that is already open:
+   * one start of the launcher is two processes on Windows, the one the
+   * shortcut starts and the administrator one it relaunches. When both opened
+   * a log of their own, startup.previous.log only ever held the few lines of
+   * the first process, and the run that had failed before was gone.
    */
-  begin(header: string): void {
+  begin(header: string, continued = false): void {
+    if (continued) {
+      this.mark(header);
+      return;
+    }
     try {
       mkdirSync(this.directory, { recursive: true });
       rmSync(this.previousPath, { force: true });
