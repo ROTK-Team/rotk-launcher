@@ -25,7 +25,7 @@ export interface LauncherConfig {
   pendingInstallRoot?: string;
   /** Custom asset synchronization before launch. Defaults to enabled. */
   assetSyncEnabled?: boolean;
-  /** Download a launcher update as soon as it is found. Defaults to enabled. */
+  /** Download a launcher update as soon as it is found. Off until the player turns it on. */
   launcherUpdateAutoDownload?: boolean;
   /** Native diagnostic observer for the next launched game; defaults to enabled. */
   diagnosticCaptureEnabled?: boolean;
