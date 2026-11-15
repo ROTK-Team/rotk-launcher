@@ -84,5 +84,3 @@ ConvertTo-Json -InputObject @($result) -Depth 6 -Compress
   try { return { status: "queried", events: await powershellJson(script) }; }
   catch { return { status: "unavailable", events: [], issue: "Windows Application log could not be read" }; }
 }
-
-export const diagnosticSystemInternals = { powershellJson };
