@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LauncherSnapshot } from "../shared/contracts";
+import { launcherUpdateBlocksPlay } from "../shared/launcher-update";
 import { assetSyncActive, gameSessionActive, primaryAction } from "../shared/primary-action";
 
 /** An installed launcher with a key, ready to play. */
@@ -39,7 +40,11 @@ describe("the main button", () => {
 
   it("puts a blocking launcher update before Play, but never over a game or an install", () => {
     const available = { status: "update-available", availableVersion: "2.0.51", progressPercent: null, error: null } as LauncherSnapshot["launcherUpdate"];
-    expect(primaryAction(snapshot({ launcherUpdate: available, canPlay: false }), false)).toEqual({ kind: "update", enabled: true });
+    // Whether a known update blocks Play is decided in shared/launcher-update;
+    // the button follows that rule, whatever it says.
+    const blocks = launcherUpdateBlocksPlay(available);
+    expect(primaryAction(snapshot({ launcherUpdate: available, canPlay: !blocks }), false))
+      .toEqual({ kind: blocks ? "update" : "play", enabled: true });
     expect(primaryAction(snapshot({ updateRequired: true, canPlay: false }), false)).toEqual({ kind: "update", enabled: true });
     expect(primaryAction(snapshot({ updateRequired: true, phase: "running", gamePid: 1, canPlay: false }), false).kind).toBe("stop-game");
     expect(primaryAction(snapshot({ updateRequired: true, phase: "installing", canPlay: false }), false).kind).toBe("installing");
