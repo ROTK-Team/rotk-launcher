@@ -1,6 +1,18 @@
 # Spec — Launcher self-update via GitHub Releases
 
-Issue: [#1](https://github.com/h1z1rotk/rotk-launcher/issues/1)
+> **Where the launcher stands today.** This is the design the self-update was
+> built from; three points have changed since.
+>
+> - Releases are not code-signed. `verifyUpdateCodeSignature` is `false` in
+>   `package.json`, so an update is checked against the `sha512` of
+>   `latest.yml`, not against an Authenticode publisher. Sections 1 and 2
+>   describe the signed setup that was planned.
+> - The repository is `ROTK-Team/rotk-launcher`.
+> - The server can refuse a launcher version (`launcher_update_required`),
+>   which makes the update mandatory. That path is in `electron/main.ts` and
+>   `shared/launcher-update.ts`, not in this document.
+
+Issue: [#1](https://github.com/ROTK-Team/rotk-launcher/issues/1)
 
 ## 1. Approach
 
@@ -18,7 +30,7 @@ user-driven (`autoDownload = false`, no install-on-quit). Rationale:
 ## 2. Configuration changes
 
 - **package.json**: add the `electron-updater` dependency; in `build`: add
-  `publish: [{ "provider": "github", "owner": "h1z1rotk", "repo": "rotk-launcher" }]`
+  `publish: [{ "provider": "github", "owner": "ROTK-Team", "repo": "rotk-launcher" }]`
   (required to generate the embedded `app-update.yml` and the `latest.yml` next to the
   installer) and set `win.publisherName` to the certificate CN (required by the
   signature verification).

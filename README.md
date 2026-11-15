@@ -134,7 +134,7 @@ tournent eux aussi en administrateur.
 
 La 2.0.12 — publiée sous le numéro 2.0.14 — demandait les droits
 administrateur au démarrage (`requireAdministrator`) pour l'**ancre TPM**
-(issue h1z1rotk/returnoftheking#320 §A) : Windows refuse à un utilisateur
+(issue ROTK-Team/returnoftheking#320 §A) : Windows refuse à un utilisateur
 standard `TPM2_ActivateCredential` et la lecture du certificat de la clé
 d'endossement (EK). Or Chromium lance ses processus GPU, renderer et
 utilitaires comme de nouvelles instances de l'exécutable du launcher, sous des
@@ -145,7 +145,7 @@ les Windows préinstallés ou « ghostés » — Windows refuse de les créer
 (`GPU process launch failed: error_code=18`, `Renderer process launch-failed`)
 et Chromium abandonne le processus (`GPU process isn't usable. Goodbye.`,
 exception `0x80000003`) : le launcher ne s'ouvrait plus (issue
-h1z1rotk/rotk-launcher#59). `--no-sandbox` le confirme, les enfants reprenant
+ROTK-Team/rotk-launcher#59). `--no-sandbox` le confirme, les enfants reprenant
 alors le jeton du parent ; l'emplacement d'installation n'y est pour rien (une
 copie sous `%LOCALAPPDATA%` échoue de même, les ACL de `Program Files` sont
 celles par défaut). La 2.0.11, `asInvoker`, tournait sur ces mêmes sessions et
@@ -187,7 +187,7 @@ La clé est chiffrée par Electron `safeStorage` — Windows DPAPI sur la platef
 Lancer l’application en développement :
 
 ```powershell
-git clone https://github.com/h1z1rotk/rotk-launcher.git
+git clone https://github.com/ROTK-Team/rotk-launcher.git
 cd rotk-launcher
 npm ci
 npm run dev
