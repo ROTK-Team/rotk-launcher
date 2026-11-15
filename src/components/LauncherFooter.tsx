@@ -85,7 +85,8 @@ export function LauncherFooter({
     : ready
     ? copy.footer.play
     : running
-      ? copy.footer.inGame
+      // Not IN GAME before the game exists: assets, file check and ticket come first.
+      ? snapshot.phase === "launching" ? copy.footer.launching : copy.footer.inGame
       : installing
         ? copy.footer.installing
         : needsAccountKey
