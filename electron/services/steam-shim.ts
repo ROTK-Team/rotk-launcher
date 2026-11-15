@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
+import { fileHashOrEmpty } from "./file-hash.js";
 import { atomicCopyFile } from "./fs-safe.js";
 
 const STEAM_SHIM_FILE_NAME = "steam_api64.dll";
@@ -17,9 +18,8 @@ async function sha256(filePath: string): Promise<string> {
   return hash.digest("hex");
 }
 
-async function fileHash(filePath: string): Promise<string> {
-  return sha256(filePath).catch(() => "");
-}
+// "" for an absent file; a file held by another program is waited for, then reported.
+const fileHash = fileHashOrEmpty;
 
 /** An unreadable bundle hashes to "", which must never match an absent shim. */
 async function bundledShimHash(bundledShimPath: string): Promise<string> {

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { fileHashOrEmpty } from "./file-hash.js";
 import { retryFs } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
@@ -331,7 +332,7 @@ async function assertBundledPatch(
   if (
     !entry?.isFile()
     || entry.size !== policy.active.bytes
-    || await sha256(bundledPatchPath).catch(() => "") !== policy.active.sha256
+    || await fileHashOrEmpty(bundledPatchPath) !== policy.active.sha256
   ) {
     throw new Error(INVALID_BUNDLED_PATCH_ERROR);
   }
@@ -346,7 +347,7 @@ async function assertSupportedH1Z1(
   if (
     !entry?.isFile()
     || entry.size !== policy.h1z1.bytes
-    || await sha256(executablePath).catch(() => "") !== policy.h1z1.sha256
+    || await fileHashOrEmpty(executablePath) !== policy.h1z1.sha256
   ) {
     throw new Error(UNSUPPORTED_CLIENT_ERROR);
   }
@@ -377,7 +378,7 @@ async function deployGameplayPatchWithPolicy(
     if (
       !staged?.isFile()
       || staged.size !== policy.active.bytes
-      || await sha256(temporaryPath).catch(() => "") !== policy.active.sha256
+      || await fileHashOrEmpty(temporaryPath) !== policy.active.sha256
     ) {
       throw new Error(INSTALL_PATCH_ERROR);
     }
