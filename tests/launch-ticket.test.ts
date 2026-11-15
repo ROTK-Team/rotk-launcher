@@ -269,8 +269,9 @@ describe("ROTK launch ticket client", () => {
   it.each(["challenge_expired", "challenge_replayed", "challenge_unknown", "policy_mismatch", "policy_stale"])(
     "marks a %s refusal as worth a fresh attestation", async (failureCode) => {
       const fetchImpl = vi.fn(async () => jsonResponse({ error: "attestation_failed", failureCode }, 403)) as typeof fetch;
+      // Shown only if the fresh attestation is refused too: Verify files cannot help.
       await expect(createLaunchTicket(launcherKey, endpoint, { fetchImpl, attestation }))
-        .rejects.toMatchObject({ code: "attestation_retryable" });
+        .rejects.toMatchObject({ code: "attestation_retryable", message: expect.not.stringContaining("Verify files") });
     });
 
   it("does not mark a refusal about the files as retryable", async () => {

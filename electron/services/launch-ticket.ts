@@ -217,15 +217,17 @@ function serviceError(status: number, value: unknown, attestationUnavailableReas
     );
   }
   if (errorCode === "attestation_failed") {
-    const error = new Error(
+    // The challenge, not the files, was refused (it expired during a long
+    // hash, or the policy changed meanwhile): a fresh attestation settles it,
+    // and Verify files would not.
+    if (typeof payload?.failureCode === "string" && RETRYABLE_ATTESTATION_FAILURES.has(payload.failureCode)) {
+      const error = new Error("The ROTK server could not validate the game file check this time. Click Play again.");
+      (error as { code?: string }).code = "attestation_retryable";
+      return error;
+    }
+    return new Error(
       "The game files do not match the official ROTK installation. Use Verify files, then try again.",
     );
-    // The challenge, not the files, was refused (it expired during a long
-    // hash, or the policy changed meanwhile): a fresh attestation settles it.
-    if (typeof payload?.failureCode === "string" && RETRYABLE_ATTESTATION_FAILURES.has(payload.failureCode)) {
-      (error as { code?: string }).code = "attestation_retryable";
-    }
-    return error;
   }
   if (errorCode === "account_banned") {
     const expiresAt = typeof payload?.expiresAt === "string" ? payload.expiresAt : null;
