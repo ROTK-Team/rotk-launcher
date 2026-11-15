@@ -6,7 +6,12 @@ import { BrandMark } from "./BrandMark";
 import { useI18n } from "../i18n";
 
 interface WindowChromeProps {
-  appVersion: string;
+  /**
+   * Null while the launcher is still starting: only the drag region and the
+   * minimize and close buttons are shown, the two controls the main process
+   * answers before its services are ready.
+   */
+  appVersion: string | null;
 }
 
 const LANGUAGE_OPTIONS: Array<{ locale: AppLocale }> = [
@@ -141,15 +146,19 @@ export function WindowChrome({ appVersion }: WindowChromeProps) {
         <span className="window-chrome__section">{copy.chrome.launcher}</span>
       </div>
       <div className="window-chrome__tools">
-        <button
-          type="button"
-          className="chrome-link"
-          onClick={() => void window.rotk.openWebsite("/updates")}
-        >
-          {copy.chrome.updates} <ExternalLink size={13} strokeWidth={1.8} />
-        </button>
-        <LanguagePicker />
-        <span className="chrome-version">{copy.chrome.build} {appVersion}</span>
+        {appVersion !== null && (
+          <>
+            <button
+              type="button"
+              className="chrome-link"
+              onClick={() => void window.rotk.openWebsite("/updates")}
+            >
+              {copy.chrome.updates} <ExternalLink size={13} strokeWidth={1.8} />
+            </button>
+            <LanguagePicker />
+            <span className="chrome-version">{copy.chrome.build} {appVersion}</span>
+          </>
+        )}
         <button
           type="button"
           className="window-button"
