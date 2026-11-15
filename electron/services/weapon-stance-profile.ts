@@ -90,8 +90,11 @@ export async function prepareWeaponStanceProfile(root: string, stateRoot: string
     .catch((e: NodeJS.ErrnoException) => { if (e.code !== "EEXIST") throw e; });
   // Acquisition records ownership first; rollback releases it only after the
   // profile is restored. A crash between either pair remains retryable.
-  const writes = [[stateFile, JSON.stringify(result.state)], [profile, result.text]];
-  for (const [path, text] of enabled ? writes : writes.reverse()) {
+  const writes = [[stateFile, JSON.stringify(result.state), saved], [profile, result.text, source]];
+  for (const [path, text, current] of enabled ? writes : writes.reverse()) {
+    // Nothing to change, nothing to write: a profile the player made read-only
+    // to keep their bindings used to fail every launch on this rename.
+    if (text === current) continue;
     const temporary = `${path}.stance-${process.pid}.tmp`;
     try { await writeFile(temporary, text!, "utf8"); await retryFs(() => rename(temporary, path!)); }
     finally { await rm(temporary, { force: true }); }
