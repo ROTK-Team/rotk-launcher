@@ -7,7 +7,8 @@ typedef struct MenuTeamMember {
     ULONGLONG expires;
     int pending;
 } MenuTeamMember;
-static MenuTeamMember g_menu_team[2];
+#define MENU_TEAM_SLOTS 4
+static MenuTeamMember g_menu_team[MENU_TEAM_SLOTS];
 /* Keep the original first-mate names for the Duo transport and its callers. */
 #define g_menu_duo_member (g_menu_team[0].member)
 #define g_menu_duo_sequence (g_menu_team[0].sequence)
@@ -21,19 +22,21 @@ static void clear_menu_team_member(MenuTeamMember *slot) {
     slot->pending_actor[0] = slot->pending_name[0] = 0;
     slot->expires = 0; slot->pending = 1;
 }
-static unsigned menu_team_count(void) {
-    /* Native scene actor slots must never be renumbered by packet arrival order. */
-    return g_menu_team[0].member ? 2 + !!g_menu_team[1].member : 1;
+/* Native scene actor slots must never be renumbered by packet arrival order:
+ * only the consecutive filled slots from slot one are visible. */
+static unsigned menu_team_prefix(void) {
+    unsigned visible = 0;
+    while (visible < MENU_TEAM_SLOTS && g_menu_team[visible].member) ++visible;
+    return visible;
 }
+static unsigned menu_team_count(void) { return 1 + menu_team_prefix(); }
 static uint64_t menu_team_member_at(uintptr_t index) {
     if (!index) return g_fake_steam_id;
-    if (!g_menu_team[0].member) return 0;
-    if (index <= 2) return g_menu_team[index - 1].member;
-    return 0;
+    return index <= menu_team_prefix() ? g_menu_team[index - 1].member : 0;
 }
 static MenuTeamMember *menu_team_find(uint64_t member) {
     if (!member) return NULL;
-    for (unsigned i = 0; i < 2; ++i) if (g_menu_team[i].member == member && (!i || g_menu_team[0].member)) return &g_menu_team[i];
+    for (unsigned i = 0, visible = menu_team_prefix(); i < visible; ++i) if (g_menu_team[i].member == member) return &g_menu_team[i];
     return NULL;
 }
 
@@ -79,13 +82,13 @@ static int receive_menu_duo_native(const char *message, size_t size, ULONGLONG n
     if (memchr(buffer, 0, size)) return 0;
     buffer[size] = 0;
     if (!strcmp(buffer, "@CHAT:ROTK_MENU_DUO_CLEAR_V1")) {
-        for (unsigned i = 0; i < 2; ++i) clear_menu_team_member(&g_menu_team[i]);
+        for (unsigned i = 0; i < MENU_TEAM_SLOTS; ++i) clear_menu_team_member(&g_menu_team[i]);
         return 1;
     }
     if (!strncmp(buffer, prefix, sizeof(prefix) - 1)) cursor = buffer + sizeof(prefix) - 1;
     else if (!strncmp(buffer, trio_prefix, sizeof(trio_prefix) - 1)) {
         cursor = buffer + sizeof(trio_prefix) - 1;
-        slot_index = 1; field_count = 5; offset = 1;
+        field_count = 5; offset = 1;
     } else return 0;
     for (unsigned i = 0; i < field_count; ++i) {
         fields[i] = cursor;
@@ -93,19 +96,27 @@ static int receive_menu_duo_native(const char *message, size_t size, ULONGLONG n
         if (i == field_count - 1) { if (separator) return 0; }
         else { if (!separator) return 0; *separator = 0; cursor = separator + 1; }
     }
-    MenuTeamMember *slot = &g_menu_team[slot_index], *other = &g_menu_team[1 - slot_index];
-    if (offset && strcmp(fields[1], "2")) return 0;
+    /* TRIO slot field is exactly one char '2'..'4' (scene slots two to four). */
+    if (offset) {
+        if (fields[1][0] < '2' || fields[1][0] > '0' + MENU_TEAM_SLOTS || fields[1][1]) return 0;
+        slot_index = (unsigned)(fields[1][0] - '1');
+    }
+    MenuTeamMember *slot = &g_menu_team[slot_index];
     if (!menu_duo_u64(fields[0], &sequence) || !sequence || sequence > 9007199254740991ULL || sequence <= slot->sequence ||
         !menu_duo_u64(fields[1 + offset], &member) || !menu_duo_u64(fields[2 + offset], &actor)) return 0;
     if (member == 0) { if (actor || fields[3 + offset][0]) return 0; }
     else if (member < 76561197960265728ULL || member == g_fake_steam_id || (actor >> 48) != 0x6000 ||
         !menu_duo_name(fields[3 + offset], name, sizeof(name))) return 0;
-    /* A coalesced clear takes precedence over the old displayed identity. */
-    uint64_t other_member = other->pending ? other->pending_member : other->member;
-    const char *other_actor = other->pending ? other->pending_actor : other->actor;
     char actor_text[32] = "";
     if (member) snprintf(actor_text, sizeof(actor_text), "%llu", (unsigned long long)actor);
-    if (member && other_member && (member == other_member || !strcmp(actor_text, other_actor))) return 0;
+    for (unsigned i = 0; member && i < MENU_TEAM_SLOTS; ++i) {
+        if (i == slot_index) continue;
+        /* A coalesced clear takes precedence over the old displayed identity. */
+        MenuTeamMember *other = &g_menu_team[i];
+        uint64_t other_member = other->pending ? other->pending_member : other->member;
+        const char *other_actor = other->pending ? other->pending_actor : other->actor;
+        if (other_member && (member == other_member || !strcmp(actor_text, other_actor))) return 0;
+    }
     slot->sequence = sequence;
     slot->pending_member = member;
     lstrcpynA(slot->pending_actor, actor_text, sizeof(slot->pending_actor));
@@ -152,29 +163,30 @@ static void poll_menu_team_member(MenuTeamMember *slot, ULONGLONG now) {
     g_menu_duo_callback_member = 0; g_menu_duo_callback_change = 0;
     log_line("MenuTeam native roster member=%llu actor=%s", (unsigned long long)member, slot->actor);
 }
-static void poll_menu_duo_native(ULONGLONG now) {
-    poll_menu_team_member(&g_menu_team[0], now);
-    MenuTeamMember *second = &g_menu_team[1];
-    if (!g_menu_team[0].member) {
-        if (second->expires && now >= second->expires) clear_menu_team_member(second);
-        if (second->member) {
-            /* Hide the second presentation while slot one is absent, but retain
-             * a fresh authoritative proposal until the first actor is ready. */
-            uint64_t wanted = second->pending ? second->pending_member : second->member;
-            char actor[32], name[129];
-            ULONGLONG expires = second->expires;
-            lstrcpynA(actor, second->pending ? second->pending_actor : second->actor, sizeof(actor));
-            lstrcpynA(name, second->pending ? second->pending_name : second->name, sizeof(name));
-            clear_menu_team_member(second);
-            poll_menu_team_member(second, now);
-            if (wanted && expires > now) {
-                second->pending_member = wanted;
-                lstrcpynA(second->pending_actor, actor, sizeof(second->pending_actor));
-                lstrcpynA(second->pending_name, name, sizeof(second->pending_name));
-                second->expires = expires; second->pending = 1;
-            }
-        }
-        return;
+static void hide_menu_team_member(MenuTeamMember *slot, ULONGLONG now) {
+    if (slot->expires && now >= slot->expires) clear_menu_team_member(slot);
+    if (!slot->member) return;
+    /* Hide this presentation while an earlier slot is absent, but retain
+     * a fresh authoritative proposal until the earlier actors are ready. */
+    uint64_t wanted = slot->pending ? slot->pending_member : slot->member;
+    char actor[32], name[129];
+    ULONGLONG expires = slot->expires;
+    lstrcpynA(actor, slot->pending ? slot->pending_actor : slot->actor, sizeof(actor));
+    lstrcpynA(name, slot->pending ? slot->pending_name : slot->name, sizeof(name));
+    clear_menu_team_member(slot);
+    poll_menu_team_member(slot, now);
+    if (wanted && expires > now) {
+        slot->pending_member = wanted;
+        lstrcpynA(slot->pending_actor, actor, sizeof(slot->pending_actor));
+        lstrcpynA(slot->pending_name, name, sizeof(slot->pending_name));
+        slot->expires = expires; slot->pending = 1;
     }
-    poll_menu_team_member(second, now);
+}
+static void poll_menu_duo_native(ULONGLONG now) {
+    int gap = 0;
+    for (unsigned i = 0; i < MENU_TEAM_SLOTS; ++i) {
+        if (gap) hide_menu_team_member(&g_menu_team[i], now);
+        else poll_menu_team_member(&g_menu_team[i], now);
+        gap |= !g_menu_team[i].member;
+    }
 }

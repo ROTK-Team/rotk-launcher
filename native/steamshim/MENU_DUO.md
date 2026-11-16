@@ -14,10 +14,22 @@ run on SteamAPI_RunCallbacks, outside the UI call. Expiry after 20 seconds or an
 explicit clear removes the member. This does not change authoritative Social
 party membership or gameplay admission. No runtime file adapter is used.
 
+Teammates after the first use `ROTK_MENU_TRIO_V1|seq|slot|member|actor|name`,
+where `slot` is exactly one character `2`, `3` or `4` (Trios uses `2`; Fives
+uses `2`-`4`). Each of the four slots has its own sequence and 20-second lease,
+and a member or actor id already held (displayed or pending) by any other slot
+is rejected. The lobby shows only the consecutive filled slots from slot one,
+so scene slots never renumber: while an earlier slot is empty, later members
+are hidden (leave callback) but their proposal is kept until its own lease
+ends, and they return without a new frame once the gap is filled.
+`ROTK_MENU_DUO_CLEAR_V1` empties all four slots.
+
 Run `npm run test:native:menu-duo` with Zig 0.15.2 available. The test compiles the
 actual shim code and exercises matchmaking calls, deferred callbacks, exact IDs,
-UTF-8 names, replacement, leave/rejoin, expiry and malformed/stale input. Checks
-explicitly remain enabled when Zig -O2 defines NDEBUG.
+UTF-8 names, replacement, leave/rejoin, expiry and malformed/stale input
+(`menu_duo_test.c`), the second teammate (`menu_trio_test.c`) and four teammates
+(`menu_fives_test.c`). Checks explicitly remain enabled when Zig -O2 defines
+NDEBUG.
 
 The generated `native/steamshim/dist/menu-duo-test.exe --wire` additionally reads
 four server-generated frames from stdin (join, replacement, clear, rejoin). The
