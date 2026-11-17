@@ -1,12 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GAME_STARTUP_MARKER, GAME_STARTUP_STALL_MS, GameLauncher, gameLauncherInternals, type GameLaunchDiagnostics, type LaunchRequest } from '../electron/services/game-launcher.js';
+import { GAME_STARTUP_MARKER, GAME_STARTUP_STALL_MS, GAMEPLAY_PATCH_LOG_NAME, GameLauncher, gameLauncherInternals, type GameLaunchDiagnostics, type LaunchRequest } from '../electron/services/game-launcher.js';
 import { localizeServiceError } from '../electron/i18n.js';
 import { RUNTIME_CONFIGS } from '../electron/services/runtime-config.js';
+
+// Captured before any test fakes the timers.
+const realSetTimeout = globalThis.setTimeout;
 
 const mocks = vi.hoisted(() => ({ spawn: vi.fn(), gatewayClose: vi.fn(async () => undefined),
   deployVoice: vi.fn(async () => undefined), checkVoice: vi.fn(async () => undefined) }));
@@ -440,6 +443,28 @@ describe('a game that freezes before it starts', () => {
     const f = await running();
     await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS * 2);
     expect(f.request.onStartupStalled).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet when the gameplay patch log shows this game got past the freeze', async () => {
+    const f = await running();
+    const log = join(f.request.config.installation!.root, GAMEPLAY_PATCH_LOG_NAME);
+    // An older run of another process must not count.
+    await writeFile(log, '2026-11-17T21:23:34.994Z pid=17068 ROTK ADS sprint rule: sprint readers keep InstantADS.\r\n');
+    await appendFile(log, '2026-11-17T21:24:13.588Z pid=4242 ROTK shotgun sprint: v3 patch installed.\r\n');
+    // Each poll reads the file on the real event loop: give it real time.
+    for (let elapsed = 0; elapsed < GAME_STARTUP_STALL_MS * 2; elapsed += 2_000) {
+      await vi.advanceTimersByTimeAsync(2_000);
+      await new Promise(done => realSetTimeout(done, 25));
+    }
+    expect(f.request.onStartupStalled).not.toHaveBeenCalled();
+  });
+
+  it('still reports the stall when the patch log only holds other processes', async () => {
+    const f = await running();
+    const log = join(f.request.config.installation!.root, GAMEPLAY_PATCH_LOG_NAME);
+    await writeFile(log, '2026-11-17T21:23:34.994Z pid=42420 ROTK ADS sprint rule: sprint readers keep InstantADS.\r\n');
+    await vi.advanceTimersByTimeAsync(GAME_STARTUP_STALL_MS);
+    expect(f.request.onStartupStalled).toHaveBeenCalledOnce();
   });
 
   it('says nothing once the game has exited', async () => {

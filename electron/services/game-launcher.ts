@@ -44,6 +44,35 @@ const GAME_EARLY_EXIT_MS = 60_000;
 // launch is reported as stalled; it is far above the slowest healthy start.
 export const GAME_STARTUP_MARKER = "Starting the game client";
 export const GAME_STARTUP_STALL_MS = 30_000;
+// The gameplay patch (dinput8 proxy) starts its work from the game's first
+// DirectInput8Create call and writes each step to this file, next to
+// H1Z1.exe, as "<time> pid=<game pid> ROTK ...". A frozen launch never gets
+// there (#247: the patch "wrote nothing for the frozen ones"), so a line with
+// this game's pid proves it is past the freeze, even when its stdout block
+// holding the startup line has not reached the launcher yet.
+export const GAMEPLAY_PATCH_LOG_NAME = "rotk-shotgun-sprint.log";
+const GAMEPLAY_PATCH_LOG_POLL_MS = 2_000;
+// Only the end of the file can hold this launch's lines; the log is appended to.
+const GAMEPLAY_PATCH_LOG_TAIL_BYTES = 64 * 1024;
+
+/** Whether the gameplay patch log already holds a line written by `pid`. */
+async function gameplayPatchLogMentions(logPath: string, pid: number): Promise<boolean> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(logPath, "r");
+    const { size } = await handle.stat();
+    const length = Math.min(size, GAMEPLAY_PATCH_LOG_TAIL_BYTES);
+    if (length === 0) return false;
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, size - length);
+    return buffer.toString("latin1").includes(` pid=${pid} `);
+  } catch {
+    // No log (vanilla mode, patch not loaded yet) or unreadable: no proof.
+    return false;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
 
 /**
  * What one attestation attempt produced.
@@ -648,6 +677,13 @@ export class GameLauncher {
       // The marker may arrive split across two chunks: keep a short tail.
       let startupTail = "";
       let startupSeen = false;
+      let patchLogPoll: ReturnType<typeof setInterval> | undefined;
+      const markStarted = (): void => {
+        startupSeen = true;
+        startupTail = "";
+        clearTimeout(stallTimer);
+        clearInterval(patchLogPoll);
+      };
       const watchStartup = (text: string): void => {
         if (startupSeen) return;
         const seen = startupTail + text;
@@ -655,10 +691,21 @@ export class GameLauncher {
           startupTail = seen.slice(-GAME_STARTUP_MARKER.length);
           return;
         }
-        startupSeen = true;
-        startupTail = "";
-        clearTimeout(stallTimer);
+        markStarted();
       };
+      if (stallTimer) {
+        const patchLogPath = join(installationRoot, GAMEPLAY_PATCH_LOG_NAME);
+        const gamePid = child.pid;
+        let checking = false;
+        patchLogPoll = setInterval(() => {
+          if (startupSeen || checking) return;
+          checking = true;
+          void gameplayPatchLogMentions(patchLogPath, gamePid)
+            .then((seen) => { if (seen && !startupSeen) markStarted(); })
+            .finally(() => { checking = false; });
+        }, GAMEPLAY_PATCH_LOG_POLL_MS);
+        patchLogPoll.unref?.();
+      }
       for (const stream of ["stdout", "stderr"] as const) {
         child[stream]?.setEncoding("utf8");
         child[stream]?.on("data", (text: string) => {
@@ -673,6 +720,7 @@ export class GameLauncher {
         if (finalized) return;
         finalized = true;
         clearTimeout(stallTimer);
+        clearInterval(patchLogPoll);
         // A startup failure is already reported by the rejected launch below.
         const earlyExit = started ? earlyExitMessage(code, performance.now() - spawnedAt) : null;
         try { request.presence?.stop(); } catch { /* Presence is optional. */ }
