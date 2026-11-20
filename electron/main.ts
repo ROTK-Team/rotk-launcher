@@ -108,6 +108,13 @@ import { describeSystemError, isSystemError } from "./services/system-error.js";
 import { acquireLockAfterHandoff, isElevationRelaunch } from "./services/instance-lock.js";
 import { redactDiagnosticText } from "./services/diagnostic-redaction.js";
 import { ELEVATION_RELAUNCH_ARGUMENT, startWithRequiredElevation, windowsElevation } from "./services/startup-elevation.js";
+import {
+  cancelsRequestWithoutSandbox,
+  isRefusedSandbox,
+  offersSandboxFallback,
+  readSandboxFallback,
+  recordSandboxFallback,
+} from "./services/sandbox-fallback.js";
 import { createHash } from 'node:crypto';
 import { uploadDiagnostic } from "./services/diagnostic-upload.js";
 import { WINDOW_FAILURE_MEMORY_MS, windowRecovery } from "./services/window-recovery.js";
@@ -156,6 +163,19 @@ if (singleInstanceLock) {
   // Leaves a line in the owner's log: this exit used to leave no trace at all.
   startupLog.mark("second-start-handed-over", `pid=${process.pid}`);
   app.quit();
+}
+
+// Issue #151: a player whose window Windows refused to sandbox chose to run
+// this launcher version without it. The switch only works before ready.
+const sandboxFallback = singleInstanceLock && process.platform === "win32"
+  ? readSandboxFallback(app.getPath("userData"), app.getVersion())
+  : "absent";
+const sandboxFallbackActive = sandboxFallback === "active";
+if (sandboxFallbackActive) {
+  app.commandLine.appendSwitch("no-sandbox");
+  startupLog.mark("sandbox-fallback-active", app.getVersion());
+} else if (sandboxFallback !== "absent") {
+  startupLog.mark("sandbox-fallback-ignored", sandboxFallback);
 }
 
 const usesIsolatedDevelopmentData = !app.isPackaged && Boolean(process.env.ROTK_USER_DATA_DIR);
@@ -1871,6 +1891,8 @@ function createWindow(): BrowserWindow {
   };
   window.once("ready-to-show", () => showOnce("ready-to-show"));
   window.webContents.once("did-finish-load", () => showOnce("did-finish-load"));
+  let pageLoaded = false;
+  window.webContents.once("did-finish-load", () => { pageLoaded = true; });
   const showDeadline = setTimeout(() => showOnce("deadline"), WINDOW_SHOW_DEADLINE_MS);
   // The page is always the one this process builds the path of, on the first
   // load and when it is loaded again after a failure.
@@ -1888,7 +1910,7 @@ function createWindow(): BrowserWindow {
   // its launcher: window-all-closed holds the process until the game ends, and
   // starting the launcher again opens a new window.
   const pageFailures: number[] = [];
-  const recoverPage = (reason: string, detail: string): void => {
+  const recoverPage = (reason: string, detail: string, exitCode = 0): void => {
     if (window.isDestroyed()) return;
     const now = Date.now();
     while (pageFailures.length > 0 && now - pageFailures[0] > WINDOW_FAILURE_MEMORY_MS) pageFailures.shift();
@@ -1901,9 +1923,20 @@ function createWindow(): BrowserWindow {
       return;
     }
     startupLog.mark("window-closed-after-failure", detail);
+    // Issue #151: Windows refuses the window's sandboxed process, on every
+    // restart. A window that never loaded cannot have started a game, so the
+    // player may restart without the sandbox or quit. Only if that choice
+    // could not be saved does the error box follow.
+    const refused = isRefusedSandbox({ reason, exitCode }, process.platform);
+    if (refused && offersSandboxFallback({ reason, exitCode }, {
+      platform: process.platform,
+      fallbackActive: sandboxFallbackActive,
+      windowLoaded: pageLoaded,
+    }) && askRestartWithoutSandbox()) return;
     void diagnostics?.recordLauncherError("launcher_renderer_gone", new Error(detail)).catch(() => undefined);
     const copy = MAIN_COPY[currentLocale];
-    dialog.showErrorBox(copy.startupTitle, `${copy.rendererGone(detail)}\n\n${copy.startupSafety}`);
+    const message = refused ? copy.rendererLaunchRefused(exitCode) : copy.rendererGone(detail);
+    dialog.showErrorBox(copy.startupTitle, `${message}\n\n${copy.startupSafety}`);
     window.destroy();
   };
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _validatedUrl, isMainFrame) => {
@@ -1914,7 +1947,7 @@ function createWindow(): BrowserWindow {
   });
   window.webContents.on("render-process-gone", (_event, details) => {
     startupLog.mark("render-process-gone", `${details.reason} exitCode=${details.exitCode}`);
-    recoverPage(details.reason, `${details.reason} exitCode=${details.exitCode}`);
+    recoverPage(details.reason, `${details.reason} exitCode=${details.exitCode}`, details.exitCode);
   });
   // A page that stops answering is only logged: it may come back by itself.
   window.on("unresponsive", () => startupLog.mark("window-unresponsive"));
@@ -1947,6 +1980,45 @@ function createWindow(): BrowserWindow {
 
   loadPage();
   return window;
+}
+
+/**
+ * Issue #151: asks whether to restart this launcher version without the
+ * window's sandbox. Returns false only when the choice could not be saved.
+ */
+function askRestartWithoutSandbox(): boolean {
+  startupLog.mark("sandbox-fallback-offered");
+  const copy = MAIN_COPY[currentLocale];
+  const choice = dialog.showMessageBoxSync({
+    type: "warning",
+    title: copy.startupTitle,
+    message: copy.sandboxFallback.message,
+    detail: copy.sandboxFallback.detail,
+    buttons: [copy.sandboxFallback.restart, copy.sandboxFallback.quit],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (choice !== 0) {
+    startupLog.mark("sandbox-fallback-declined");
+    app.quit();
+    return true;
+  }
+  try {
+    recordSandboxFallback(app.getPath("userData"), app.getVersion());
+  } catch (error) {
+    startupLog.mark("sandbox-fallback-unsaved", (error as NodeJS.ErrnoException | null)?.code ?? "unknown");
+    return false;
+  }
+  startupLog.mark("sandbox-fallback-accepted");
+  // This process is already elevated and keeps the instance lock until it
+  // exits, so the restart carries the relaunch marker: it waits for that lock
+  // instead of handing over to a process that is about to disappear, and it
+  // never asks for administrator rights again.
+  const args = process.argv.slice(1).filter((argument) => argument !== ELEVATION_RELAUNCH_ARGUMENT);
+  app.relaunch({ args: [...args, ELEVATION_RELAUNCH_ARGUMENT] });
+  app.exit(0);
+  return true;
 }
 
 function systemLocale(): AppLocale {
@@ -2156,6 +2228,13 @@ if (singleInstanceLock) {
         initialize: async () => {
           session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
           session.defaultSession.setPermissionCheckHandler(() => false);
+          if (sandboxFallbackActive) {
+            // Without the sandbox the window runs nothing but the launcher's own files.
+            const devServer = app.isPackaged ? null : process.env.VITE_DEV_SERVER_URL ?? null;
+            session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+              callback({ cancel: cancelsRequestWithoutSandbox(details.url, devServer) });
+            });
+          }
           await initialize();
           startLaunchPreparation();
         },
