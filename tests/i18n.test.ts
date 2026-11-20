@@ -1,10 +1,20 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { localizeServiceError } from "../electron/i18n";
+import { localizeServiceError, MAIN_COPY } from "../electron/i18n";
 import { assertOutsideLauncherFolder } from "../electron/services/path-policy";
 import { APP_LOCALES, normalizeAppLocale } from "../shared/locale";
 
 describe("launcher locales", () => {
+  it.each(APP_LOCALES)("words a failed launcher update download in %s without the raw English message", (locale) => {
+    const copy = MAIN_COPY[locale].update;
+    expect(copy.downloadFailed("ECONNRESET")).toContain("ECONNRESET");
+    expect(copy.downloadStalled).not.toBe("");
+    if (locale !== "en") {
+      expect(copy.downloadFailed("HTTP 403")).not.toBe(MAIN_COPY.en.update.downloadFailed("HTTP 403"));
+      expect(copy.downloadStalled).not.toBe(MAIN_COPY.en.update.downloadStalled);
+    }
+  });
+
   it.each(APP_LOCALES)("keeps the Steam console command intact in %s", (locale) => {
     const command = "download_depot 433850 433851 1929288548044868931 9048628616520611413";
     const raw = `Steam a installé une version de H1Z1 que ROTK ne prend pas encore en charge. Ouvre la console Steam (steam://open/console), colles-y la commande en fin de message, appuie sur Entrée, attends « Depot download complete » puis relance. Commande : ${command}`;

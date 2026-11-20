@@ -188,6 +188,7 @@ export interface LauncherUpdateSummary {
   status: LauncherUpdateStatus;
   availableVersion: string | null;
   progressPercent: number | null;
+  /** Why a download failed, already in the player's language. Null otherwise. */
   error: string | null;
 }
 

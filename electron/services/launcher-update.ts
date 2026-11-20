@@ -51,6 +51,9 @@ const IDLE_STATE: LauncherUpdateSummary = {
   error: null,
 };
 
+// `error` in this state is a short code (ECONNRESET, HTTP 403, stalled): the
+// raw message is English and may carry signed URLs. The snapshot turns the
+// code into a sentence in the player's language.
 export type LauncherUpdateFailure = "unavailable" | "not-downloaded" | "no-update";
 
 /** A download with no progress for this long is reported as failed. */
@@ -119,7 +122,7 @@ export class LauncherUpdateService {
           ...this.current,
           status: this.unattended ? "update-available" : "error",
           progressPercent: null,
-          error: this.unattended ? null : error.message,
+          error: this.unattended ? null : updateErrorCode(error),
         });
         this.onDownloadError(updateErrorCode(error));
       } else {
@@ -207,11 +210,13 @@ export class LauncherUpdateService {
     this.stallTimer = setTimeout(() => {
       this.stallTimer = null;
       if (this.current.status !== "downloading") return;
+      // Same as a failed download: one nobody asked for goes back to being
+      // offered, and the next check starts it again.
       this.transition({
         ...this.current,
-        status: "error",
+        status: this.unattended ? "update-available" : "error",
         progressPercent: null,
-        error: "The download stopped receiving data.",
+        error: this.unattended ? null : "stalled",
       });
       this.onDownloadError("stalled");
     }, DOWNLOAD_STALL_MS);

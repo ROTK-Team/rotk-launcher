@@ -150,7 +150,7 @@ describe("launcher self-update service", () => {
     expect(service.state).toMatchObject({
       status: "error",
       availableVersion: "0.3.0",
-      error: "connection reset",
+      error: "Error",
     });
 
     expect(service.download()).toBeNull();
