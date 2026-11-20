@@ -25,8 +25,10 @@ const DEBUG_FILES = new Map([
   ['frame-times-summary.json', DEBUG_SUMMARY_LIMIT],
 ]);
 const RETENTION_BYTES = 5 * 1024 ** 3;
-const ROOT_LOG_NAMES = new Set(['rotk-crouch-parity.log', 'rotk-vivox-v5-compat.log', 'rotk-vivox-hook.log', 'rotk-vivoxproxy.log', 'steam_api64.log', 'vivox.log', 'vivoxsdk_x64.log', 'h1z1.log', 'client.log', 'game.log', 'connection.log', 'debug.txt']);
-const GAME_LOG_NAMES = new Set(['killfeed.log', 'gfxwrap.log', 'uidb.log', 'failedloadassets.log', 'failedsyncloadassets.log', 'contentpackerrors.txt']);
+// rotk-shotgun-sprint.log says which gameplay patches installed or were refused.
+// LongFrames.log is the game's own breakdown of each long frame by engine section.
+const ROOT_LOG_NAMES = new Set(['rotk-crouch-parity.log', 'rotk-shotgun-sprint.log', 'rotk-vivox-v5-compat.log', 'rotk-vivox-hook.log', 'rotk-vivoxproxy.log', 'steam_api64.log', 'vivox.log', 'vivoxsdk_x64.log', 'h1z1.log', 'client.log', 'game.log', 'connection.log', 'debug.txt']);
+const GAME_LOG_NAMES = new Set(['killfeed.log', 'longframes.log', 'gfxwrap.log', 'uidb.log', 'failedloadassets.log', 'failedsyncloadassets.log', 'contentpackerrors.txt']);
 // The game chooses variable log component names. Within its dedicated log
 // directories accept .log rotations; structured/text reports require a known
 // diagnostic prefix. Configuration and credentials remain explicitly excluded.
@@ -402,6 +404,14 @@ export class DiagnosticReportService {
         if (existing?.isSymbolicLink()) { issues.push({ source: name, reason: 'linked_output_skipped' }); return; }
         await writeFile(path, bytes); if (!saved.has(name)) count++; saved.set(name, bytes.length); total += bytes.length - previous;
       };
+      // A tail cut inside the file starts in the middle of a row. Drop that partial
+      // row: it is incomplete anyway, and save() only finds the PC-name column on
+      // rows that begin with their date.
+      const fromNextRow = (bytes: Buffer, cut: boolean): string => {
+        if (!cut) return bytes.toString('utf8');
+        const next = bytes.indexOf(0x0a);
+        return bytes.subarray(next < 0 ? bytes.length : next + 1).toString('utf8');
+      };
       const readTail = async (path: string, root: string, offset: number, label: string, cutoff?: ExitSourceSnapshot): Promise<string | null> => {
         try {
           const info = await safeFile(path, root);
@@ -414,11 +424,11 @@ export class DiagnosticReportService {
             if (end <= offset) return null;
             if (from > offset) issues.push({ source: label, reason: 'tail_truncated_2MiB' });
             // Return the already verified bytes, avoiding a second read race.
-            return bytes.subarray(from - cutoff.tailStart).toString('utf8');
+            return fromNextRow(bytes.subarray(from - cutoff.tailStart), from > offset);
           }
           if (end <= offset) return null;
           if (from > offset) issues.push({ source: label, reason: 'tail_truncated_2MiB' });
-          return (await boundedBytes(path, from, end)).toString('utf8');
+          return fromNextRow(await boundedBytes(path, from, end), from > offset);
         } catch (error) { issues.push({ source: label, reason: cutoff ? 'source_changed_or_unavailable_since_exit_boundary' : failureReason(error) }); return null; }
       };
       const startedMs = Date.parse(record.summary.startedAt);
@@ -572,7 +582,7 @@ export class DiagnosticReportService {
       'Debug sessions: performance.jsonl(.1) contains approximately one-second process/system resource samples; it is not a frame-time trace.',
       'frame-times.jsonl(.1) contains measured frame/presentation timings only when the optional collector succeeded. Check frame-times-summary.json and its coverage/status before interpreting missing data.',
       'performance-summary.json and frame-times-summary.json describe their respective collectors. A missing or unavailable frame collector does not mean the game ran smoothly.',
-      'KillFeed/GFxWrap/asset-load logs can be compared by timestamps with debug evidence. Coincidence with a kill does not establish that the killfeed or custom assets caused a stutter.',
+      'KillFeed/LongFrames/GFxWrap/asset-load logs can be compared by timestamps with debug evidence. Coincidence with a kill does not establish that the killfeed or custom assets caused a stutter.',
       'Client game logs may use local time; compare the launch UTC offset and any internal millisecond timestamp. Shared logs are bounded at exit; session-owned debug evidence is frozen after collectors finish.',
       'Debug JSONL: up to 16 MiB per file (including each rotation separately), summaries up to 64 KiB, separate total budget 66 MiB. Invalid/incomplete JSON rows are omitted and declared in manifest issues.',
       'Text logs are bounded and sanitized. Command lines, environment and credential files are excluded.',

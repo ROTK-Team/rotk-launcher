@@ -208,6 +208,45 @@ describe('game log and debug-session exports', () => {
     expect(record.issues.some((issue) => issue.source === 'client-game' && issue.reason === 'ENOENT')).toBe(false);
   });
 
+  it('includes the rewritten LongFrames.log without the PC name and the gameplay patch lines of this session', async () => {
+    const f = await fixture(), logs = join(f.installationRoot, 'Logs'); await mkdir(logs);
+    const longFrames = join(logs, 'LongFrames.log'), sprint = join(f.installationRoot, 'rotk-shotgun-sprint.log');
+    await writeFile(longFrames, '2026-10-02\t20:00:00\tPRIVATE-COMPUTER\t1790950000\t1\t3\t1000\tPREVIOUS_LONG_FRAME\r\n');
+    await writeFile(sprint, '2026-10-02T20:00:00.000Z pid=1111 PREVIOUS_LAUNCH_PATCH\n\r\n');
+    const { id } = await f.service.beginSession(f.context);
+    // The game recreates LongFrames.log at each launch; the patch log only grows.
+    await writeFile(longFrames, [
+      '2026-10-03\t15:55:47\tPRIVATE-COMPUTER\t1791034210\t14251\t3\t14977319\tFrame 166236 usec (avg 4414) Highest[ClientPcDataTime=162276 usec] Process:[System=0 usec(0.0%) User=0 usec(0.0%)]',
+      '2026-10-03\t15:55:47\tPRIVATE-COMPUTER\t1791034210\t14252\t3\t14977319\tFrameTime [166236]',
+      '2026-10-03\t15:55:47\tPRIVATE-COMPUTER\t1791034210\t14263\t3\t14977319\t\t\t\t\tClientPcDataTime [162276]', '',
+    ].join('\r\n'));
+    await appendFile(sprint, '2026-10-03T13:30:18.570Z pid=18740 ROTK trio reboot: bridge allocation refused.\n\r\n');
+    await f.service.finalizeSession(id, { exitCode: 0 });
+    await f.service.exportReport(id, join(f.root, 'long-frames.zip'), { includeDumps: false, description: '' });
+    const files = await unzip(join(f.root, 'long-frames.zip')), text = logsText(files);
+    expect([...files.keys()].some((entry) => entry.includes('client-game-LongFrames.log'))).toBe(true);
+    expect(text).toContain('2026-10-03\t15:55:47\t[HOST]\t1791034210\t14251\t3\t14977319\tFrame 166236 usec (avg 4414) Highest[ClientPcDataTime=162276 usec]');
+    expect(text).toContain('2026-10-03\t15:55:47\t[HOST]\t1791034210\t14263\t3\t14977319\t\t\t\t\tClientPcDataTime [162276]');
+    expect(text).toContain('2026-10-03T13:30:18.570Z pid=18740 ROTK trio reboot: bridge allocation refused.');
+    for (const forbidden of ['PRIVATE-COMPUTER', 'PREVIOUS_LONG_FRAME', 'PREVIOUS_LAUNCH_PATCH']) expect(text).not.toContain(forbidden);
+  });
+
+  it('drops the row cut by the 2 MiB limit so a truncated LongFrames.log keeps no PC name', async () => {
+    const f = await fixture(), logs = join(f.installationRoot, 'Logs'); await mkdir(logs);
+    const { id } = await f.service.beginSession(f.context);
+    const row = (text: string) => `2026-10-03\t15:55:47\tPRIVATE-COMPUTER\t1791034210\t14251\t3\t14977319\t${text}\r\n`;
+    const cut = row('CUT_ROW'), last = row('Frame 166236 usec (avg 4414) Highest[ClientPcDataTime=162276 usec]');
+    // The newest 2 MiB start two bytes into the cut row, after "20" of its date.
+    const filler = row('x'.repeat(2 * 1024 * 1024 - (cut.length - 2) - last.length - row('').length));
+    await writeFile(join(logs, 'LongFrames.log'), row('OLDER_ROW') + cut + filler + last);
+    await f.service.finalizeSession(id, { exitCode: 0 });
+    await f.service.exportReport(id, join(f.root, 'long-frames-tail.zip'), { includeDumps: false, description: '' });
+    const files = await unzip(join(f.root, 'long-frames-tail.zip')), text = logsText(files);
+    expect(text).toContain('2026-10-03\t15:55:47\t[HOST]\t1791034210\t14251\t3\t14977319\tFrame 166236 usec (avg 4414) Highest[ClientPcDataTime=162276 usec]');
+    for (const forbidden of ['PRIVATE-COMPUTER', 'CUT_ROW', 'OLDER_ROW']) expect(text).not.toContain(forbidden);
+    expect(JSON.parse(files.get('manifest.json')!.toString()).issues.some((issue: { reason: string }) => issue.reason === 'tail_truncated_2MiB')).toBe(true);
+  });
+
   it('keeps complete debug JSONL beyond 2 MiB, both rotations and summaries, with manifest hashes and no unexpected artifacts', async () => {
     const f = await fixture(), { id, directory } = await f.service.beginSession(f.context);
     const row = JSON.stringify({ event: 'frame', at: '2026-09-09T07:40:12.123Z', frameTimeMs: 2.1, padding: 'x'.repeat(1100) }) + '\n';
