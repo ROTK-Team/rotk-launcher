@@ -70,6 +70,29 @@ const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
 const STATE_FILE_NAME = "asset-state.v1.json";
 const CACHE_DIRECTORY_NAME = "asset-cache";
 const BACKUP_DIRECTORY_NAME = "asset-backups";
+/** In the cache: when each pack still kept there left the feed. */
+const REPLACED_INDEX_NAME = "replaced-packs.v1.json";
+const CACHED_PACK_NAME = /^([a-f0-9]{64})\.pack$/;
+
+/**
+ * A pack that leaves the feed stays in the cache for a while: releases often
+ * go back to an earlier pack after an event, and the player then reuses it
+ * instead of downloading it again.
+ */
+export interface CacheRetentionPolicy {
+  /** How long a pack stays after it left the feed. */
+  maxAgeMs: number;
+  /** Total size of the packs kept that way; the oldest replaced go first. */
+  maxBytes: number;
+  /** Free space the drive keeps after a sync: the oldest replaced go until it does. */
+  minFreeBytes: number;
+}
+
+const DEFAULT_CACHE_RETENTION: CacheRetentionPolicy = {
+  maxAgeMs: 30 * 24 * 60 * 60 * 1000,
+  maxBytes: 3 * 1024 ** 3,
+  minFreeBytes: 10 * 1024 ** 3,
+};
 
 /**
  * The feed distributes data files only. Anything Windows may execute or load
@@ -146,6 +169,21 @@ export interface AssetSyncServiceOptions {
   feedFallbackWaitMs?: number;
   /** Bytes per second the pack downloads may use, read as they run; 0 means no limit. */
   downloadSpeedLimit?(): number;
+  cacheRetention?: Partial<CacheRetentionPolicy>;
+}
+
+/** A cached pack the current feed no longer lists. */
+interface ReplacedPack {
+  fileName: string;
+  sha256: string;
+  size: number;
+  /** When it left the feed, in ms. */
+  replacedAt: number;
+}
+
+interface ReplacedIndex {
+  schemaVersion: 1;
+  packs: Array<{ sha256: string; replacedAt: string }>;
 }
 
 /** Where the cache and the backups of the installation at `root` are kept: next to it, outside the attested tree. */
@@ -340,6 +378,19 @@ async function readInstallId(root: string): Promise<string | null> {
   }
 }
 
+function isReplacedIndex(value: unknown): value is ReplacedIndex {
+  if (!value || typeof value !== "object") return false;
+  const index = value as Partial<ReplacedIndex>;
+  return index.schemaVersion === 1
+    && Array.isArray(index.packs)
+    && index.packs.every((pack) =>
+      pack
+      && typeof pack === "object"
+      && isHex64(pack.sha256)
+      && typeof pack.replacedAt === "string"
+      && Number.isFinite(Date.parse(pack.replacedAt)));
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path, fsConstants.F_OK);
@@ -398,6 +449,11 @@ async function ensureFreeSpace(directory: string, downloadBytes: number): Promis
   }
 }
 
+async function availableBytes(directory: string): Promise<number | null> {
+  const disk = await statfs(directory).catch(() => null);
+  return disk ? Number(disk.bavail) * Number(disk.bsize) : null;
+}
+
 class DownloadStalledError extends Error {
   constructor(assetName: string) {
     super(`Le téléchargement de l’asset ${assetName} s’est interrompu.`);
@@ -452,6 +508,7 @@ export class AssetSyncService {
   private readonly onFeedUnavailable: (reason: string) => void;
   private readonly feedFallbackWaitMs: number;
   private readonly downloadSpeedLimit: () => number;
+  private readonly cacheRetention: CacheRetentionPolicy;
   private lastProgressAt = 0;
 
   constructor(options: AssetSyncServiceOptions) {
@@ -467,6 +524,7 @@ export class AssetSyncService {
     this.onFeedUnavailable = options.onFeedUnavailable ?? (() => undefined);
     this.feedFallbackWaitMs = options.feedFallbackWaitMs ?? MANIFEST_FALLBACK_WAIT_MS;
     this.downloadSpeedLimit = options.downloadSpeedLimit ?? (() => 0);
+    this.cacheRetention = { ...DEFAULT_CACHE_RETENTION, ...options.cacheRetention };
   }
 
   /**
@@ -560,7 +618,13 @@ export class AssetSyncService {
     }
 
     const totalBytes = pending.reduce((sum, asset) => sum + asset.size, 0);
-    await ensureFreeSpace(dirname(root), totalBytes);
+    try {
+      await ensureFreeSpace(dirname(root), totalBytes);
+    } catch (error) {
+      // Packs kept from earlier releases never cost an update: drop them, then check again.
+      if (!(await this.dropReplacedPacks(manifest))) throw error;
+      await ensureFreeSpace(dirname(root), totalBytes);
+    }
     let completedBytes = 0;
     let assetsCompleted = 0;
     const emit = (phase: AssetSyncProgress["phase"], assetName: string, force = false): void => {
@@ -1123,9 +1187,7 @@ export class AssetSyncService {
   private async pruneCache(manifest: AssetManifest): Promise<void> {
     const keep = new Set(manifest.assets.map((asset) => `${asset.sha256}.pack`));
     try {
-      for (const entry of await readdir(this.cacheDirectory)) {
-        if (!keep.has(entry)) await rm(join(this.cacheDirectory, entry), { force: true });
-      }
+      await this.pruneReplacedPacks(keep);
     } catch {
       // Cache pruning is best-effort housekeeping.
     }
@@ -1137,6 +1199,101 @@ export class AssetSyncService {
         if (!keep.has(entry)) await rm(join(this.legacyCacheDirectory, entry), { force: true }).catch(() => undefined);
       }
       await rmdir(this.legacyCacheDirectory).catch(() => undefined); // only when empty
+    }
+  }
+
+  /**
+   * Remove the cache entries not in `keep`, except the packs the feed replaced
+   * lately (see CacheRetentionPolicy). `.part` files and anything else go at once.
+   */
+  private async pruneReplacedPacks(keep: Set<string>): Promise<void> {
+    const now = Date.now();
+    const index = await this.readReplacedIndex();
+    const replaced: ReplacedPack[] = [];
+    for (const entry of await readdir(this.cacheDirectory)) {
+      if (keep.has(entry) || entry === REPLACED_INDEX_NAME) continue;
+      const sha256 = CACHED_PACK_NAME.exec(entry)?.[1];
+      const details = sha256 ? await stat(join(this.cacheDirectory, entry)).catch(() => null) : null;
+      if (!sha256 || !details?.isFile()) {
+        await this.removeFromCache(entry);
+        continue;
+      }
+      // A pack the index does not list left the feed since the last sync.
+      // Without a readable index the file date stands in: the pack was written
+      // while it was still in the feed, so a lost index only shortens its stay.
+      const replacedAt = index ? index.get(sha256) ?? now : details.mtimeMs;
+      replaced.push({ fileName: entry, sha256, size: details.size, replacedAt: Math.min(replacedAt, now) });
+    }
+
+    const { maxAgeMs, maxBytes, minFreeBytes } = this.cacheRetention;
+    // Newest replaced first: the oldest are the first to go.
+    const kept = replaced.sort((a, b) => b.replacedAt - a.replacedAt);
+    let keptBytes = 0;
+    let keptCount = 0;
+    for (const pack of kept) {
+      if (now - pack.replacedAt > maxAgeMs || keptBytes + pack.size > maxBytes) break;
+      keptBytes += pack.size;
+      keptCount += 1;
+    }
+    // A pack that could not be deleted stays listed with its date, so the next
+    // sync tries again instead of keeping it as newly replaced.
+    const leftOver: ReplacedPack[] = [];
+    const drop = async (pack: ReplacedPack): Promise<void> => {
+      if (!(await this.removeFromCache(pack.fileName))) leftOver.push(pack);
+    };
+    for (const pack of kept.splice(keptCount)) await drop(pack);
+    // Low on space (or no way to tell): the oldest go until the drive keeps minFreeBytes free.
+    let free = kept.length > 0 ? await availableBytes(this.cacheDirectory) : null;
+    while (kept.length > 0 && (free === null || free < minFreeBytes)) {
+      const oldest = kept.pop()!;
+      await drop(oldest);
+      if (free !== null) free += oldest.size;
+    }
+    await this.writeReplacedIndex([...kept, ...leftOver]);
+  }
+
+  /**
+   * Make room for an update: remove everything in the cache the feed does not
+   * use, kept packs included, but not the `.part` files of its own packs.
+   * Returns whether there was anything to remove.
+   */
+  private async dropReplacedPacks(manifest: AssetManifest): Promise<boolean> {
+    const keep = new Set(manifest.assets.flatMap((asset) => [`${asset.sha256}.pack`, `${asset.sha256}.pack.part`]));
+    let dropped = false;
+    for (const entry of await readdir(this.cacheDirectory).catch(() => [] as string[])) {
+      if (keep.has(entry) || entry === REPLACED_INDEX_NAME) continue;
+      if (await this.removeFromCache(entry)) dropped = true;
+    }
+    return dropped;
+  }
+
+  private async removeFromCache(fileName: string): Promise<boolean> {
+    return rm(join(this.cacheDirectory, fileName), { force: true }).then(() => true, () => false);
+  }
+
+  /** When each listed pack left the feed, in ms; null when the index is missing or unreadable. */
+  private async readReplacedIndex(): Promise<Map<string, number> | null> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(join(this.cacheDirectory, REPLACED_INDEX_NAME), "utf8"));
+      if (!isReplacedIndex(parsed)) return null;
+      return new Map(parsed.packs.map((pack) => [pack.sha256, Date.parse(pack.replacedAt)]));
+    } catch {
+      return null;
+    }
+  }
+
+  private async writeReplacedIndex(packs: ReplacedPack[]): Promise<void> {
+    const index: ReplacedIndex = {
+      schemaVersion: 1,
+      packs: packs.map(({ sha256, replacedAt }) => ({ sha256, replacedAt: new Date(replacedAt).toISOString() })),
+    };
+    const indexPath = join(this.cacheDirectory, REPLACED_INDEX_NAME);
+    const temporaryPath = `${indexPath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, `${JSON.stringify(index, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+      await retryFs(() => rename(temporaryPath, indexPath));
+    } finally {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
     }
   }
 }
