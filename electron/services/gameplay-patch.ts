@@ -8,8 +8,8 @@ import { SUPPORTED_CLIENT_BUILDS } from "./client-build.js";
 
 export const GAMEPLAY_PATCH_FILE_NAME = "dinput8.dll";
 export const GAMEPLAY_PATCH_SHA256 =
-  "701a216cf896254fa3d26cfbecbf158c6fa7e7fe2c753ece1132b6c4c88bac31";
-export const GAMEPLAY_PATCH_BYTES = 71_168;
+  "813a4c1f1fca1ffcd2239b11faf2ea90ddf1ef89aedc7baa2f4cc7bac4cbfd13";
+export const GAMEPLAY_PATCH_BYTES = 74_240;
 
 /**
  * Marker next to H1Z1.exe. The proxy enables the sprint byte pair and guarded
@@ -23,6 +23,11 @@ export const GAMEPLAY_MARKER_FILE_NAME = "rotk-shotgun-sprint.ini";
 
 /** Exact retired ROTK artifacts an automatic migration may replace. */
 export const RETIRED_GAMEPLAY_PATCHES = Object.freeze([
+  Object.freeze({
+    // Launchers 2.0.49 to 2.0.52: direct memory reads, before the bridge block and marker debounce (#173).
+    sha256: "701a216cf896254fa3d26cfbecbf158c6fa7e7fe2c753ece1132b6c4c88bac31",
+    bytes: 71_168,
+  }),
   Object.freeze({
     // Launcher 2.0.48: last build that read game memory through ReadProcessMemory.
     sha256: "f6611f3ab31aa28eca251b54402ca9927efea090b94706d3e41e5c458c9b8caa",

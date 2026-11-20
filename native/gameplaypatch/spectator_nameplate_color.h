@@ -159,17 +159,15 @@ static BOOL nameplate_restore(void) {
 static void nameplate_install(BYTE *base) {
     BYTE *relay = NULL, replacement[8], color_replacement[8];
     DWORD protection;
-    SYSTEM_INFO info;
     if (nameplate_image != NULL || !nameplate_signatures_ready(base)) {
         patch_log("ROTK spectator names: unsupported or already installed formatter; skipped.\n");
         return;
     }
-    GetSystemInfo(&info);
-    for (uintptr_t delta = 0x08000000; delta < 0x70000000 && relay == NULL;
-         delta += info.dwAllocationGranularity) {
-        relay = VirtualAlloc(base + delta, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    relay = bridge_page(base);
+    if (relay == NULL) {
+        bridge_refused("ROTK spectator names", base);
+        return;
     }
-    if (relay == NULL) return;
     if (!nameplate_build_relay(relay, (uintptr_t)relay,
             (uintptr_t)(base + NAMEPLATE_FORMAT_RVA), replacement,
             (uintptr_t)(base + NAMEPLATE_WORD_RVA)) ||
@@ -178,7 +176,8 @@ static void nameplate_install(BYTE *base) {
         !VirtualProtect(relay, 4096, PAGE_EXECUTE_READ, &protection) ||
         !FlushInstructionCache(GetCurrentProcess(), relay, NAMEPLATE_SOLID_RELAY_OFFSET + NAMEPLATE_SOLID_RELAY_SIZE) ||
         !marker_enabled() || !nameplate_signatures_ready(base)) {
-        VirtualFree(relay, 0U, MEM_RELEASE);
+        bridge_release(relay);
+        patch_log("ROTK spectator names: relay preparation or guard recheck refused; skipped.\n");
         return;
     }
     nameplate_image = base;
