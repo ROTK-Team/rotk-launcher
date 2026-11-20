@@ -60,7 +60,7 @@ import {
 import { ConfigStore } from "./services/config-store.js";
 import { assertVisualCppRuntime } from "./services/visual-cpp-runtime.js";
 import { DISCORD_INVITE_URL, DiscordPresence } from "./services/discord-presence.js";
-import { adoptExistingClient, adoptedInPlace, cleanupInstallLeftovers, inspectDestination, installClient, lostWithLauncherFolder, readInstallationMarker, removeInstallation } from "./services/installer.js";
+import { adoptExistingClient, adoptedInPlace, findSupportedDepotExecutable, steamExecutableStatus, type SteamExecutableStatus, cleanupInstallLeftovers, inspectDestination, installClient, lostWithLauncherFolder, readInstallationMarker, removeInstallation } from "./services/installer.js";
 import { folderSize } from "./services/folder-size.js";
 import {
   GAME_STARTUP_STALL_MS,
@@ -73,7 +73,8 @@ import {
 import type { InputProfileRecovery } from "./services/input-profile-recovery.js";
 import { collectHwid } from "./services/machine-identity.js";
 import { PathPolicyError, assertOutsideLauncherFolder, classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
-import { H1Z1_STEAM_APP_ID, locateSteamClient } from "./services/steam-locator.js";
+import { H1Z1_STEAM_APP_ID, locateSteamClient, locateSteamDepot } from "./services/steam-locator.js";
+import { UnsupportedClientBuildError } from "./services/client-build.js";
 import { phaseAfterSelection } from "./services/setup-phase.js";
 import {
   runtimeConfigFor,
@@ -213,6 +214,11 @@ const HOME_CHOICE_INTERVAL_MS = 60_000;
 const HOME_CHOICE_FOCUS_GAP_MS = 10_000;
 let homeChoiceReadAt = 0;
 let lastErrorRaw: string | null = null;
+/** The selected H1Z1's exe is unsupported: the patch step of the setup. */
+let steamExecutable: (SteamExecutableStatus & { folders: readonly string[] }) | null = null;
+/** The source `steamExecutable` was computed for; undefined before the first check. */
+let steamExecutableSource: string | null | undefined;
+let steamExecutableWatch: NodeJS.Timeout | null = null;
 // Kept until dismissed or the next Play, so a failed launch cannot hide it.
 let inputProfileRecovery: InputProfileRecovery | null = null;
 // H1Z1 froze before its window and the launcher started it again: said until
@@ -695,7 +701,54 @@ async function attestInstallation(
   });
 }
 
+function stopSteamExecutableWatch(): void {
+  if (steamExecutableWatch) clearInterval(steamExecutableWatch);
+  steamExecutableWatch = null;
+}
+
+function openSteamConsole(): void {
+  if (steamExecutable) clipboard.writeText(steamExecutable.command);
+  void shell.openExternal("steam://open/console").catch(() => undefined);
+}
+
+// Marks the patch step done as soon as download_depot has put the supported exe on the disk.
+// ponytail: two file stats every 3 s, only while the patch step waits.
+function watchSteamExecutable(): void {
+  stopSteamExecutableWatch();
+  let checking = false;
+  steamExecutableWatch = setInterval(() => {
+    const current = steamExecutable;
+    if (checking || !current) return;
+    checking = true;
+    void findSupportedDepotExecutable(current.folders)
+      .then((found) => {
+        if (!found || steamExecutable !== current) return;
+        stopSteamExecutableWatch();
+        steamExecutable = { ...current, downloaded: true };
+        void broadcastSnapshot();
+      })
+      .catch(() => undefined)
+      .finally(() => { checking = false; });
+  }, 3_000);
+}
+
+// Checked whenever the selected H1Z1 changes, before anything is copied.
+async function refreshSteamExecutable(source: string | null): Promise<void> {
+  steamExecutableSource = source;
+  stopSteamExecutableWatch();
+  steamExecutable = null;
+  if (source) {
+    const steamDepot = await locateSteamDepot();
+    const status = await steamExecutableStatus(source, steamDepot).catch(() => null);
+    if (steamExecutableSource !== source) return;
+    steamExecutable = status && { ...status, folders: steamDepot.folders };
+    if (steamExecutable && !steamExecutable.downloaded) watchSteamExecutable();
+  }
+  void broadcastSnapshot();
+}
+
 async function snapshot(): Promise<LauncherSnapshot> {
+  if (sourceRoot !== steamExecutableSource) void refreshSteamExecutable(sourceRoot);
   const configuredRoot = await installationRoot();
   const runtime = activeRuntime();
   return {
@@ -745,6 +798,7 @@ async function snapshot(): Promise<LauncherSnapshot> {
       ? MAIN_COPY[currentLocale].inputProfile[inputProfileRecovery.restored ? "restored" : "reset"](inputProfileRecovery.damagedCopy)
       : startupStallRelaunched ? MAIN_COPY[currentLocale].stopGame.relaunched : null,
     gamePid,
+    steamExecutable: steamExecutable ? { command: steamExecutable.command, downloaded: steamExecutable.downloaded } : null,
     updateRequired: updateRequired || launcherUpdateBlocksPlay(launcherUpdate.state),
     canPlay:
       phase === "ready"
@@ -1232,6 +1286,7 @@ function registerIpc(): void {
     progress = null;
     lastErrorRaw = null;
     await broadcastSnapshot();
+    let steamDepot: Awaited<ReturnType<typeof locateSteamDepot>> = { folders: [], installedManifestId: null };
     try {
       const onProgress = (nextProgress: NonNullable<LauncherSnapshot["progress"]>): void => {
         progress = nextProgress;
@@ -1241,6 +1296,7 @@ function registerIpc(): void {
         ? sourceRoot
         : destinationRoot as string;
       const launcherFolder = await installedLauncherFolder();
+      steamDepot = await locateSteamDepot();
       let marker: Awaited<ReturnType<typeof installClient>>;
       if (sourceKind === "direct") {
         marker = await adoptExistingClient({
@@ -1250,6 +1306,7 @@ function registerIpc(): void {
           vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
           launcherVersion: app.getVersion(),
           launcherFolder,
+          steamDepot,
           onProgress,
         });
       } else {
@@ -1263,6 +1320,7 @@ function registerIpc(): void {
           vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
           launcherVersion: app.getVersion(),
           launcherFolder,
+          steamDepot,
           signal: installAbortController.signal,
           onProgress,
         });
@@ -1292,6 +1350,12 @@ function registerIpc(): void {
         result = { ok: false, cancelled: true };
       } else {
         result = operationError<{ installationRoot: string }>(error);
+        // The exe changed since the source was checked (Steam updated meanwhile): back to the patch step.
+        if (error instanceof UnsupportedClientBuildError) {
+          steamExecutable = { command: error.command, downloaded: false, folders: steamDepot.folders };
+          steamExecutableSource = sourceRoot;
+          watchSteamExecutable();
+        }
       }
       // The copy resumes on the next attempt, so the selection stays. A client
       // that was already installed before this attempt stays playable.
@@ -1308,6 +1372,10 @@ function registerIpc(): void {
     }
   };
   ipcMain.handle(IPC_CHANNELS.install, trustedHandler(runInstall));
+  ipcMain.handle(IPC_CHANNELS.openSteamConsole, trustedHandler(async (): Promise<OperationResult> => {
+    openSteamConsole();
+    return { ok: true };
+  }));
 
   ipcMain.handle(
     IPC_CHANNELS.repairGame,

@@ -1,13 +1,21 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The real build check needs the 82 MB H1Z1.exe and the Vivox step its DLLs;
 // both have their own tests. Here only the copy/resume/repair flow matters.
-vi.mock("../electron/services/client-build.js", () => ({
-  identifyClientBuild: () => ({ id: "test-build", fileVersion: "0", executableSize: 0, executableSha256: "" }),
-}));
+// Here a 3-byte H1Z1.exe ("exe") is the supported build and anything else is not.
+vi.mock("../electron/services/client-build.js", async (original) => {
+  const actual = await original<typeof import("../electron/services/client-build.js")>();
+  const build = { id: "test-build", fileVersion: "0", executableSize: 3, executableSha256: "" };
+  return {
+    ...actual,
+    SUPPORTED_CLIENT_BUILDS: [build],
+    findSupportedBuild: (size: number) => (size === 3 ? build : undefined),
+  };
+});
 vi.mock("../electron/services/vivox-client.js", () => ({
   deployVivoxCompatibility: async () => undefined,
 }));
@@ -25,7 +33,7 @@ vi.mock("node:fs/promises", async (original) => {
   };
 });
 
-const { installClient, inspectDestination, readInstallationMarker } = await import("../electron/services/installer.js");
+const { findSupportedDepotExecutable, steamExecutableStatus, installClient, inspectDestination, readInstallationMarker } = await import("../electron/services/installer.js");
 const { INSTALL_PENDING_MARKER_NAME } = await import("../electron/constants.js");
 
 const roots: string[] = [];
@@ -55,7 +63,11 @@ async function fixture() {
   const shim = join(root, "shim.dll");
   await writeFile(shim, "rotk shim");
   const destination = join(root, "Games", "ROTK");
-  const request = (signal = new AbortController().signal, onProgress = (_: unknown) => undefined) => ({
+  const request = (
+    signal = new AbortController().signal,
+    onProgress = (_: unknown) => undefined,
+    steamDepot?: { folders: string[]; installedManifestId: string | null },
+  ) => ({
     sourceRoot: source,
     destinationRoot: destination,
     shimPath: shim,
@@ -63,10 +75,11 @@ async function fixture() {
     vivoxRuntimePath: "unused",
     launcherVersion: "test",
       launcherFolder: null,
+    steamDepot,
     signal,
     onProgress,
   });
-  return { source, destination, request };
+  return { root, source, destination, request };
 }
 
 const read = (path: string) => readFile(path, "utf8");
@@ -145,5 +158,79 @@ describe("installClient flow", () => {
     expect(await read(join(destination, "UserOptions.ini"))).toBe("[Display]\nMode=Player\n");
     expect(await read(join(destination, "steam_api64.dll"))).toBe("rotk shim");
     await expect(stat(join(destination, INSTALL_PENDING_MARKER_NAME))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+});
+
+describe("Steam's unsupported H1Z1.exe update", () => {
+  // Steam's 2026-11-20 update only replaced H1Z1.exe with a build ROTK does not support.
+  async function steamUpdated() {
+    const setup = await fixture();
+    await writeFile(join(setup.source, "H1Z1.exe"), "new-exe");
+    const depot = join(setup.root, "Steam", "steamapps", "content", "app_433850", "depot_433851");
+    return { ...setup, depot };
+  }
+
+  it("refuses with the delta download command when the supported exe was not downloaded", async () => {
+    const { destination, depot, request } = await steamUpdated();
+    const failure = installClient(request(undefined, undefined, { folders: [depot], installedManifestId: "9048628616520611413" }));
+    await expect(failure).rejects.toMatchObject({
+      name: "UnsupportedClientBuildError",
+      command: "download_depot 433850 433851 1929288548044868931 9048628616520611413",
+    });
+    expect(await inspectDestination(destination)).not.toBe("installed");
+  });
+
+  it("installs the rest from Steam and H1Z1.exe from the depot download", async () => {
+    const { root, source, destination, depot, request } = await steamUpdated();
+    await mkdir(depot, { recursive: true });
+    await writeFile(join(depot, "H1Z1.exe"), "exe");
+
+    const marker = await installClient(request(undefined, undefined, { folders: [join(root, "missing"), depot], installedManifestId: null }));
+    expect(await read(join(destination, "H1Z1.exe"))).toBe("exe");
+    expect(await read(join(destination, "Resources/Assets/assets_x64_1.pack2"))).toBe(SOURCE_FILES["Resources/Assets/assets_x64_1.pack2"]);
+    expect(marker.criticalHashes["H1Z1.exe"]).toBe(createHash("sha256").update("exe").digest("hex"));
+    expect(await read(join(source, "H1Z1.exe"))).toBe("new-exe");
+  });
+
+  it("the launcher's download watch only accepts the supported exe", async () => {
+    const { root } = await fixture();
+    const depot = join(root, "depot");
+    await mkdir(depot, { recursive: true });
+    expect(await findSupportedDepotExecutable([join(root, "missing"), depot])).toBeNull();
+    await writeFile(join(depot, "H1Z1.exe"), "new-exe");
+    expect(await findSupportedDepotExecutable([depot])).toBeNull();
+    await writeFile(join(depot, "H1Z1.exe"), "exe");
+    expect(await findSupportedDepotExecutable([depot])).toMatchObject({ path: join(depot, "H1Z1.exe"), size: 3 });
+  });
+
+  it("tells the setup, before any copy, whether a patch step is needed and done", async () => {
+    const { root, source } = await fixture();
+    const depot = join(root, "depot");
+    const steamDepot = { folders: [depot], installedManifestId: "9048628616520611413" };
+    expect(await steamExecutableStatus(source, steamDepot)).toBeNull();
+    await writeFile(join(source, "H1Z1.exe"), "new-exe");
+    expect(await steamExecutableStatus(source, steamDepot)).toEqual({
+      command: "download_depot 433850 433851 1929288548044868931 9048628616520611413",
+      downloaded: false,
+    });
+    await mkdir(depot, { recursive: true });
+    await writeFile(join(depot, "H1Z1.exe"), "exe");
+    expect(await steamExecutableStatus(source, steamDepot)).toMatchObject({ downloaded: true });
+  });
+
+  it("a repair after Steam's update never copies Steam's exe over the supported one", async () => {
+    const { root, source, destination, request } = await fixture();
+    await installClient(request());
+    await writeFile(join(source, "H1Z1.exe"), "new-exe");
+    await expect(installClient(request())).rejects.toMatchObject({ name: "UnsupportedClientBuildError" });
+    expect(await read(join(destination, "H1Z1.exe"))).toBe("exe");
+
+    const depot = join(root, "depot");
+    await mkdir(depot, { recursive: true });
+    await writeFile(join(depot, "H1Z1.exe"), "exe");
+    await unlink(join(destination, "Resources/Audio/pc9/Weapons.bnk_pc"));
+    await installClient(request(undefined, undefined, { folders: [depot], installedManifestId: null }));
+    expect(await read(join(destination, "H1Z1.exe"))).toBe("exe");
+    expect(await read(join(destination, "Resources/Audio/pc9/Weapons.bnk_pc"))).toBe("bank");
   });
 });

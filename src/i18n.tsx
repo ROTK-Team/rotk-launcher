@@ -158,7 +158,7 @@ export interface Copy {
     manualDownload: string;
   };
   install: {
-    steps: { language: string; h1z1: string; location: string; copy: string; key: string };
+    steps: { language: string; h1z1: string; location: string; patch: string; copy: string; key: string };
     languageTitle: string;
     languageLead: string;
     stepOf: (index: number, total: number) => string;
@@ -201,6 +201,16 @@ export interface Copy {
     cancel: string;
     failedTitle: string;
     failedKept: string;
+    steamExeTitle: string;
+    steamExeLead: string;
+    steamExeSteps: readonly string[];
+    steamExeCommand: string;
+    steamExeCopy: string;
+    steamExeCopied: string;
+    steamExeOpen: string;
+    steamExeReopen: string;
+    steamExeWaiting: string;
+    steamExeReady: string;
     retry: string;
     keyTitle: string;
     keyLead: string;
@@ -457,7 +467,7 @@ const COPY: Record<AppLocale, Copy> = {
       manualDownload: "Still stuck? Download the launcher installer from rotk.app and install it over this one.",
     },
     install: {
-      steps: { language: "LANGUAGE", h1z1: "H1Z1", location: "LOCATION", copy: "INSTALL", key: "ACCOUNT" },
+      steps: { language: "LANGUAGE", h1z1: "H1Z1", location: "LOCATION", patch: "PATCH", copy: "INSTALL", key: "ACCOUNT" },
       languageTitle: "CHOOSE YOUR LANGUAGE",
       languageLead: "You can change it later in the settings.",
       stepOf: (index, total) => `STEP ${index} OF ${total}`,
@@ -506,6 +516,20 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "CANCEL",
       failedTitle: "THE INSTALL STOPPED",
       failedKept: "What is already copied is kept: retrying resumes from there.",
+      steamExeTitle: "Get the right version of H1Z1",
+      steamExeLead: "Steam updated H1Z1 to a version ROTK does not support yet. No need to reinstall anything: Steam can fetch the right version in about a minute.",
+      steamExeSteps: [
+        "Click OPEN STEAM: Steam shows its console, a window of text, and the command is already copied.",
+        "Click the input line at the very bottom of that window, paste with Ctrl+V, then press Enter.",
+        "Steam downloads about 60 MB. Come back here: the installation starts on its own when it is done.",
+      ],
+      steamExeCommand: "Command:",
+      steamExeCopy: "Copy",
+      steamExeCopied: "Copied",
+      steamExeOpen: "OPEN STEAM",
+      steamExeReopen: "OPEN STEAM AGAIN",
+      steamExeWaiting: "Waiting for Steam… The console shows “Depot download complete” when it is done.",
+      steamExeReady: "The right H1Z1.exe is ready: starting the installation.",
       retry: "TRY AGAIN",
       keyTitle: "LINK YOUR ROTK ACCOUNT",
       keyLead: "Last step. Your launcher key is on the website: copy it, then paste it here.",
@@ -787,7 +811,7 @@ const COPY: Record<AppLocale, Copy> = {
       manualDownload: "Toujours bloqué ? Télécharge l’installateur du launcher sur rotk.app et installe-le par-dessus.",
     },
     install: {
-      steps: { language: "LANGUE", h1z1: "H1Z1", location: "EMPLACEMENT", copy: "INSTALLATION", key: "COMPTE" },
+      steps: { language: "LANGUE", h1z1: "H1Z1", location: "EMPLACEMENT", patch: "CORRECTIF", copy: "INSTALLATION", key: "COMPTE" },
       languageTitle: "CHOISIS TA LANGUE",
       languageLead: "Tu pourras la changer plus tard dans les réglages.",
       stepOf: (index, total) => `ÉTAPE ${index} SUR ${total}`,
@@ -836,6 +860,20 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "ANNULER",
       failedTitle: "L’INSTALLATION S’EST ARRÊTÉE",
       failedKept: "Ce qui est déjà copié est gardé : réessayer reprend au même endroit.",
+      steamExeTitle: "Récupère la bonne version de H1Z1",
+      steamExeLead: "Steam a mis à jour H1Z1 vers une version que ROTK ne prend pas encore en charge. Rien à réinstaller : Steam peut récupérer la bonne version en une minute environ.",
+      steamExeSteps: [
+        "Clique sur OUVRIR STEAM : Steam affiche sa console, une fenêtre de texte, et la commande est déjà copiée.",
+        "Clique dans la ligne de saisie tout en bas de cette fenêtre, colle avec Ctrl+V, puis appuie sur Entrée.",
+        "Steam télécharge environ 60 Mo. Reviens ici : l’installation démarre toute seule à la fin.",
+      ],
+      steamExeCommand: "Commande :",
+      steamExeCopy: "Copier",
+      steamExeCopied: "Copiée",
+      steamExeOpen: "OUVRIR STEAM",
+      steamExeReopen: "ROUVRIR STEAM",
+      steamExeWaiting: "En attente de Steam… La console affiche « Depot download complete » quand c’est fini.",
+      steamExeReady: "Le bon H1Z1.exe est prêt : l’installation démarre.",
       retry: "RÉESSAYER",
       keyTitle: "RELIE TON COMPTE ROTK",
       keyLead: "Dernière étape. Ta clé launcher se trouve sur le site : copie-la, puis colle-la ici.",
@@ -1117,7 +1155,7 @@ const COPY: Record<AppLocale, Copy> = {
       manualDownload: "仍然无法更新？请在 rotk.app 下载启动器安装程序，并覆盖安装。",
     },
     install: {
-      steps: { language: "语言", h1z1: "H1Z1", location: "安装位置", copy: "安装", key: "账号" },
+      steps: { language: "语言", h1z1: "H1Z1", location: "安装位置", patch: "补丁", copy: "安装", key: "账号" },
       languageTitle: "选择语言",
       languageLead: "之后可以在设置中更改。",
       stepOf: (index, total) => `第 ${index} 步，共 ${total} 步`,
@@ -1166,6 +1204,20 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "取消",
       failedTitle: "安装已中断",
       failedKept: "已复制的内容会保留：重试将从中断处继续。",
+      steamExeTitle: "获取正确版本的 H1Z1",
+      steamExeLead: "Steam 把 H1Z1 更新到了 ROTK 暂不支持的版本。无需重新安装：Steam 大约一分钟就能取回正确的版本。",
+      steamExeSteps: [
+        "点击“打开 STEAM”：Steam 会显示它的控制台（一个文字窗口），命令已经复制好了。",
+        "点击该窗口最底部的输入行，按 Ctrl+V 粘贴，然后按回车。",
+        "Steam 会下载约 60 MB。回到这里：下载完成后安装会自动开始。",
+      ],
+      steamExeCommand: "命令：",
+      steamExeCopy: "复制",
+      steamExeCopied: "已复制",
+      steamExeOpen: "打开 STEAM",
+      steamExeReopen: "再次打开 STEAM",
+      steamExeWaiting: "正在等待 Steam… 完成后控制台会显示“Depot download complete”。",
+      steamExeReady: "正确的 H1Z1.exe 已就绪：正在开始安装。",
       retry: "重试",
       keyTitle: "绑定你的 ROTK 账号",
       keyLead: "最后一步。启动器密钥在网站上：复制后粘贴到这里。",

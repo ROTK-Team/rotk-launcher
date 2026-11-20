@@ -15,16 +15,49 @@ export const SUPPORTED_CLIENT_BUILDS: readonly SupportedClientBuild[] = [
   },
 ] as const;
 
-export function identifyClientBuild(executableSize: number, executableSha256: string): SupportedClientBuild {
-  const match = SUPPORTED_CLIENT_BUILDS.find(
+/**
+ * Steam depot that still serves the supported H1Z1.exe. Steam replaced the exe
+ * on 2026-11-20 (manifest 9048628616520611413); every other file is unchanged,
+ * so a player only needs this manifest's H1Z1.exe, fetched by Steam itself.
+ */
+export const SUPPORTED_STEAM_DEPOT = {
+  appId: "433850",
+  depotId: "433851",
+  manifestId: "1929288548044868931",
+} as const;
+
+/**
+ * Steam console command that downloads the supported manifest into
+ * steamapps\content\app_433850\depot_433851. With the player's installed
+ * manifest as delta, Steam only downloads the files that differ (H1Z1.exe).
+ */
+export function depotDownloadCommand(installedManifestId: string | null): string {
+  const { appId, depotId, manifestId } = SUPPORTED_STEAM_DEPOT;
+  const delta = installedManifestId && /^\d+$/.test(installedManifestId) && installedManifestId !== manifestId
+    ? ` ${installedManifestId}`
+    : "";
+  return `download_depot ${appId} ${depotId} ${manifestId}${delta}`;
+}
+
+export class UnsupportedClientBuildError extends Error {
+  constructor(readonly command: string) {
+    super(
+      `Steam a installé une version de H1Z1 que ROTK ne prend pas encore en charge. Ouvre la console Steam (steam://open/console), colles-y la commande en fin de message, appuie sur Entrée, attends « Depot download complete » puis relance. Commande : ${command}`,
+    );
+    this.name = "UnsupportedClientBuildError";
+  }
+}
+
+export function findSupportedBuild(executableSize: number, executableSha256: string): SupportedClientBuild | undefined {
+  return SUPPORTED_CLIENT_BUILDS.find(
     (build) =>
       build.executableSize === executableSize &&
       build.executableSha256 === executableSha256.toLocaleLowerCase("en-US"),
   );
-  if (!match) {
-    throw new Error(
-      "Cette version de H1Z1 n’est pas encore prise en charge par ROTK. Vérifie les fichiers du jeu dans Steam puis réessaie.",
-    );
-  }
+}
+
+export function identifyClientBuild(executableSize: number, executableSha256: string): SupportedClientBuild {
+  const match = findSupportedBuild(executableSize, executableSha256);
+  if (!match) throw new UnsupportedClientBuildError(depotDownloadCommand(null));
   return match;
 }
