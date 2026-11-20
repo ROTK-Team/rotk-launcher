@@ -20,10 +20,12 @@ export const VISUAL_CPP_RUNTIME_MINIMUM: FileVersion = [14, 40, 33810, 0];
 /** Microsoft's permalink to the latest x64 Visual C++ Redistributable. */
 export const VISUAL_CPP_RUNTIME_DOWNLOAD_URL = "https://aka.ms/vc14/vc_redist.x64.exe";
 
-// rotkc.dll is loaded into H1Z1.exe by name, so Windows looks for these in the
-// game folder, then in System32 (none of them is a KnownDLL). The check stops
-// there: the Redistributable installs them in System32, and a copy found only
-// further down the search order, in a PATH folder for example, is not counted.
+// The voice proxy loads rotkc.dll from the game folder by full path and has
+// Windows look for these imports in that folder, then in System32 (none of them
+// is a KnownDLL). The check stops there too: the Redistributable installs them
+// in System32, and a copy found only further down the old search order, in a
+// PATH folder for example, is not counted. The proxy falls back to that order
+// only when the strict load cannot find an import, and logs that it did.
 // The launcher is a 64-bit process: its System32 is the folder H1Z1 uses too.
 const VISUAL_CPP_RUNTIME_FILES = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"] as const;
 
