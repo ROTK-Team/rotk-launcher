@@ -5,6 +5,14 @@ import { assertOutsideLauncherFolder } from "../electron/services/path-policy";
 import { APP_LOCALES, normalizeAppLocale } from "../shared/locale";
 
 describe("launcher locales", () => {
+  it.each(APP_LOCALES)("keeps the Steam console command intact in %s", (locale) => {
+    const command = "download_depot 433850 433851 1929288548044868931 9048628616520611413";
+    const raw = `Steam a installé une version de H1Z1 que ROTK ne prend pas encore en charge. La console Steam s’ouvre et la commande est copiée : colle-la (Ctrl+V), valide, attends « Depot download complete » puis relance l’installation. Commande : ${command}`;
+    const translated = localizeServiceError(raw, locale);
+    expect(translated.endsWith(command)).toBe(true);
+    if (locale !== "fr") expect(translated).not.toBe(raw);
+  });
+
   it.each(APP_LOCALES)("localizes account diagnostics while preserving technical codes in %s", (locale) => {
     const samples = [
       ["Unable to reach", "ENOTFOUND"],

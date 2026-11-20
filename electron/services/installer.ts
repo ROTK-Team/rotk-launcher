@@ -34,7 +34,13 @@ import {
   validateClientSource,
   validateInstallDestination,
 } from "./path-policy.js";
-import { identifyClientBuild } from "./client-build.js";
+import {
+  SUPPORTED_CLIENT_BUILDS,
+  UnsupportedClientBuildError,
+  depotDownloadCommand,
+  findSupportedBuild,
+  type SupportedClientBuild,
+} from "./client-build.js";
 import { deployVivoxCompatibility } from "./vivox-client.js";
 
 const MAX_CLIENT_FILES = 250_000;
@@ -70,6 +76,23 @@ export interface InstallationMarker {
   criticalHashes: Record<string, string>;
 }
 
+/**
+ * Where Steam's `download_depot` puts the supported H1Z1.exe, and the manifest
+ * the player has installed (for a delta download of that one file).
+ */
+export interface SteamDepotSource {
+  folders: string[];
+  installedManifestId: string | null;
+}
+
+interface ClientExecutable {
+  build: SupportedClientBuild;
+  path: string;
+  size: number;
+  sha256: string;
+  modifiedAt: Date;
+}
+
 interface PendingInstallMarker {
   schemaVersion: 1;
   installId: string;
@@ -85,6 +108,7 @@ export interface InstallRequest {
   vivoxRuntimePath: string;
   launcherVersion: string;
   launcherFolder: string | null;
+  steamDepot?: SteamDepotSource;
   signal: AbortSignal;
   onProgress(progress: InstallProgress): void;
 }
@@ -96,6 +120,7 @@ export interface AdoptExistingClientRequest {
   vivoxRuntimePath: string;
   launcherVersion: string;
   launcherFolder: string | null;
+  steamDepot?: SteamDepotSource;
   onProgress(progress: InstallProgress): void;
 }
 
@@ -341,6 +366,32 @@ async function applyClientPatches(
   await patchBattlEye(root);
 }
 
+/**
+ * The H1Z1.exe to install: the source's own when it is a supported build,
+ * otherwise a supported one Steam downloaded with `download_depot`. Steam's
+ * 2026-11-20 update (1.0.331) is a new protected build the ROTK patches and
+ * attestation do not cover, while every other client file stayed the same.
+ */
+async function resolveClientExecutable(
+  sourcePath: string,
+  sourceSha256: string,
+  steamDepot: SteamDepotSource | undefined,
+): Promise<ClientExecutable> {
+  const source = await stat(sourcePath);
+  const own = findSupportedBuild(source.size, sourceSha256);
+  if (own) return { build: own, path: sourcePath, size: source.size, sha256: sourceSha256, modifiedAt: source.mtime };
+  for (const folder of steamDepot?.folders ?? []) {
+    const path = join(folder, "H1Z1.exe");
+    const details = await stat(path).catch(() => null);
+    // Size first: hashing a 150 MB exe of the wrong build is wasted time.
+    if (!details?.isFile() || !SUPPORTED_CLIENT_BUILDS.some((build) => build.executableSize === details.size)) continue;
+    const hash = await sha256(path);
+    const build = findSupportedBuild(details.size, hash);
+    if (build) return { build, path, size: details.size, sha256: hash, modifiedAt: details.mtime };
+  }
+  throw new UnsupportedClientBuildError(depotDownloadCommand(steamDepot?.installedManifestId ?? null));
+}
+
 async function hashCriticalFiles(root: string): Promise<Record<string, string>> {
   const hashes: Record<string, string> = {};
   for (const fileName of CRITICAL_CLIENT_FILES) hashes[fileName] = await sha256(join(root, fileName));
@@ -366,8 +417,15 @@ export async function adoptExistingClient(
   });
 
   const criticalHashes = await hashCriticalFiles(root);
-  const executable = await stat(join(root, "H1Z1.exe"));
-  const clientBuild = identifyClientBuild(executable.size, criticalHashes["H1Z1.exe"]);
+  const executablePath = join(root, "H1Z1.exe");
+  const executable = await resolveClientExecutable(executablePath, criticalHashes["H1Z1.exe"], request.steamDepot);
+  const clientBuild = executable.build;
+  if (executable.path !== executablePath) {
+    // The player's own copy, outside Steam: Steam's update is swapped for the supported exe.
+    await retryFs(() => copyFile(executable.path, executablePath));
+    if (await sha256(executablePath) !== executable.sha256) throw new Error("La copie de H1Z1.exe ne correspond pas à la source.");
+    criticalHashes["H1Z1.exe"] = executable.sha256;
+  }
 
   request.onProgress({
     phase: "configuring",
@@ -466,12 +524,22 @@ export async function installClient(request: InstallRequest): Promise<Installati
     currentFile: "",
   });
   const files = await enumerateSource(sourceRoot, request.signal);
-  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
 
   const sourceCriticalHashes = await hashCriticalFiles(sourceRoot);
   const executable = files.find((file) => file.relativePath.toLocaleLowerCase("en-US") === "h1z1.exe");
   if (!executable) throw new Error("H1Z1.exe a disparu pendant l’analyse du client.");
-  const clientBuild = identifyClientBuild(executable.size, sourceCriticalHashes["H1Z1.exe"]);
+  const clientExecutable = await resolveClientExecutable(
+    executable.absolutePath,
+    sourceCriticalHashes["H1Z1.exe"],
+    request.steamDepot,
+  );
+  const clientBuild = clientExecutable.build;
+  // Steam updated H1Z1.exe: the rest comes from Steam, the exe from the depot download.
+  executable.absolutePath = clientExecutable.path;
+  executable.size = clientExecutable.size;
+  executable.modifiedAt = clientExecutable.modifiedAt;
+  sourceCriticalHashes["H1Z1.exe"] = clientExecutable.sha256;
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
 
   // Critical files the launcher never rewrites: a repair checks their hash too.
   const repairHashes = new Map(CRITICAL_CLIENT_FILES
@@ -551,7 +619,8 @@ export async function installClient(request: InstallRequest): Promise<Installati
     if (await sha256(join(destinationRoot, fileName)) !== sourceCriticalHashes[fileName]) {
       throw new Error(`La copie de ${fileName} ne correspond pas à la source.`);
     }
-    if (await sha256(join(sourceRoot, fileName)) !== sourceCriticalHashes[fileName]) {
+    const sourcePath = fileName === "H1Z1.exe" ? clientExecutable.path : join(sourceRoot, fileName);
+    if (await sha256(sourcePath) !== sourceCriticalHashes[fileName]) {
       throw new Error(`Le fichier source ${fileName} a changé pendant la copie.`);
     }
   }

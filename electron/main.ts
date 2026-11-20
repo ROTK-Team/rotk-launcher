@@ -73,7 +73,8 @@ import {
 import type { InputProfileRecovery } from "./services/input-profile-recovery.js";
 import { collectHwid } from "./services/machine-identity.js";
 import { PathPolicyError, assertOutsideLauncherFolder, classifyClientSource, validateInstallDestination } from "./services/path-policy.js";
-import { H1Z1_STEAM_APP_ID, locateSteamClient } from "./services/steam-locator.js";
+import { H1Z1_STEAM_APP_ID, locateSteamClient, locateSteamDepot } from "./services/steam-locator.js";
+import { UnsupportedClientBuildError } from "./services/client-build.js";
 import { phaseAfterSelection } from "./services/setup-phase.js";
 import {
   runtimeConfigFor,
@@ -1241,6 +1242,7 @@ function registerIpc(): void {
         ? sourceRoot
         : destinationRoot as string;
       const launcherFolder = await installedLauncherFolder();
+      const steamDepot = await locateSteamDepot();
       let marker: Awaited<ReturnType<typeof installClient>>;
       if (sourceKind === "direct") {
         marker = await adoptExistingClient({
@@ -1250,6 +1252,7 @@ function registerIpc(): void {
           vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
           launcherVersion: app.getVersion(),
           launcherFolder,
+          steamDepot,
           onProgress,
         });
       } else {
@@ -1263,6 +1266,7 @@ function registerIpc(): void {
           vivoxRuntimePath: resolveBundledVivoxRuntimePath(),
           launcherVersion: app.getVersion(),
           launcherFolder,
+          steamDepot,
           signal: installAbortController.signal,
           onProgress,
         });
@@ -1292,6 +1296,11 @@ function registerIpc(): void {
         result = { ok: false, cancelled: true };
       } else {
         result = operationError<{ installationRoot: string }>(error);
+        if (error instanceof UnsupportedClientBuildError) {
+          // The message tells the player to paste this into the Steam console.
+          clipboard.writeText(error.command);
+          void shell.openExternal("steam://open/console").catch(() => undefined);
+        }
       }
       // The copy resumes on the next attempt, so the selection stays. A client
       // that was already installed before this attempt stays playable.

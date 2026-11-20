@@ -4,6 +4,8 @@ import { access, readFile, stat } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { promisify } from "node:util";
 import { validateClientSource } from "./path-policy.js";
+import { SUPPORTED_STEAM_DEPOT } from "./client-build.js";
+import type { SteamDepotSource } from "./installer.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -94,11 +96,7 @@ export function parseLibraryFoldersVdf(content: string): string[] {
  * libraryfolders.vdf, then each known game directory name. Returns the first
  * candidate that passes the client-source validation, or null.
  */
-export async function locateSteamClient(
-  overrides: Partial<SteamLocatorDependencies> = {},
-): Promise<string | null> {
-  const deps: SteamLocatorDependencies = { ...DEFAULT_DEPENDENCIES, ...overrides };
-
+async function listSteamLibraries(deps: SteamLocatorDependencies): Promise<string[]> {
   const steamRoots: string[] = [];
   const registrySteamPath = await deps.readRegistrySteamPath();
   if (registrySteamPath) steamRoots.push(normalize(registrySteamPath));
@@ -122,6 +120,44 @@ export async function locateSteamClient(
     if (!manifest) continue;
     for (const library of parseLibraryFoldersVdf(manifest)) addLibrary(library);
   }
+  return libraries;
+}
+
+/** The manifest of `depotId` recorded in a Steam app manifest (.acf), or null. */
+export function installedDepotManifest(appManifest: string, depotId: string): string | null {
+  // Only InstalledDepots gives a depot a { "manifest" ... } block.
+  if (!/^\d+$/.test(depotId)) return null;
+  return appManifest.match(new RegExp(`"${depotId}"\\s*\\{[^}]*?"manifest"\\s*"(\\d+)"`, "i"))?.[1] ?? null;
+}
+
+/**
+ * Where `download_depot` leaves the supported H1Z1.exe (steamapps\content of
+ * the Steam install, checked in every library to be safe) and the manifest the
+ * player has installed, so the download command can be a one-file delta.
+ */
+export async function locateSteamDepot(
+  overrides: Partial<SteamLocatorDependencies> = {},
+): Promise<SteamDepotSource> {
+  const deps: SteamLocatorDependencies = { ...DEFAULT_DEPENDENCIES, ...overrides };
+  const { appId, depotId } = SUPPORTED_STEAM_DEPOT;
+  const libraries = await listSteamLibraries(deps);
+  let installedManifestId: string | null = null;
+  for (const library of libraries) {
+    const appManifest = await deps.readTextFile(join(library, "steamapps", `appmanifest_${appId}.acf`));
+    installedManifestId = appManifest ? installedDepotManifest(appManifest, depotId) : null;
+    if (installedManifestId) break;
+  }
+  return {
+    folders: libraries.map((library) => join(library, "steamapps", "content", `app_${appId}`, `depot_${depotId}`)),
+    installedManifestId,
+  };
+}
+
+export async function locateSteamClient(
+  overrides: Partial<SteamLocatorDependencies> = {},
+): Promise<string | null> {
+  const deps: SteamLocatorDependencies = { ...DEFAULT_DEPENDENCIES, ...overrides };
+  const libraries = await listSteamLibraries(deps);
 
   for (const library of libraries) {
     // The app manifest names the real folder, whatever the game was called then.

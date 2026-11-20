@@ -1,7 +1,9 @@
 import { join, normalize } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  installedDepotManifest,
   locateSteamClient,
+  locateSteamDepot,
   parseLibraryFoldersVdf,
   STEAM_GAME_DIRECTORY_CANDIDATES,
   type SteamLocatorDependencies,
@@ -204,5 +206,50 @@ describe("Steam client discovery", () => {
     const validateCandidate = vi.fn(deps.validateCandidate);
     await locateSteamClient({ ...deps, validateCandidate });
     expect(validateCandidate).toHaveBeenCalledTimes(STEAM_GAME_DIRECTORY_CANDIDATES.length);
+  });
+});
+
+describe("Steam depot download lookup", () => {
+  const ACF = `"AppState"
+{
+	"appid"		"433850"
+	"buildid"		"26797749"
+	"InstalledDepots"
+	{
+		"433851"
+		{
+			"manifest"		"9048628616520611413"
+			"size"		"17877744680"
+		}
+	}
+	"SharedDepots"
+	{
+		"228986"		"228980"
+	}
+}`;
+
+  it("reads the installed manifest of the H1Z1 depot from the app manifest", () => {
+    expect(installedDepotManifest(ACF, "433851")).toBe("9048628616520611413");
+    expect(installedDepotManifest(ACF, "228986")).toBeNull();
+    expect(installedDepotManifest("", "433851")).toBeNull();
+  });
+
+  it("lists the download folder of every library and the installed manifest", async () => {
+    const library = "D:\\SteamLibrary";
+    const depot = await locateSteamDepot(dependencies({
+      registrySteamPath: STEAM_ROOT,
+      existingDirectories: [STEAM_ROOT],
+      vdfByPath: {
+        [join(STEAM_ROOT, "steamapps", "libraryfolders.vdf")]: '"libraryfolders" { "1" { "path" "D:\\\\SteamLibrary" } }',
+        [join(library, "steamapps", "appmanifest_433850.acf")]: ACF,
+      },
+    }));
+    expect(depot).toEqual({
+      folders: [
+        join(normalize(STEAM_ROOT), "steamapps", "content", "app_433850", "depot_433851"),
+        join(library, "steamapps", "content", "app_433850", "depot_433851"),
+      ],
+      installedManifestId: "9048628616520611413",
+    });
   });
 });
