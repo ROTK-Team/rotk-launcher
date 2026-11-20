@@ -1727,6 +1727,8 @@ function registerIpc(): void {
         return { ok: false, error: MAIN_COPY[currentLocale].update.gameRunning };
       }
       if (installAbortController) return { ok: false, error: MAIN_COPY[currentLocale].installationInProgress };
+      // Quitting now would cut a pack extraction or backup copy in the middle.
+      if (assetSyncRunning) return { ok: false, error: MAIN_COPY[currentLocale].assets.busy };
       // The launcher quits for the installer whatever happens to it next: keep
       // a trace, so the next start can tell when the update did not install.
       const state = launcherUpdate.state;
