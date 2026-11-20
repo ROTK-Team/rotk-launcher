@@ -1,7 +1,6 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { retryFs } from "./fs-safe.js";
+import { mkdir, readFile, rm } from "node:fs/promises";
+import { atomicWriteFile, retryFs } from "./fs-safe.js";
 import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
 import { isValidPlayerKey, normalizePlayerKey } from "../../shared/player-key.js";
 import {
   DEFAULT_SERVER_ID,
@@ -167,12 +166,6 @@ export class PlayerKeyStore {
 
   private async writeStored(next: StoredPlayerKeys): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true });
-    const temporaryPath = `${this.path}.${randomUUID()}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    await retryFs(() => rename(temporaryPath, this.path));
+    await atomicWriteFile(this.path, `${JSON.stringify(next, null, 2)}\n`, "utf8", { mode: 0o600 });
   }
 }

@@ -17,7 +17,7 @@ import {
   writeFile,
   rmdir,
 } from "node:fs/promises";
-import { retryFs } from "./fs-safe.js";
+import { retryFs, syncFile } from "./fs-safe.js";
 import { dirname, join, resolve } from "node:path";
 import type { InstallProgress } from "../../shared/contracts.js";
 import {
@@ -193,11 +193,13 @@ async function renameWithRetry(from: string, to: string): Promise<void> {
   }
 }
 
-// Write next to the target, then rename: a crash never leaves a truncated file.
+// Write next to the target, flush it, then rename: a crash or a power cut never
+// leaves a truncated or zero-filled file.
 async function replaceAtomically(target: string, write: (temporary: string) => Promise<void>): Promise<void> {
   const temporary = `${target}.rotk-${randomUUID()}.tmp`;
   try {
     await write(temporary);
+    await syncFile(temporary);
     await renameWithRetry(temporary, target);
   } finally {
     await rm(temporary, { force: true }).catch(() => undefined);

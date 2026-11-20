@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { retryFs } from "./fs-safe.js";
+import { mkdir, readFile } from "node:fs/promises";
+import { atomicWriteFile } from "./fs-safe.js";
 import { dirname, join } from "node:path";
 import type { PublishedUpdate } from "../../shared/contracts.js";
 import type { AppLocale } from "../../shared/locale.js";
@@ -201,9 +201,7 @@ export class UpdateFeedService {
 
   private async writeCache(updates: PublishedUpdate[]): Promise<void> {
     await mkdir(dirname(this.cachePath), { recursive: true });
-    const temporary = `${this.cachePath}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(updates, null, 2)}\n`, "utf8");
-    await retryFs(() => rename(temporary, this.cachePath));
+    await atomicWriteFile(this.cachePath, `${JSON.stringify(updates, null, 2)}\n`);
   }
 }
 
