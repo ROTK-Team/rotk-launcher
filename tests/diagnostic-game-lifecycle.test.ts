@@ -57,6 +57,10 @@ afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+// Client preparation retries files that an antivirus or indexer holds for a
+// moment (fs-safe.ts: up to 1.5 s for EPERM, 7.5 s for EBUSY). CI runners do
+// hold them, so the waits after a launch outlast those retries.
+const LAUNCH_WAIT = { timeout: 15_000 };
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'rotk-game-lifecycle-test-')); roots.push(root);
@@ -75,13 +79,13 @@ async function fixture() {
   return { launcher: new GameLauncher(), request, diagnostics, child: () => children.at(-1)! };
 }
 
-describe('game lifecycle remains independent of diagnostics', () => {
+describe('game lifecycle remains independent of diagnostics', { timeout: 30_000 }, () => {
   it('starts presence only after stable startup and clears it before diagnostic collection finishes', async () => {
     const f = await fixture(), collection = deferred();
     f.request.presence = { start: vi.fn(), stop: vi.fn() };
     vi.mocked(f.diagnostics.onExit).mockReturnValue(collection.promise);
     const launched = f.launcher.launch(f.request);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     expect(f.request.presence.start).not.toHaveBeenCalled();
     expect(await launched).toBe(4242);
     expect(f.request.presence.start).toHaveBeenCalledWith(4242);
@@ -89,7 +93,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(f.request.presence.stop).toHaveBeenCalledOnce();
     expect(f.request.onExit).not.toHaveBeenCalled();
     collection.resolve();
-    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce(), LAUNCH_WAIT);
   });
 
   it('stops only its own running game, and the exit event hands Play back', async () => {
@@ -100,7 +104,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(f.launcher.stop()).toBe(true);
     expect(f.child().kill).toHaveBeenCalledOnce();
     f.child().exit(1);
-    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledWith(1));
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledWith(1), LAUNCH_WAIT);
     expect(f.launcher.stop()).toBe(false);
     expect(f.child().kill).toHaveBeenCalledOnce();
   });
@@ -109,12 +113,12 @@ describe('game lifecycle remains independent of diagnostics', () => {
     const f = await fixture();
     f.request.presence = { start: vi.fn(), stop: vi.fn(() => { throw new Error('Discord unavailable'); }) };
     const launched = f.launcher.launch(f.request).catch(error => error);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled());
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled(), LAUNCH_WAIT);
     f.child().exit(-1073741819);
     expect((await launched).message).toContain('0xC0000005');
     expect(f.request.presence.start).not.toHaveBeenCalled();
     expect(f.request.presence.stop).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce(), LAUNCH_WAIT);
   });
   it('refuses an outdated Visual C++ runtime before repairing voice or attesting', async () => {
     const f = await fixture();
@@ -133,7 +137,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     await writeFile(profile, locked);
     await chmod(profile, 0o444);
     const launched = f.launcher.launch(f.request).catch(error => error);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     expect(await readFile(profile, 'utf8')).toBe(locked);
     await chmod(profile, 0o666);
     f.child().exit(0);
@@ -145,7 +149,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     await writeFile(options, '[UI]\n');
     await chmod(options, 0o444);
     const launched = f.launcher.launch(f.request).catch(error => error);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     expect(await readFile(options, 'utf8')).toBe('[UI]\n');
     await chmod(options, 0o666);
     f.child().exit(0);
@@ -168,7 +172,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     const f = await fixture();
     await rm(join(f.request.config.installation!.root, 'steam_api64.original.dll'));
     const launched = f.launcher.launch(f.request).catch(error => error);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     f.child().exit(0);
     await launched;
   });
@@ -194,7 +198,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     await writeFile(join(clientRoot, 'InputProfile_User.xml'), '<Profile name="User"></Profile>');
     f.diagnostics.onPreparing = vi.fn(() => prepared.promise);
     const launched = f.launcher.launch(f.request).catch(error => error);
-    await vi.waitFor(() => expect(f.diagnostics.onPreparing).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(f.diagnostics.onPreparing).toHaveBeenCalledOnce(), LAUNCH_WAIT);
     expect(mocks.spawn).not.toHaveBeenCalled();
     const userProfile = await readFile(join(clientRoot, 'InputProfile_User.xml'), 'utf8');
     expect(userProfile).toContain('<Trigger>V</Trigger>');
@@ -203,7 +207,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(await readFile(join(clientRoot, 'InputProfile_Default.xml'), 'utf8')).toBe(defaultProfile);
     expect(await readFile(join(clientRoot, 'rotkc.dll'), 'utf8')).toBe('fixture bytes');
     prepared.resolve();
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     f.child().exit(0);
     await launched;
     expect(f.diagnostics.onPreparing).toHaveBeenCalledOnce();
@@ -213,7 +217,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     const f = await fixture(), collection = deferred();
     vi.mocked(f.diagnostics.onExit).mockReturnValue(collection.promise);
     const launched = f.launcher.launch(f.request).catch(error => error);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     f.child().exit(-1073741819);
     expect((await launched).message).toContain('0xC0000005');
     expect(f.diagnostics.onExit).toHaveBeenCalledWith(-1073741819, null);
@@ -221,7 +225,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     expect(f.request.onExit).not.toHaveBeenCalled();
     expect(mocks.gatewayClose).toHaveBeenCalled();
     collection.resolve();
-    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledWith(-1073741819));
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledWith(-1073741819), LAUNCH_WAIT);
     expect(f.child().kill).not.toHaveBeenCalled();
   });
 
@@ -231,7 +235,7 @@ describe('game lifecycle remains independent of diagnostics', () => {
     for (const hook of ['onIdentity', 'onSpawned', 'onOutput', 'onExit'] as const)
       vi.mocked(f.diagnostics[hook]).mockImplementation(() => { throw new Error('Diagnostic callback failed'); });
     const launched = f.launcher.launch(f.request);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     expect(() => f.child().stdout.write('game message')).not.toThrow();
     vi.useFakeTimers();
     await vi.advanceTimersByTimeAsync(3_100);
@@ -248,11 +252,11 @@ describe('game lifecycle remains independent of diagnostics', () => {
     const f = await fixture();
     vi.mocked(f.diagnostics.onExit).mockRejectedValue(new Error('Collection disk failure'));
     const launched = f.launcher.launch(f.request).catch(error => error);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled());
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled(), LAUNCH_WAIT);
     f.child().exit(-1073741571);
     f.child().emit('error', new Error('late process error'));
     expect((await launched).message).toContain('0xC00000FD');
-    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledWith(-1073741571));
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledWith(-1073741571), LAUNCH_WAIT);
     expect(f.request.onExit).toHaveBeenCalledOnce();
     expect(f.diagnostics.onExit).toHaveBeenCalledOnce();
     expect(f.child().kill).not.toHaveBeenCalled();
@@ -269,14 +273,14 @@ describe('game lifecycle remains independent of diagnostics', () => {
   });
 });
 
-describe('the H1Z1 process the launcher starts', () => {
+describe('the H1Z1 process the launcher starts', { timeout: 30_000 }, () => {
   it('runs from the game folder, detached, with its output piped and the ticket identity in its environment', async () => {
     process.env.H1Z1_LEFTOVER = 'from another launcher';
     process.env.STEAMAPPID = '433850';
     try {
       const f = await fixture();
       const launched = f.launcher.launch(f.request).catch(error => error);
-      await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+      await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
       const [executable, , options] = mocks.spawn.mock.calls[0];
       const root = f.request.config.installation!.root;
       expect(executable).toBe(join(root, 'H1Z1.exe'));
@@ -298,7 +302,7 @@ describe('the H1Z1 process the launcher starts', () => {
   });
 });
 
-describe('a game that closes soon after a launch reported as started', () => {
+describe('a game that closes soon after a launch reported as started', { timeout: 30_000 }, () => {
   const hint = 'Si tu ne l’as pas fermé toi-même, relance le jeu ; si ça recommence, Debug (dans les réglages) permet d’envoyer un rapport à ROTK.';
   // Fake timers from the start, so the stability window and the measured delay
   // advance together and no test waits three real seconds.
@@ -307,7 +311,7 @@ describe('a game that closes soon after a launch reported as started', () => {
     const f = await fixture();
     f.request.onEarlyExit = vi.fn();
     const launched = f.launcher.launch(f.request);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     await vi.advanceTimersByTimeAsync(3_100);
     await expect(launched).resolves.toBe(4242);
     return f;
@@ -351,10 +355,10 @@ describe('a game that closes soon after a launch reported as started', () => {
     const f = await fixture();
     f.request.onEarlyExit = vi.fn();
     const launched = f.launcher.launch(f.request).catch(error => error);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled());
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled(), LAUNCH_WAIT);
     f.child().exit(-1073741819);
     expect((await launched).message).toContain('pendant son initialisation');
-    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(f.request.onExit).toHaveBeenCalledOnce(), LAUNCH_WAIT);
     expect(f.request.onEarlyExit).not.toHaveBeenCalled();
   });
 
@@ -378,7 +382,7 @@ describe('a game that closes soon after a launch reported as started', () => {
     async function startupFailure(code: number): Promise<string> {
       const f = await fixture();
       const launched = f.launcher.launch(f.request).catch(error => error);
-      await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled());
+      await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalled(), LAUNCH_WAIT);
       f.child().exit(code);
       return (await launched).message;
     }
@@ -397,13 +401,13 @@ describe('a game that closes soon after a launch reported as started', () => {
   });
 });
 
-describe('a game that freezes before it starts', () => {
+describe('a game that freezes before it starts', { timeout: 30_000 }, () => {
   async function running() {
     vi.useFakeTimers();
     const f = await fixture();
     f.request.onStartupStalled = vi.fn();
     const launched = f.launcher.launch(f.request);
-    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242));
+    await vi.waitFor(() => expect(f.diagnostics.onSpawned).toHaveBeenCalledWith(4242), LAUNCH_WAIT);
     await vi.advanceTimersByTimeAsync(3_100);
     await expect(launched).resolves.toBe(4242);
     return f;
