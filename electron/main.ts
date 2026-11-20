@@ -26,6 +26,7 @@ import {
   type InstallDrive,
   type LauncherPhase,
   type LauncherSnapshot,
+  type LauncherUpdateSummary,
   type OperationResult,
   type PlayerIdentitySummary,
   type PlayerFontOption,
@@ -747,6 +748,14 @@ async function refreshSteamExecutable(source: string | null): Promise<void> {
   void broadcastSnapshot();
 }
 
+// The service keeps a short failure code; the player reads it in their language.
+function localizedLauncherUpdate(): LauncherUpdateSummary {
+  const state = launcherUpdate.state;
+  if (!state.error) return state;
+  const copy = MAIN_COPY[currentLocale].update;
+  return { ...state, error: state.error === "stalled" ? copy.downloadStalled : copy.downloadFailed(state.error) };
+}
+
 async function snapshot(): Promise<LauncherSnapshot> {
   if (sourceRoot !== steamExecutableSource) void refreshSteamExecutable(sourceRoot);
   const configuredRoot = await installationRoot();
@@ -778,7 +787,7 @@ async function snapshot(): Promise<LauncherSnapshot> {
       })),
     },
     playerIdentity: identitySummary(),
-    launcherUpdate: launcherUpdate.state,
+    launcherUpdate: localizedLauncherUpdate(),
     launcherUpdateAutoDownload,
     preferences,
     assetSync: assetSyncSummary(),

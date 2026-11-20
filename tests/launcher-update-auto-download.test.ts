@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ConfigStore } from "../electron/services/config-store.js";
-import { LauncherUpdateService, type UpdaterLike } from "../electron/services/launcher-update.js";
+import { DOWNLOAD_STALL_MS, LauncherUpdateService, type UpdaterLike } from "../electron/services/launcher-update.js";
 
 class FakeUpdater implements UpdaterLike {
   autoDownload = true;
@@ -92,7 +92,41 @@ describe("launcher update downloaded without a click", () => {
     expect(updater.downloadUpdate).toHaveBeenCalledTimes(1);
 
     updater.emit("error", new Error("connection reset"));
-    expect(service.state).toMatchObject({ status: "error", error: "connection reset" });
+    expect(service.state).toMatchObject({ status: "error", error: "Error" });
+  });
+
+  it("stays quiet when an unattended download stalls, and the next check starts it again", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updater, service, codes } = createService({ value: true });
+      await service.check();
+      updater.emit("update-available", { version: "2.0.51" });
+      expect(service.state.status).toBe("downloading");
+
+      await vi.advanceTimersByTimeAsync(DOWNLOAD_STALL_MS);
+      expect(service.state).toMatchObject({ status: "update-available", availableVersion: "2.0.51", error: null });
+      expect(codes).toEqual(["stalled"]);
+
+      await service.check();
+      expect(updater.downloadUpdate).toHaveBeenCalledTimes(2);
+      expect(service.state.status).toBe("downloading");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still shows a stall to the player who clicked on the download", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updater, service } = createService({ value: false });
+      await service.check();
+      updater.emit("update-available", { version: "2.0.51" });
+      service.download();
+      await vi.advanceTimersByTimeAsync(DOWNLOAD_STALL_MS);
+      expect(service.state).toMatchObject({ status: "error", error: "stalled" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("remembers the player's choice across restarts", async () => {
