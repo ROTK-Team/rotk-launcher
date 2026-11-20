@@ -406,6 +406,46 @@ describe("ROTK asset sync", () => {
     await expect(readFile(join(root, "sounds.pack"), "utf8")).resolves.toBe("custom sounds");
   });
 
+  it("resumes from the part file after a connection reset in the middle of the body", async () => {
+    const { userData, root } = await setup();
+    const payload = Buffer.from("0123456789".repeat(100));
+    const entry = assetEntry("big.pack", payload, { installPath: "data/big.pack" });
+    const ranges: Array<string | null> = [];
+    const sync = new AssetSyncService({
+      userDataDirectory: userData,
+      feedUrl: FEED_URL,
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) === FEED_URL) return new Response(JSON.stringify(manifest([entry])));
+        const range = new Headers(init?.headers).get("range");
+        ranges.push(range);
+        if (ranges.length > 1) {
+          return new Response(new Uint8Array(payload.subarray(400)), {
+            status: 206,
+            headers: { "content-range": `bytes 400-999/${payload.length}` },
+          });
+        }
+        // What undici does when the socket resets after the headers.
+        const reset = new TypeError("terminated", {
+          cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+        });
+        let sent = false;
+        return new Response(new ReadableStream({
+          async pull(controller) {
+            // Let the first chunk reach the part file before the reset.
+            if (sent) await new Promise((resolve) => setTimeout(resolve, 100));
+            if (sent) return controller.error(reset);
+            sent = true;
+            controller.enqueue(new Uint8Array(payload.subarray(0, 400)));
+          },
+        }));
+      }) as typeof fetch,
+    });
+
+    await sync.sync(root);
+    expect(ranges).toEqual([null, "bytes=400-"]);
+    expect(await readFile(join(root, "data", "big.pack"))).toEqual(payload);
+  });
+
   it("does not retry a missing asset", async () => {
     const { userData, root } = await setup();
     const entry = assetEntry("gone.pack", Buffer.from("x"));
