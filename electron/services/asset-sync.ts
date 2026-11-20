@@ -429,8 +429,10 @@ function isRetryableDownloadError(error: unknown): boolean {
   const status = /HTTP (\d{3})/.exec(error.message)?.[1];
   if (status) return status === "408" || status === "429" || status.startsWith("5");
   // fetch() failures (DNS, reset, TLS) surface as TypeError("fetch failed"); socket resets carry a code.
-  const code = (error as NodeJS.ErrnoException).code ?? "";
-  return (error instanceof TypeError && error.message === "fetch failed")
+  // A reset in the middle of the body is TypeError("terminated") with the socket error in its cause.
+  const cause = error.cause as NodeJS.ErrnoException | undefined;
+  const code = (error as NodeJS.ErrnoException).code ?? cause?.code ?? "";
+  return (error instanceof TypeError && (error.message === "fetch failed" || error.message === "terminated"))
     || code.startsWith("UND_ERR") || NETWORK_ERROR_CODES.has(code);
 }
 
