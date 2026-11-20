@@ -387,6 +387,34 @@ export async function findSupportedDepotExecutable(folders: readonly string[]): 
   return null;
 }
 
+export interface SteamExecutableStatus {
+  /** Steam console command that downloads the supported H1Z1.exe. */
+  command: string;
+  /** Steam already put the supported exe in its download_depot folder. */
+  downloaded: boolean;
+}
+
+/**
+ * Null when the source's own H1Z1.exe is supported; otherwise what the setup
+ * shows before the copy. A missing exe is left to the source validation.
+ */
+export async function steamExecutableStatus(
+  sourceRoot: string,
+  steamDepot: SteamDepotSource,
+): Promise<SteamExecutableStatus | null> {
+  const path = join(sourceRoot, "H1Z1.exe");
+  const details = await stat(path).catch(() => null);
+  if (!details?.isFile()) return null;
+  if (SUPPORTED_CLIENT_BUILDS.some((build) => build.executableSize === details.size)) {
+    const hash = await sha256(path).catch(() => null);
+    if (hash && findSupportedBuild(details.size, hash)) return null;
+  }
+  return {
+    command: depotDownloadCommand(steamDepot.installedManifestId),
+    downloaded: (await findSupportedDepotExecutable(steamDepot.folders)) !== null,
+  };
+}
+
 async function resolveClientExecutable(
   sourcePath: string,
   sourceSha256: string,

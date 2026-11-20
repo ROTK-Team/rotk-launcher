@@ -255,10 +255,10 @@ export interface LauncherSnapshot {
   /** Something the launcher repaired on its own that the player should know. */
   notice: string | null;
   gamePid: number | null;
-  /** Steam's H1Z1.exe is a build ROTK does not support: the Steam console
-   *  command that downloads the supported one. The install resumes on its own
-   *  once Steam has downloaded it. */
-  steamExecutable?: { command: string } | null;
+  /** The selected H1Z1's exe is a build ROTK does not support: the setup adds
+   *  a patch step with the Steam console command that downloads the supported
+   *  one, done once Steam has downloaded it. Null when no patch is needed. */
+  steamExecutable?: { command: string; downloaded: boolean } | null;
   /** The server refused a launch for an out-of-date launcher; Play is blocked
    *  until a newer version is installed. */
   updateRequired: boolean;

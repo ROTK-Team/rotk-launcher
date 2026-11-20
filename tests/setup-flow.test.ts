@@ -54,6 +54,16 @@ describe("the screen the assistant shows", () => {
     expect(setupStepList(snapshot("ready", "D:\\Games\\ROTK", { selection: STEAM, configured: false }), true)).toEqual(["h1z1", "location", "copy", "key"]);
   });
 
+  it("adds the patch step before the copy when Steam's H1Z1.exe is not the supported build", () => {
+    const patch = { command: "download_depot 433850 433851 1929288548044868931", downloaded: false };
+    const withPatch = (sourceKind: "copy-required" | "direct") => ({
+      ...snapshot("source-selected", null, { selection: { ...STEAM, sourceKind } }),
+      steamExecutable: patch,
+    }) as LauncherSnapshot;
+    expect(setupStepList(withPatch("copy-required"), false)).toEqual(["h1z1", "location", "patch", "copy", "key"]);
+    expect(setupStepList(withPatch("direct"), false)).toEqual(["h1z1", "patch", "copy", "key"]);
+  });
+
   it("lists no location step for a client used where it is", () => {
     expect(setupStepList(snapshot("source-selected", null, { selection: { ...STEAM, sourceKind: "direct" } }), false)).toEqual(["h1z1", "copy", "key"]);
   });

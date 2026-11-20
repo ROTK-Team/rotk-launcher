@@ -33,7 +33,7 @@ vi.mock("node:fs/promises", async (original) => {
   };
 });
 
-const { findSupportedDepotExecutable, installClient, inspectDestination, readInstallationMarker } = await import("../electron/services/installer.js");
+const { findSupportedDepotExecutable, steamExecutableStatus, installClient, inspectDestination, readInstallationMarker } = await import("../electron/services/installer.js");
 const { INSTALL_PENDING_MARKER_NAME } = await import("../electron/constants.js");
 
 const roots: string[] = [];
@@ -201,6 +201,21 @@ describe("Steam's unsupported H1Z1.exe update", () => {
     expect(await findSupportedDepotExecutable([depot])).toBeNull();
     await writeFile(join(depot, "H1Z1.exe"), "exe");
     expect(await findSupportedDepotExecutable([depot])).toMatchObject({ path: join(depot, "H1Z1.exe"), size: 3 });
+  });
+
+  it("tells the setup, before any copy, whether a patch step is needed and done", async () => {
+    const { root, source } = await fixture();
+    const depot = join(root, "depot");
+    const steamDepot = { folders: [depot], installedManifestId: "9048628616520611413" };
+    expect(await steamExecutableStatus(source, steamDepot)).toBeNull();
+    await writeFile(join(source, "H1Z1.exe"), "new-exe");
+    expect(await steamExecutableStatus(source, steamDepot)).toEqual({
+      command: "download_depot 433850 433851 1929288548044868931 9048628616520611413",
+      downloaded: false,
+    });
+    await mkdir(depot, { recursive: true });
+    await writeFile(join(depot, "H1Z1.exe"), "exe");
+    expect(await steamExecutableStatus(source, steamDepot)).toMatchObject({ downloaded: true });
   });
 
   it("a repair after Steam's update never copies Steam's exe over the supported one", async () => {

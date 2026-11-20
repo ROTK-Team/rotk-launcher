@@ -3,7 +3,7 @@ import type { InstallProgress, LauncherSnapshot } from "../shared/contracts";
 import type { AppLocale } from "../shared/locale";
 
 /** Where the player stands between a fresh launcher and Play. */
-export type SetupStep = "h1z1" | "location" | "copy" | "key" | "done";
+export type SetupStep = "h1z1" | "location" | "patch" | "copy" | "key" | "done";
 
 /**
  * The game is installed and can be used. A damaged installation keeps its
@@ -31,9 +31,11 @@ export function setupStep(snapshot: LauncherSnapshot, relocating: boolean): Setu
  * already has a key ends without the account step.
  */
 export function setupStepList(snapshot: LauncherSnapshot, relocating: boolean): Exclude<SetupStep, "done">[] {
+  // Steam's H1Z1.exe is not the supported build: the patch step fetches the right one first.
+  const patch: Exclude<SetupStep, "done">[] = snapshot.steamExecutable ? ["patch"] : [];
   const steps: Exclude<SetupStep, "done">[] = snapshot.selection.sourceKind === "direct"
-    ? ["h1z1", "copy", "key"]
-    : ["h1z1", "location", "copy", "key"];
+    ? ["h1z1", ...patch, "copy", "key"]
+    : ["h1z1", "location", ...patch, "copy", "key"];
   return relocating && snapshot.playerIdentity.configured ? steps.filter((step) => step !== "key") : steps;
 }
 

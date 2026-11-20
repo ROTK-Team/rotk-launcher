@@ -158,7 +158,7 @@ export interface Copy {
     manualDownload: string;
   };
   install: {
-    steps: { language: string; h1z1: string; location: string; copy: string; key: string };
+    steps: { language: string; h1z1: string; location: string; patch: string; copy: string; key: string };
     languageTitle: string;
     languageLead: string;
     stepOf: (index: number, total: number) => string;
@@ -206,6 +206,7 @@ export interface Copy {
     steamExeSteps: readonly string[];
     steamExeOpen: string;
     steamExeWaiting: string;
+    steamExeReady: string;
     retry: string;
     keyTitle: string;
     keyLead: string;
@@ -462,7 +463,7 @@ const COPY: Record<AppLocale, Copy> = {
       manualDownload: "Still stuck? Download the launcher installer from rotk.app and install it over this one.",
     },
     install: {
-      steps: { language: "LANGUAGE", h1z1: "H1Z1", location: "LOCATION", copy: "INSTALL", key: "ACCOUNT" },
+      steps: { language: "LANGUAGE", h1z1: "H1Z1", location: "LOCATION", patch: "PATCH", copy: "INSTALL", key: "ACCOUNT" },
       languageTitle: "CHOOSE YOUR LANGUAGE",
       languageLead: "You can change it later in the settings.",
       stepOf: (index, total) => `STEP ${index} OF ${total}`,
@@ -512,14 +513,15 @@ const COPY: Record<AppLocale, Copy> = {
       failedTitle: "THE INSTALL STOPPED",
       failedKept: "What is already copied is kept: retrying resumes from there.",
       steamExeTitle: "Steam updated H1Z1",
-      steamExeLead: "Steam installed a new H1Z1.exe that ROTK does not support. Steam can download the right one in about a minute, without reinstalling the game.",
+      steamExeLead: "Steam installed a new H1Z1.exe that ROTK does not support yet. Steam can download the right one in about a minute, without reinstalling the game.",
       steamExeSteps: [
         "The Steam console has opened and the command below is copied.",
         "Paste it in the console (Ctrl+V) and press Enter.",
-        "Wait for “Depot download complete”: the installation resumes on its own.",
+        "Wait for “Depot download complete”: the installation starts on its own.",
       ],
       steamExeOpen: "COPY AND OPEN THE CONSOLE",
       steamExeWaiting: "Waiting for Steam's download…",
+      steamExeReady: "The right H1Z1.exe is ready: starting the installation.",
       retry: "TRY AGAIN",
       keyTitle: "LINK YOUR ROTK ACCOUNT",
       keyLead: "Last step. Your launcher key is on the website: copy it, then paste it here.",
@@ -801,7 +803,7 @@ const COPY: Record<AppLocale, Copy> = {
       manualDownload: "Toujours bloqué ? Télécharge l’installateur du launcher sur rotk.app et installe-le par-dessus.",
     },
     install: {
-      steps: { language: "LANGUE", h1z1: "H1Z1", location: "EMPLACEMENT", copy: "INSTALLATION", key: "COMPTE" },
+      steps: { language: "LANGUE", h1z1: "H1Z1", location: "EMPLACEMENT", patch: "CORRECTIF", copy: "INSTALLATION", key: "COMPTE" },
       languageTitle: "CHOISIS TA LANGUE",
       languageLead: "Tu pourras la changer plus tard dans les réglages.",
       stepOf: (index, total) => `ÉTAPE ${index} SUR ${total}`,
@@ -855,10 +857,11 @@ const COPY: Record<AppLocale, Copy> = {
       steamExeSteps: [
         "La console Steam s’est ouverte et la commande ci-dessous est copiée.",
         "Colle-la dans la console (Ctrl+V) puis appuie sur Entrée.",
-        "Attends « Depot download complete » : l’installation reprend toute seule.",
+        "Attends « Depot download complete » : l’installation démarre toute seule.",
       ],
       steamExeOpen: "COPIER ET OUVRIR LA CONSOLE",
       steamExeWaiting: "En attente du téléchargement Steam…",
+      steamExeReady: "Le bon H1Z1.exe est prêt : l’installation démarre.",
       retry: "RÉESSAYER",
       keyTitle: "RELIE TON COMPTE ROTK",
       keyLead: "Dernière étape. Ta clé launcher se trouve sur le site : copie-la, puis colle-la ici.",
@@ -1140,7 +1143,7 @@ const COPY: Record<AppLocale, Copy> = {
       manualDownload: "仍然无法更新？请在 rotk.app 下载启动器安装程序，并覆盖安装。",
     },
     install: {
-      steps: { language: "语言", h1z1: "H1Z1", location: "安装位置", copy: "安装", key: "账号" },
+      steps: { language: "语言", h1z1: "H1Z1", location: "安装位置", patch: "补丁", copy: "安装", key: "账号" },
       languageTitle: "选择语言",
       languageLead: "之后可以在设置中更改。",
       stepOf: (index, total) => `第 ${index} 步，共 ${total} 步`,
@@ -1194,10 +1197,11 @@ const COPY: Record<AppLocale, Copy> = {
       steamExeSteps: [
         "Steam 控制台已打开，下面的命令已复制。",
         "在控制台中粘贴（Ctrl+V）并按回车。",
-        "等待出现“Depot download complete”：安装会自动继续。",
+        "等待出现“Depot download complete”：安装会自动开始。",
       ],
       steamExeOpen: "复制并打开控制台",
       steamExeWaiting: "正在等待 Steam 下载…",
+      steamExeReady: "正确的 H1Z1.exe 已就绪：正在开始安装。",
       retry: "重试",
       keyTitle: "绑定你的 ROTK 账号",
       keyLead: "最后一步。启动器密钥在网站上：复制后粘贴到这里。",

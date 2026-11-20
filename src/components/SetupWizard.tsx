@@ -49,8 +49,10 @@ export function SetupWizard({
   const t = copy.install;
   const step = setupStep(snapshot, relocating);
   const installing = step === "copy";
-  // Steam installed an H1Z1.exe ROTK does not support: the install waits for the supported one.
+  // Steam's H1Z1.exe is not the supported build: the patch step fetches the right one first.
   const steamHelp = snapshot.steamExecutable ?? null;
+  const patchNeeded = steamHelp !== null;
+  const patchReady = steamHelp?.downloaded === true;
   // A client that is already outside Steam is used where it is: no location screen.
   const beforeCopy: SetupStep = snapshot.selection.sourceKind === "direct" ? "h1z1" : "location";
   // A new player is asked for the language before anything else, once.
@@ -61,10 +63,23 @@ export function SetupWizard({
       if (step === "copy" || step === "key" || step === "done") return step;
       if (current === "language") return current;
       // The copy stopped: stay on its screen while there is an error to read.
-      if (current === "copy") return error || steamHelp ? "copy" : beforeCopy;
+      // A copy refused for the exe goes back to the patch step.
+      if (current === "copy") return patchNeeded && !patchReady ? "patch" : error ? "copy" : beforeCopy;
+      if (current === "patch" && !patchNeeded) return beforeCopy;
       return step === "h1z1" || current === "key" || current === "done" ? "h1z1" : current;
     });
-  }, [step, error, steamHelp, beforeCopy]);
+  }, [step, error, beforeCopy, patchNeeded, patchReady]);
+
+  // The patch step comes before the copy while Steam's exe is not the supported one.
+  const startInstall = () => {
+    if (!patchNeeded || patchReady) return onInstall();
+    setScreen("patch");
+    onOpenSteamConsole();
+  };
+  // Steam downloaded the supported exe: the copy starts on its own.
+  useEffect(() => {
+    if (screen === "patch" && patchReady) onInstall();
+  }, [screen, patchReady]); // not onInstall: a new function on every render would start it again
 
   const dialog = useRef<HTMLElement>(null);
   // The buttons of a screen go away with it: the keyboard stays in the assistant.
@@ -107,7 +122,6 @@ export function SetupWizard({
 
   const steps: Exclude<Screen, "done">[] = [...(askLanguage ? ["language" as const] : []), ...setupStepList(snapshot, relocating)];
   const failed = screen === "copy" && !installing;
-  const waitingForSteam = failed && steamHelp !== null;
   const at = screen === "done" ? steps.length : Math.max(0, steps.indexOf(screen));
   // A folder picked by hand is not `<drive>\Games\ROTK`.
   const customDestination = destinationRoot !== null && !/^[A-Z]:\\Games\\ROTK$/i.test(destinationRoot);
@@ -118,7 +132,8 @@ export function SetupWizard({
     language: t.languageTitle,
     h1z1: missing ? t.h1z1Missing : t.title,
     location: t.locationTitle,
-    copy: waitingForSteam ? t.steamExeTitle : failed ? t.failedTitle : t.copyTitle,
+    patch: t.steamExeTitle,
+    copy: failed ? t.failedTitle : t.copyTitle,
     key: t.keyTitle,
     done: t.doneTitle,
   }[screen];
@@ -126,7 +141,8 @@ export function SetupWizard({
     language: t.languageLead,
     h1z1: relocating ? copy.settings.installElsewhereHint : missing ? t.h1z1MissingDetail : t.lead,
     location: t.locationLead,
-    copy: waitingForSteam ? t.steamExeLead : failed ? t.failedKept : null,
+    patch: t.steamExeLead,
+    copy: failed ? t.failedKept : null,
     key: t.keyLead,
     done: t.doneLead,
   }[screen];
@@ -147,7 +163,7 @@ export function SetupWizard({
         <h2 id="setup-wizard-title">{heading}</h2>
         {lead && <p className="setup-lead">{lead}</p>}
 
-        {error && !installing && !waitingForSteam && (
+        {error && !installing && screen !== "patch" && (
           <div className="setup-error" role="alert">
             <CircleAlert size={18} aria-hidden="true" />
             <p>{error}</p>
@@ -238,7 +254,7 @@ export function SetupWizard({
           </>
         )}
 
-        {waitingForSteam && (
+        {screen === "patch" && steamHelp && (
           <div className="setup-steam-exe">
             <ol>
               {t.steamExeSteps.map((line) => <li key={line}>{line}</li>)}
@@ -249,7 +265,9 @@ export function SetupWizard({
                 <Copy size={14} aria-hidden="true" /> {t.steamExeOpen}
               </button>
             </div>
-            <p className="setup-note" role="status"><LoaderCircle size={16} className="setup-spin" aria-hidden="true" /> {t.steamExeWaiting}</p>
+            {patchReady
+              ? <p className="setup-note" role="status"><Check size={16} aria-hidden="true" /> {t.steamExeReady}</p>
+              : <p className="setup-note" role="status"><LoaderCircle size={16} className="setup-spin" aria-hidden="true" /> {t.steamExeWaiting}</p>}
           </div>
         )}
 
@@ -314,17 +332,18 @@ export function SetupWizard({
           ? <button type="button" className="launcher-button launcher-button--quiet" onClick={onCancel}>{t.cancel}</button>
           : <button type="button" className="launcher-button launcher-button--quiet" onClick={onClose}>{screen === "done" ? t.close : t.later}</button>}
         <span />
-        {(screen === "location" || failed) && (
-          <button type="button" className="launcher-button launcher-button--ghost" onClick={() => { onDismissError(); setScreen(failed ? beforeCopy : "h1z1"); }}>{t.back}</button>
+        {(screen === "location" || screen === "patch" || failed) && (
+          <button type="button" className="launcher-button launcher-button--ghost" onClick={() => { onDismissError(); setScreen(screen === "location" ? "h1z1" : beforeCopy); }}>{t.back}</button>
         )}
         {screen === "language" && (
           <button type="button" className="launcher-button launcher-button--big" onClick={() => { rememberLanguageChosen(); setScreen(step === "location" ? "h1z1" : step); }}>{t.next}</button>
         )}
         {screen === "h1z1" && sourceRoot && (direct
-          ? <button type="button" className="launcher-button launcher-button--big" onClick={onInstall} disabled={busy}>{t.adopt}</button>
+          ? <button type="button" className="launcher-button launcher-button--big" onClick={startInstall} disabled={busy}>{t.adopt}</button>
           : <button type="button" className="launcher-button launcher-button--big" onClick={() => setScreen("location")}>{t.next}</button>)}
-        {screen === "location" && <button type="button" className="launcher-button launcher-button--big" onClick={onInstall} disabled={busy || !destinationRoot}>{t.install}</button>}
-        {failed && <button type="button" className="launcher-button launcher-button--big" onClick={onInstall} disabled={busy}>{t.retry}</button>}
+        {screen === "location" && <button type="button" className="launcher-button launcher-button--big" onClick={startInstall} disabled={busy || !destinationRoot}>{t.install}</button>}
+        {screen === "patch" && <button type="button" className="launcher-button launcher-button--big" onClick={onInstall} disabled={busy || !patchReady}>{t.install}</button>}
+        {failed && <button type="button" className="launcher-button launcher-button--big" onClick={startInstall} disabled={busy}>{t.retry}</button>}
         {screen === "done" && (
           <button type="button" className="launcher-button launcher-button--big" disabled={!snapshot.canPlay || busy} onClick={onPlay}>
             {copy.footer.play} <Play size={18} fill="currentColor" aria-hidden="true" />
