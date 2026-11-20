@@ -146,13 +146,13 @@ describe("launcher locales", () => {
     expect(localizeServiceError(deleted, "zh")).toContain("ROTK Launcher 文件夹");
   });
 
-  it("localizes common install errors in Chinese and falls back to English", () => {
+  it("localizes common install errors in Chinese", () => {
     expect(localizeServiceError("Espace disque insuffisant : 19 Go sont nécessaires.", "zh"))
       .toBe("磁盘空间不足，需要 19 GB。");
     expect(localizeServiceError("H1Z1 est déjà lancé depuis cette installation.", "zh"))
       .toBe("H1Z1 正在运行，请先关闭游戏。");
     expect(localizeServiceError("Trop de redirections pendant le téléchargement des assets.", "zh"))
-      .toBe("Too many redirects while downloading assets.");
+      .toBe("下载资源时重定向次数过多。");
   });
 
   it("localizes account service errors for Chinese players", () => {
