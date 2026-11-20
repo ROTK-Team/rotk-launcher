@@ -42,7 +42,7 @@ export function depotDownloadCommand(installedManifestId: string | null): string
 export class UnsupportedClientBuildError extends Error {
   constructor(readonly command: string) {
     super(
-      `Steam a installé une version de H1Z1 que ROTK ne prend pas encore en charge. La console Steam s’ouvre et la commande est copiée : colle-la (Ctrl+V), valide, attends « Depot download complete » puis relance l’installation. Commande : ${command}`,
+      `Steam a installé une version de H1Z1 que ROTK ne prend pas encore en charge. Ouvre la console Steam (steam://open/console), colles-y la commande en fin de message, appuie sur Entrée, attends « Depot download complete » puis relance. Commande : ${command}`,
     );
     this.name = "UnsupportedClientBuildError";
   }

@@ -71,10 +71,17 @@ export function SetupWizard({
   }, [step, error, beforeCopy, patchNeeded, patchReady]);
 
   // The patch step comes before the copy while Steam's exe is not the supported one.
+  // Steam opens only when the player asks for it on that step.
   const startInstall = () => {
     if (!patchNeeded || patchReady) return onInstall();
     setScreen("patch");
-    onOpenSteamConsole();
+  };
+  const [steamOpened, setSteamOpened] = useState(false);
+  const [commandCopied, setCommandCopied] = useState(false);
+  const openSteam = () => { setSteamOpened(true); setCommandCopied(true); onOpenSteamConsole(); };
+  const copyCommand = () => {
+    if (!steamHelp) return;
+    void navigator.clipboard.writeText(steamHelp.command).then(() => setCommandCopied(true), () => undefined);
   };
   // Steam downloaded the supported exe: the copy starts on its own.
   useEffect(() => {
@@ -257,17 +264,20 @@ export function SetupWizard({
         {screen === "patch" && steamHelp && (
           <div className="setup-steam-exe">
             <ol>
-              {t.steamExeSteps.map((line) => <li key={line}>{line}</li>)}
+              {t.steamExeSteps.map((line, index) => (
+                <li key={line} data-state={patchReady || (steamOpened && index === 0) ? "done" : undefined}>{line}</li>
+              ))}
             </ol>
-            <div className="setup-steam-exe__command">
+            <p className="setup-steam-exe__command">
+              <span>{t.steamExeCommand}</span>
               <code>{steamHelp.command}</code>
-              <button type="button" className="launcher-button launcher-button--ghost" onClick={onOpenSteamConsole}>
-                <Copy size={14} aria-hidden="true" /> {t.steamExeOpen}
+              <button type="button" className="launcher-link" onClick={copyCommand}>
+                <Copy size={13} aria-hidden="true" /> {commandCopied ? t.steamExeCopied : t.steamExeCopy}
               </button>
-            </div>
+            </p>
             {patchReady
               ? <p className="setup-note" role="status"><Check size={16} aria-hidden="true" /> {t.steamExeReady}</p>
-              : <p className="setup-note" role="status"><LoaderCircle size={16} className="setup-spin" aria-hidden="true" /> {t.steamExeWaiting}</p>}
+              : steamOpened && <p className="setup-note" role="status"><LoaderCircle size={16} className="setup-spin" aria-hidden="true" /> {t.steamExeWaiting}</p>}
           </div>
         )}
 
@@ -342,7 +352,9 @@ export function SetupWizard({
           ? <button type="button" className="launcher-button launcher-button--big" onClick={startInstall} disabled={busy}>{t.adopt}</button>
           : <button type="button" className="launcher-button launcher-button--big" onClick={() => setScreen("location")}>{t.next}</button>)}
         {screen === "location" && <button type="button" className="launcher-button launcher-button--big" onClick={startInstall} disabled={busy || !destinationRoot}>{t.install}</button>}
-        {screen === "patch" && <button type="button" className="launcher-button launcher-button--big" onClick={onInstall} disabled={busy || !patchReady}>{t.install}</button>}
+        {screen === "patch" && (patchReady
+          ? <button type="button" className="launcher-button launcher-button--big" onClick={onInstall} disabled={busy}>{t.install}</button>
+          : <button type="button" className="launcher-button launcher-button--big" onClick={openSteam}>{steamOpened ? t.steamExeReopen : t.steamExeOpen} <ExternalLink size={16} aria-hidden="true" /></button>)}
         {failed && <button type="button" className="launcher-button launcher-button--big" onClick={startInstall} disabled={busy}>{t.retry}</button>}
         {screen === "done" && (
           <button type="button" className="launcher-button launcher-button--big" disabled={!snapshot.canPlay || busy} onClick={onPlay}>

@@ -204,7 +204,11 @@ export interface Copy {
     steamExeTitle: string;
     steamExeLead: string;
     steamExeSteps: readonly string[];
+    steamExeCommand: string;
+    steamExeCopy: string;
+    steamExeCopied: string;
     steamExeOpen: string;
+    steamExeReopen: string;
     steamExeWaiting: string;
     steamExeReady: string;
     retry: string;
@@ -512,15 +516,19 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "CANCEL",
       failedTitle: "THE INSTALL STOPPED",
       failedKept: "What is already copied is kept: retrying resumes from there.",
-      steamExeTitle: "Steam updated H1Z1",
-      steamExeLead: "Steam installed a new H1Z1.exe that ROTK does not support yet. Steam can download the right one in about a minute, without reinstalling the game.",
+      steamExeTitle: "Get the right version of H1Z1",
+      steamExeLead: "Steam updated H1Z1 to a version ROTK does not support yet. No need to reinstall anything: Steam can fetch the right version in about a minute.",
       steamExeSteps: [
-        "The Steam console has opened and the command below is copied.",
-        "Paste it in the console (Ctrl+V) and press Enter.",
-        "Wait for “Depot download complete”: the installation starts on its own.",
+        "Click OPEN STEAM: Steam shows its console, a window of text, and the command is already copied.",
+        "Click the input line at the very bottom of that window, paste with Ctrl+V, then press Enter.",
+        "Steam downloads about 60 MB. Come back here: the installation starts on its own when it is done.",
       ],
-      steamExeOpen: "COPY AND OPEN THE CONSOLE",
-      steamExeWaiting: "Waiting for Steam's download…",
+      steamExeCommand: "Command:",
+      steamExeCopy: "Copy",
+      steamExeCopied: "Copied",
+      steamExeOpen: "OPEN STEAM",
+      steamExeReopen: "OPEN STEAM AGAIN",
+      steamExeWaiting: "Waiting for Steam… The console shows “Depot download complete” when it is done.",
       steamExeReady: "The right H1Z1.exe is ready: starting the installation.",
       retry: "TRY AGAIN",
       keyTitle: "LINK YOUR ROTK ACCOUNT",
@@ -852,15 +860,19 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "ANNULER",
       failedTitle: "L’INSTALLATION S’EST ARRÊTÉE",
       failedKept: "Ce qui est déjà copié est gardé : réessayer reprend au même endroit.",
-      steamExeTitle: "Steam a mis à jour H1Z1",
-      steamExeLead: "Steam a installé un nouveau H1Z1.exe que ROTK ne prend pas en charge. Steam peut télécharger le bon en une minute environ, sans réinstaller le jeu.",
+      steamExeTitle: "Récupère la bonne version de H1Z1",
+      steamExeLead: "Steam a mis à jour H1Z1 vers une version que ROTK ne prend pas encore en charge. Rien à réinstaller : Steam peut récupérer la bonne version en une minute environ.",
       steamExeSteps: [
-        "La console Steam s’est ouverte et la commande ci-dessous est copiée.",
-        "Colle-la dans la console (Ctrl+V) puis appuie sur Entrée.",
-        "Attends « Depot download complete » : l’installation démarre toute seule.",
+        "Clique sur OUVRIR STEAM : Steam affiche sa console, une fenêtre de texte, et la commande est déjà copiée.",
+        "Clique dans la ligne de saisie tout en bas de cette fenêtre, colle avec Ctrl+V, puis appuie sur Entrée.",
+        "Steam télécharge environ 60 Mo. Reviens ici : l’installation démarre toute seule à la fin.",
       ],
-      steamExeOpen: "COPIER ET OUVRIR LA CONSOLE",
-      steamExeWaiting: "En attente du téléchargement Steam…",
+      steamExeCommand: "Commande :",
+      steamExeCopy: "Copier",
+      steamExeCopied: "Copiée",
+      steamExeOpen: "OUVRIR STEAM",
+      steamExeReopen: "ROUVRIR STEAM",
+      steamExeWaiting: "En attente de Steam… La console affiche « Depot download complete » quand c’est fini.",
       steamExeReady: "Le bon H1Z1.exe est prêt : l’installation démarre.",
       retry: "RÉESSAYER",
       keyTitle: "RELIE TON COMPTE ROTK",
@@ -1192,15 +1204,19 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "取消",
       failedTitle: "安装已中断",
       failedKept: "已复制的内容会保留：重试将从中断处继续。",
-      steamExeTitle: "Steam 更新了 H1Z1",
-      steamExeLead: "Steam 安装了 ROTK 不支持的新版 H1Z1.exe。Steam 可以在大约一分钟内下载正确的版本，无需重新安装游戏。",
+      steamExeTitle: "获取正确版本的 H1Z1",
+      steamExeLead: "Steam 把 H1Z1 更新到了 ROTK 暂不支持的版本。无需重新安装：Steam 大约一分钟就能取回正确的版本。",
       steamExeSteps: [
-        "Steam 控制台已打开，下面的命令已复制。",
-        "在控制台中粘贴（Ctrl+V）并按回车。",
-        "等待出现“Depot download complete”：安装会自动开始。",
+        "点击“打开 STEAM”：Steam 会显示它的控制台（一个文字窗口），命令已经复制好了。",
+        "点击该窗口最底部的输入行，按 Ctrl+V 粘贴，然后按回车。",
+        "Steam 会下载约 60 MB。回到这里：下载完成后安装会自动开始。",
       ],
-      steamExeOpen: "复制并打开控制台",
-      steamExeWaiting: "正在等待 Steam 下载…",
+      steamExeCommand: "命令：",
+      steamExeCopy: "复制",
+      steamExeCopied: "已复制",
+      steamExeOpen: "打开 STEAM",
+      steamExeReopen: "再次打开 STEAM",
+      steamExeWaiting: "正在等待 Steam… 完成后控制台会显示“Depot download complete”。",
       steamExeReady: "正确的 H1Z1.exe 已就绪：正在开始安装。",
       retry: "重试",
       keyTitle: "绑定你的 ROTK 账号",

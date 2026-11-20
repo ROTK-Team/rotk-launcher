@@ -1355,7 +1355,6 @@ function registerIpc(): void {
           steamExecutable = { command: error.command, downloaded: false, folders: steamDepot.folders };
           steamExecutableSource = sourceRoot;
           watchSteamExecutable();
-          openSteamConsole();
         }
       }
       // The copy resumes on the next attempt, so the selection stays. A client
