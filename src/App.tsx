@@ -273,6 +273,7 @@ export default function App() {
           onSelectDestination={() => void selectDestination()}
           onChooseDrive={(root) => void perform(() => window.rotk.chooseInstallDrive(root))}
           onInstallWithSteam={() => void perform(() => window.rotk.openSteamInstall())}
+          onOpenSteamConsole={() => void window.rotk.openSteamConsole()}
           onInstall={() => void install()}
           onCancel={() => void window.rotk.cancelInstall()}
           onSaveKey={(profile, playerKey) => void perform(() => window.rotk.setPlayerKey(profile, playerKey))}

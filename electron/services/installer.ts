@@ -372,6 +372,21 @@ async function applyClientPatches(
  * 2026-11-20 update (1.0.331) is a new protected build the ROTK patches and
  * attestation do not cover, while every other client file stayed the same.
  */
+/** The first supported H1Z1.exe in Steam's download_depot folders, or null. */
+export async function findSupportedDepotExecutable(folders: readonly string[]): Promise<ClientExecutable | null> {
+  for (const folder of folders) {
+    const path = join(folder, "H1Z1.exe");
+    const details = await stat(path).catch(() => null);
+    // Size first: hashing a 150 MB exe of the wrong build is wasted time.
+    if (!details?.isFile() || !SUPPORTED_CLIENT_BUILDS.some((build) => build.executableSize === details.size)) continue;
+    // Steam may still be writing it: a read error is "not there yet".
+    const hash = await sha256(path).catch(() => null);
+    const build = hash ? findSupportedBuild(details.size, hash) : undefined;
+    if (hash && build) return { build, path, size: details.size, sha256: hash, modifiedAt: details.mtime };
+  }
+  return null;
+}
+
 async function resolveClientExecutable(
   sourcePath: string,
   sourceSha256: string,
@@ -380,15 +395,8 @@ async function resolveClientExecutable(
   const source = await stat(sourcePath);
   const own = findSupportedBuild(source.size, sourceSha256);
   if (own) return { build: own, path: sourcePath, size: source.size, sha256: sourceSha256, modifiedAt: source.mtime };
-  for (const folder of steamDepot?.folders ?? []) {
-    const path = join(folder, "H1Z1.exe");
-    const details = await stat(path).catch(() => null);
-    // Size first: hashing a 150 MB exe of the wrong build is wasted time.
-    if (!details?.isFile() || !SUPPORTED_CLIENT_BUILDS.some((build) => build.executableSize === details.size)) continue;
-    const hash = await sha256(path);
-    const build = findSupportedBuild(details.size, hash);
-    if (build) return { build, path, size: details.size, sha256: hash, modifiedAt: details.mtime };
-  }
+  const fromDepot = await findSupportedDepotExecutable(steamDepot?.folders ?? []);
+  if (fromDepot) return fromDepot;
   throw new UnsupportedClientBuildError(depotDownloadCommand(steamDepot?.installedManifestId ?? null));
 }
 

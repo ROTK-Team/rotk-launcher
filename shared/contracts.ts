@@ -255,6 +255,10 @@ export interface LauncherSnapshot {
   /** Something the launcher repaired on its own that the player should know. */
   notice: string | null;
   gamePid: number | null;
+  /** Steam's H1Z1.exe is a build ROTK does not support: the Steam console
+   *  command that downloads the supported one. The install resumes on its own
+   *  once Steam has downloaded it. */
+  steamExecutable?: { command: string } | null;
   /** The server refused a launch for an out-of-date launcher; Play is blocked
    *  until a newer version is installed. */
   updateRequired: boolean;
@@ -307,6 +311,8 @@ export interface RotkLauncherApi {
   selectDestination(): Promise<OperationResult<{ destinationRoot: string }>>;
   /** Opens Steam on the H1Z1 install page. */
   openSteamInstall(): Promise<OperationResult>;
+  /** Copies the download_depot command and opens the Steam console. */
+  openSteamConsole(): Promise<OperationResult>;
   dismissError(): Promise<void>;
   listInstallDrives(): Promise<InstallDrive[]>;
   /** Installs into `<drive>\Games\ROTK`. */
@@ -369,6 +375,7 @@ export const IPC_CHANNELS = {
   selectSource: "launcher:select-source",
   selectDestination: "launcher:select-destination",
   openSteamInstall: "launcher:open-steam-install",
+  openSteamConsole: "launcher:open-steam-console",
   dismissError: "launcher:dismiss-error",
   listInstallDrives: "launcher:list-install-drives",
   chooseInstallDrive: "launcher:choose-install-drive",

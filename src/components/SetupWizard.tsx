@@ -1,4 +1,4 @@
-import { Check, CircleAlert, Download, ExternalLink, Eye, EyeOff, FolderOpen, HardDrive, KeyRound, LoaderCircle, Play, X } from "lucide-react";
+import { Check, CircleAlert, Copy, Download, ExternalLink, Eye, EyeOff, FolderOpen, HardDrive, KeyRound, LoaderCircle, Play, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { InstallDrive, LauncherSnapshot } from "../../shared/contracts";
 import type { LaunchProfileId } from "../../shared/launch-profile";
@@ -22,6 +22,8 @@ interface SetupWizardProps {
   onSelectDestination(): void;
   onChooseDrive(root: string): void;
   onInstallWithSteam(): void;
+  /** Copies the download_depot command and opens the Steam console. */
+  onOpenSteamConsole(): void;
   onInstall(): void;
   onCancel(): void;
   onSaveKey(profile: LaunchProfileId, playerKey: string): void;
@@ -41,12 +43,14 @@ const PHASES = ["scanning", "copying", "verifying", "configuring", "finalizing"]
  */
 export function SetupWizard({
   snapshot, busy, error, searching, relocating,
-  onClose, onDismissError, onSelectSource, onSelectDestination, onChooseDrive, onInstallWithSteam, onInstall, onCancel, onSaveKey, onPlay,
+  onClose, onDismissError, onSelectSource, onSelectDestination, onChooseDrive, onInstallWithSteam, onOpenSteamConsole, onInstall, onCancel, onSaveKey, onPlay,
 }: SetupWizardProps) {
   const { copy, locale, setLocale } = useI18n();
   const t = copy.install;
   const step = setupStep(snapshot, relocating);
   const installing = step === "copy";
+  // Steam installed an H1Z1.exe ROTK does not support: the install waits for the supported one.
+  const steamHelp = snapshot.steamExecutable ?? null;
   // A client that is already outside Steam is used where it is: no location screen.
   const beforeCopy: SetupStep = snapshot.selection.sourceKind === "direct" ? "h1z1" : "location";
   // A new player is asked for the language before anything else, once.
@@ -57,10 +61,10 @@ export function SetupWizard({
       if (step === "copy" || step === "key" || step === "done") return step;
       if (current === "language") return current;
       // The copy stopped: stay on its screen while there is an error to read.
-      if (current === "copy") return error ? "copy" : beforeCopy;
+      if (current === "copy") return error || steamHelp ? "copy" : beforeCopy;
       return step === "h1z1" || current === "key" || current === "done" ? "h1z1" : current;
     });
-  }, [step, error, beforeCopy]);
+  }, [step, error, steamHelp, beforeCopy]);
 
   const dialog = useRef<HTMLElement>(null);
   // The buttons of a screen go away with it: the keyboard stays in the assistant.
@@ -103,6 +107,7 @@ export function SetupWizard({
 
   const steps: Exclude<Screen, "done">[] = [...(askLanguage ? ["language" as const] : []), ...setupStepList(snapshot, relocating)];
   const failed = screen === "copy" && !installing;
+  const waitingForSteam = failed && steamHelp !== null;
   const at = screen === "done" ? steps.length : Math.max(0, steps.indexOf(screen));
   // A folder picked by hand is not `<drive>\Games\ROTK`.
   const customDestination = destinationRoot !== null && !/^[A-Z]:\\Games\\ROTK$/i.test(destinationRoot);
@@ -113,7 +118,7 @@ export function SetupWizard({
     language: t.languageTitle,
     h1z1: missing ? t.h1z1Missing : t.title,
     location: t.locationTitle,
-    copy: failed ? t.failedTitle : t.copyTitle,
+    copy: waitingForSteam ? t.steamExeTitle : failed ? t.failedTitle : t.copyTitle,
     key: t.keyTitle,
     done: t.doneTitle,
   }[screen];
@@ -121,7 +126,7 @@ export function SetupWizard({
     language: t.languageLead,
     h1z1: relocating ? copy.settings.installElsewhereHint : missing ? t.h1z1MissingDetail : t.lead,
     location: t.locationLead,
-    copy: failed ? t.failedKept : null,
+    copy: waitingForSteam ? t.steamExeLead : failed ? t.failedKept : null,
     key: t.keyLead,
     done: t.doneLead,
   }[screen];
@@ -142,7 +147,7 @@ export function SetupWizard({
         <h2 id="setup-wizard-title">{heading}</h2>
         {lead && <p className="setup-lead">{lead}</p>}
 
-        {error && !installing && (
+        {error && !installing && !waitingForSteam && (
           <div className="setup-error" role="alert">
             <CircleAlert size={18} aria-hidden="true" />
             <p>{error}</p>
@@ -231,6 +236,21 @@ export function SetupWizard({
               <p className="setup-note setup-note--warning" role="status"><CircleAlert size={16} aria-hidden="true" /> {t.noDrive}</p>
             )}
           </>
+        )}
+
+        {waitingForSteam && (
+          <div className="setup-steam-exe">
+            <ol>
+              {t.steamExeSteps.map((line) => <li key={line}>{line}</li>)}
+            </ol>
+            <div className="setup-steam-exe__command">
+              <code>{steamHelp.command}</code>
+              <button type="button" className="launcher-button launcher-button--ghost" onClick={onOpenSteamConsole}>
+                <Copy size={14} aria-hidden="true" /> {t.steamExeOpen}
+              </button>
+            </div>
+            <p className="setup-note" role="status"><LoaderCircle size={16} className="setup-spin" aria-hidden="true" /> {t.steamExeWaiting}</p>
+          </div>
         )}
 
         {screen === "copy" && installing && (

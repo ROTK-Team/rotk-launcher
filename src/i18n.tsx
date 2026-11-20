@@ -201,6 +201,11 @@ export interface Copy {
     cancel: string;
     failedTitle: string;
     failedKept: string;
+    steamExeTitle: string;
+    steamExeLead: string;
+    steamExeSteps: readonly string[];
+    steamExeOpen: string;
+    steamExeWaiting: string;
     retry: string;
     keyTitle: string;
     keyLead: string;
@@ -506,6 +511,15 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "CANCEL",
       failedTitle: "THE INSTALL STOPPED",
       failedKept: "What is already copied is kept: retrying resumes from there.",
+      steamExeTitle: "Steam updated H1Z1",
+      steamExeLead: "Steam installed a new H1Z1.exe that ROTK does not support. Steam can download the right one in about a minute, without reinstalling the game.",
+      steamExeSteps: [
+        "The Steam console has opened and the command below is copied.",
+        "Paste it in the console (Ctrl+V) and press Enter.",
+        "Wait for “Depot download complete”: the installation resumes on its own.",
+      ],
+      steamExeOpen: "COPY AND OPEN THE CONSOLE",
+      steamExeWaiting: "Waiting for Steam's download…",
       retry: "TRY AGAIN",
       keyTitle: "LINK YOUR ROTK ACCOUNT",
       keyLead: "Last step. Your launcher key is on the website: copy it, then paste it here.",
@@ -836,6 +850,15 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "ANNULER",
       failedTitle: "L’INSTALLATION S’EST ARRÊTÉE",
       failedKept: "Ce qui est déjà copié est gardé : réessayer reprend au même endroit.",
+      steamExeTitle: "Steam a mis à jour H1Z1",
+      steamExeLead: "Steam a installé un nouveau H1Z1.exe que ROTK ne prend pas en charge. Steam peut télécharger le bon en une minute environ, sans réinstaller le jeu.",
+      steamExeSteps: [
+        "La console Steam s’est ouverte et la commande ci-dessous est copiée.",
+        "Colle-la dans la console (Ctrl+V) puis appuie sur Entrée.",
+        "Attends « Depot download complete » : l’installation reprend toute seule.",
+      ],
+      steamExeOpen: "COPIER ET OUVRIR LA CONSOLE",
+      steamExeWaiting: "En attente du téléchargement Steam…",
       retry: "RÉESSAYER",
       keyTitle: "RELIE TON COMPTE ROTK",
       keyLead: "Dernière étape. Ta clé launcher se trouve sur le site : copie-la, puis colle-la ici.",
@@ -1166,6 +1189,15 @@ const COPY: Record<AppLocale, Copy> = {
       cancel: "取消",
       failedTitle: "安装已中断",
       failedKept: "已复制的内容会保留：重试将从中断处继续。",
+      steamExeTitle: "Steam 更新了 H1Z1",
+      steamExeLead: "Steam 安装了 ROTK 不支持的新版 H1Z1.exe。Steam 可以在大约一分钟内下载正确的版本，无需重新安装游戏。",
+      steamExeSteps: [
+        "Steam 控制台已打开，下面的命令已复制。",
+        "在控制台中粘贴（Ctrl+V）并按回车。",
+        "等待出现“Depot download complete”：安装会自动继续。",
+      ],
+      steamExeOpen: "复制并打开控制台",
+      steamExeWaiting: "正在等待 Steam 下载…",
       retry: "重试",
       keyTitle: "绑定你的 ROTK 账号",
       keyLead: "最后一步。启动器密钥在网站上：复制后粘贴到这里。",
